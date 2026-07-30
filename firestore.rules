@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// モノ・ループ内定者マイページ Firestore Security Rules
+// 方針：画面で隠すだけでなく、URL直打ちでも管理データに触れさせない。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+    // リクエスト元学生の卒年度（自分の students ドキュメントから取得）
+    function myGrad() {
+      return get(/databases/$(database)/documents/students/$(request.auth.uid)).data.grad;
+    }
+    function myStudentExists() {
+      return exists(/databases/$(database)/documents/students/$(request.auth.uid));
+    }
+
+    // ---- students ----
+    match /students/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+      // 学生本人は連絡先系のフィールドのみ更新可（status/deleted/grad/linkCode/lineUserId/email は不可）
+      allow update: if isAdmin()
+        || (isOwner(uid)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['zip', 'address', 'phone', 'emergency']));
+      // 作成・削除はサーバー（Admin SDK）または管理者のみ
+      allow create, delete: if isAdmin();
+    }
+
+    // ---- events（公開済み & 自分の卒年度のみ閲覧可）----
+    match /events/{id} {
+      allow read: if isAdmin()
+        || (signedIn() && myStudentExists()
+            && resource.data.published == true
+            && resource.data.grad == myGrad());
+      allow write: if isAdmin();
+    }
+
+    // ---- surveys ----
+    match /surveys/{id} {
+      allow read: if isAdmin()
+        || (signedIn() && myStudentExists()
+            && resource.data.published == true
+            && resource.data.grad == myGrad());
+      allow write: if isAdmin();
+    }
+
+    // ---- journeys/{grad} ----
+    match /journeys/{grad} {
+      allow read: if isAdmin()
+        || (signedIn() && myStudentExists() && string(myGrad()) == grad);
+      allow write: if isAdmin();
+    }
+
+    // ---- rsvps/{eventId}_{uid} ----
+    match /rsvps/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update: if isAdmin()
+        || (signedIn() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---- responses/{surveyId}_{uid} ----
+    match /responses/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update: if isAdmin()
+        || (signedIn() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---- cohorts（卒年度マスタ。initialPassword を含むため管理者のみ read/write）----
+    //   学生・未認証は一切読めない。/signup での有効性確認は公開APIが年度・active だけ返す。
+    match /cohorts/{year} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---- notices（お知らせ。全学生が閲覧可・作成は管理者のみ）----
+    match /notices/{id} {
+      allow read: if isAdmin() || (signedIn() && myStudentExists());
+      allow write: if isAdmin();
+    }
+
+    // ---- templates（管理者のみ）----
+    match /templates/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // ---- broadcasts（管理者は閲覧のみ。作成は Admin SDK）----
+    match /broadcasts/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---- authCodes（クライアントからは一切不可。Admin SDK のみ）----
+    match /authCodes/{email} {
+      allow read, write: if false;
+    }
+
+    // それ以外は全拒否
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

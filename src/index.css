@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* フォントは游ゴシック体に統一（旧: 明朝/セリフ体のクラスも游ゴシックに上書き） */
+.en-serif,
+.jp-mincho {
+  font-family: "Yu Gothic Medium", "Yu Gothic", "YuGothic", "游ゴシック Medium",
+    "游ゴシック体", "游ゴシック", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    sans-serif;
+}
+
+@keyframes ml-in-kf {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ml-in {
+  animation: ml-in-kf 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.ml-in-1 {
+  animation-delay: 0.1s;
+}
+.ml-in-2 {
+  animation-delay: 0.2s;
+}
+.ml-in-3 {
+  animation-delay: 0.3s;
+}
+
+@keyframes ml-blink-kf {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+.ml-blink {
+  animation: ml-blink-kf 1.6s ease-in-out infinite;
+}
+
+/* ループちゃんのふわふわ浮遊 */
+@keyframes ml-float-kf {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.ml-float {
+  animation: ml-float-kf 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-in,
+  .ml-in-1,
+  .ml-in-2,
+  .ml-in-3,
+  .ml-blink,
+  .ml-float {
+    animation: none !important;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
