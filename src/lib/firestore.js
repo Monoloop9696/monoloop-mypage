@@ -12,6 +12,7 @@ import {
   where,
   serverTimestamp,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -109,6 +110,15 @@ export async function addEvent(data) {
 export const updateEvent = (id, patch) => updateDoc(doc(db, "events", id), patch);
 export const deleteEvent = (id) => deleteDoc(doc(db, "events", id));
 
+// イベント削除＋関連する出欠(rsvps)も一括削除
+export async function deleteEventCascade(eventId) {
+  const snap = await getDocs(query(collection(db, "rsvps"), where("eventId", "==", eventId)));
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(db, "events", eventId));
+  await batch.commit();
+}
+
 // =====================================================================
 // surveys
 // =====================================================================
@@ -140,6 +150,15 @@ export async function addSurvey(data) {
 
 export const updateSurvey = (id, patch) => updateDoc(doc(db, "surveys", id), patch);
 export const deleteSurvey = (id) => deleteDoc(doc(db, "surveys", id));
+
+// アンケート削除＋関連する回答(responses)も一括削除
+export async function deleteSurveyCascade(surveyId) {
+  const snap = await getDocs(query(collection(db, "responses"), where("surveyId", "==", surveyId)));
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(db, "surveys", surveyId));
+  await batch.commit();
+}
 
 // =====================================================================
 // journeys/{grad}: { steps: [...] }

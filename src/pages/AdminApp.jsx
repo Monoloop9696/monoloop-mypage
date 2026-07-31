@@ -10,7 +10,8 @@ import { downloadCsv } from "../lib/csv";
 import { setStudentAccount, lineBroadcast } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
-  loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, addSurvey,
+  loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
+  addSurvey, deleteSurveyCascade,
   updateStudent, addTemplate, deleteTemplate, loadAllRsvps, loadAllResponses,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -129,6 +130,18 @@ function AdminBody({
   const [newNotice, setNewNotice] = useState("");
   const [pwEditing, setPwEditing] = useState(false);
   const [pwDraft, setPwDraft] = useState("");
+  const [confirmDel, setConfirmDel] = useState(null); // `event:<id>` / `survey:<id>`
+
+  const doDeleteEvent = async (id) => {
+    setConfirmDel(null); setExpandedEvent(null);
+    try { await deleteEventCascade(id); await refreshAnswers(); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+  };
+  const doDeleteSurvey = async (id) => {
+    setConfirmDel(null); setExpandedSurvey(null);
+    try { await deleteSurveyCascade(id); await refreshAnswers(); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+  };
 
   const selectYear = (y) => {
     setSelectedYear(y); setExpandedEvent(null); setExpandedSurvey(null); setConfirmDeleteId(null);
@@ -633,9 +646,21 @@ function AdminBody({
                           </div>
                         );
                       })}
-                      <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white mt-1" style={{ background: BRAND }}>
-                        <Download size={12} /> 出欠をCSV出力
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap mt-1">
+                        <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
+                          <Download size={12} /> 出欠をCSV出力
+                        </button>
+                        {confirmDel === `event:${e.id}` ? (
+                          <>
+                            <button onClick={() => doDeleteEvent(e.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（出欠も消去）</button>
+                            <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setConfirmDel(`event:${e.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#DC2626", borderColor: "#FECACA", background: "#fff" }}>
+                            <Trash2 size={12} /> このイベントを削除
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -776,9 +801,21 @@ function AdminBody({
                             ))}
                           </div>
                         </div>
-                        <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
-                          <Download size={12} /> 回答をCSV出力
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
+                            <Download size={12} /> 回答をCSV出力
+                          </button>
+                          {confirmDel === `survey:${s.id}` ? (
+                            <>
+                              <button onClick={() => doDeleteSurvey(s.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>
+                              <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                            </>
+                          ) : (
+                            <button onClick={() => setConfirmDel(`survey:${s.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#DC2626", borderColor: "#FECACA", background: "#fff" }}>
+                              <Trash2 size={12} /> このアンケートを削除
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })()}
