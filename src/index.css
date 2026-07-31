@@ -71,8 +71,23 @@
   }
 }
 
+/* 端末のダークモードで色が反転しないよう、アプリ全体をライト固定 */
+:root {
+  color-scheme: light;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
+  background-color: #fdf0f4; /* PAPER */
+  color-scheme: light;
+}
+
+/* 入力欄・プルダウン等のネイティブ部品もライト固定（iOS/Android のダーク反転対策） */
+input,
+select,
+textarea,
+button {
+  color-scheme: light;
 }
