@@ -4,6 +4,7 @@ import { FullLoader } from "./components/common";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ResetPassword from "./pages/ResetPassword";
+import ResetConfirm from "./pages/ResetConfirm";
 import Privacy from "./pages/Privacy";
 import StudentApp from "./pages/StudentApp";
 import AdminApp from "./pages/AdminApp";
@@ -45,6 +46,7 @@ export default function App() {
         }
       />
       <Route path="/reset" element={<ResetPassword />} />
+      <Route path="/reset-confirm" element={<ResetConfirm />} />
       <Route
         path="/"
         element={

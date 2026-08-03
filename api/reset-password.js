@@ -16,7 +16,14 @@ export default async function handler(req, res) {
     let link;
     try {
       await authAdmin.getUserByEmail(normEmail);
-      link = await authAdmin.generatePasswordResetLink(normEmail);
+      const rawLink = await authAdmin.generatePasswordResetLink(normEmail);
+      // Firebaseの英語ページではなく、アプリ内の日本語ページ /reset-confirm に oobCode を渡す
+      const oob = new URL(rawLink).searchParams.get("oobCode");
+      const host = req.headers.host || "";
+      const proto = req.headers["x-forwarded-proto"] || (host.includes("localhost") ? "http" : "https");
+      link = oob
+        ? `${proto}://${host}/reset-confirm?oobCode=${encodeURIComponent(oob)}`
+        : rawLink;
     } catch (e) {
       // 未登録アドレスは、存在有無を漏らさないため成功として返し何も送らない
       if (e.code === "auth/user-not-found") return sendJson(res, 200, { ok: true });
