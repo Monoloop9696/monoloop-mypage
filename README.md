@@ -2,6 +2,9 @@
 
 内定者向けマイページ（学生ビュー）と採用管理コンソール（人事ビュー）を1つにまとめた本番運用向けWebアプリです。プロトタイプ（`monoloop-mypage.jsx`）のデザイン・機能をそのまま実装し、バックエンドを Firebase / Resend / LINE / Vercel で構成しています。
 
+- **本番URL**: https://monoloop-mypage.vercel.app
+- **リポジトリ**: GitHub（private）。`main` への push で Vercel が自動デプロイ。
+
 ## 技術スタック（すべて無料枠で構成可能）
 
 | 領域 | 採用技術 |
