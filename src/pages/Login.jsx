@@ -94,7 +94,7 @@ export default function Login() {
         <div className="mt-10 pt-5" style={{ borderTop: `1px solid ${HAIR}` }}>
           <p className="text-xs leading-relaxed" style={{ color: MUTE }}>
             まだ登録がお済みでない方は、採用担当からご案内した登録用URLからお手続きください。<br />
-            ご不明な場合は採用担当（imai.syuto@monoloop.jp）までご連絡ください。
+            ご不明な場合は採用担当（モノ・ループLINEグループ）までご連絡ください。
           </p>
         </div>
       </div>
