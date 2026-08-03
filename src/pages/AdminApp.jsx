@@ -86,10 +86,7 @@ export default function AdminApp() {
         <header className="sticky top-0 z-40 px-5 py-3.5 flex items-center justify-between"
           style={{ background: "#fff", borderBottom: "1px solid #E5E7EB" }}>
           <div className="flex items-center gap-2.5">
-            <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
-              <circle cx="13" cy="13" r="9" fill="none" stroke={BRAND} strokeWidth="3"
-                strokeDasharray="40 17" strokeLinecap="round" transform="rotate(40 13 13)" />
-            </svg>
+            <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 22, width: "auto" }} />
             <div>
               <p className="text-sm font-bold leading-none">モノループ</p>
               <p className="text-xs text-gray-400 leading-none mt-0.5">採用管理コンソール</p>
