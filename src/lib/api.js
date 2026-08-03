@@ -38,6 +38,9 @@ export const registerAccount = (payload) => post("/api/register", payload);
 // 公開：有効な卒年度一覧（/signup の年度チェック用。パスワードは含まれない）
 export const publicCohorts = () => post("/api/public-cohorts", {});
 
+// パスワード再設定メール（Resend経由。存在有無に関わらず ok を返す）
+export const resetPassword = (payload) => post("/api/reset-password", payload);
+
 // ログイン後：admin クレーム付与（該当メールのみ）。{ admin: boolean } を返す
 export const syncRole = () => post("/api/set-role", {}, { authed: true });
 

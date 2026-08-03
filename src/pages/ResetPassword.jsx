@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { sendPasswordResetEmail } from "firebase/auth";
-import { auth } from "../firebase";
+import { resetPassword } from "../lib/api";
 import { PAPER, ROSE, IVORY, GOLD, HAIR, MUTE, studentFontStyle, caps } from "../theme";
 
 export default function ResetPassword() {
@@ -14,19 +13,17 @@ export default function ResetPassword() {
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
+    if (!email.includes("@")) {
+      setErr("メールアドレスの形式が正しくありません。");
+      return;
+    }
     setBusy(true);
     try {
-      await sendPasswordResetEmail(auth, email.trim());
-      // 存在しないメールでも同じ表示にして、登録有無を漏らさない
+      // Resend 経由で再設定メールを送信（存在有無に関わらず ok が返る＝登録有無を漏らさない）
+      await resetPassword({ email: email.trim() });
       setSent(true);
     } catch (ex) {
-      if (ex.code === "auth/invalid-email") {
-        setErr("メールアドレスの形式が正しくありません。");
-      } else if (ex.code === "auth/user-not-found") {
-        setSent(true);
-      } else {
-        setErr("送信に失敗しました。時間をおいて再度お試しください。");
-      }
+      setErr(ex.message || "送信に失敗しました。時間をおいて再度お試しください。");
     } finally {
       setBusy(false);
     }
