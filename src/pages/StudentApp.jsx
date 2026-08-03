@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Home, Calendar, ClipboardList, MessageCircle,
-  ChevronRight, MapPin, Clock, X, Check, LogOut, Bell,
+  Home, Calendar, ClipboardList, MessageCircle, Newspaper,
+  ChevronRight, MapPin, Clock, X, Check, LogOut, Bell, Download,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { EdHeader, FullLoader } from "../components/common";
@@ -11,8 +11,10 @@ import {
 } from "../theme";
 import {
   listenStudent, listenPublishedEvents, listenPublishedSurveys, listenJourney,
-  listenMyRsvps, listenMyResponses, listenNotices, setRsvp, submitResponse, updateStudent,
+  listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
+  listenArticleImages, setRsvp, submitResponse, updateStudent,
 } from "../lib/firestore";
+import { downloadDataUrl } from "../lib/image";
 
 const ADD_FRIEND_URL = import.meta.env.VITE_LINE_ADD_FRIEND_URL || "";
 
@@ -123,12 +125,27 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   });
   const [savingProfile, setSavingProfile] = useState(false);
   const [notices, setNotices] = useState([]);
+  const [articles, setArticles] = useState([]);
+  const [activeArticle, setActiveArticle] = useState(null);
+  const [articleImages, setArticleImages] = useState([]);
 
   useEffect(() => listenNotices(setNotices), []);
+  useEffect(() => listenPublishedArticles(setArticles), []);
+  useEffect(() => {
+    if (!activeArticle) { setArticleImages([]); return; }
+    return listenArticleImages(activeArticle.id, setArticleImages);
+  }, [activeArticle]);
+
+  const fmtDate = (ts) => {
+    const d = ts?.toDate ? ts.toDate() : null;
+    return d ? `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(d.getDate()).padStart(2, "0")}` : "";
+  };
   const fmtNoticeDate = (n) => {
     const d = n.createdAt?.toDate ? n.createdAt.toDate() : null;
     return d ? `${d.getMonth() + 1}.${d.getDate()}` : "";
   };
+  // 自分の卒年度向け or 全学年の記事
+  const myArticles = articles.filter((a) => a.grad == null || a.grad === grad);
 
   const studentName = student.name || "";
   const lineLinked = !!student.lineUserId;
@@ -231,6 +248,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     { key: "home", label: "HOME", icon: Home },
     { key: "event", label: "EVENTS", icon: Calendar },
     { key: "survey", label: "SURVEY", icon: ClipboardList },
+    { key: "news", label: "NEWS", icon: Newspaper },
     { key: "line", label: "LINE", icon: MessageCircle },
   ];
 
@@ -485,6 +503,70 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   <p className="text-xs mt-4" style={{ color: MUTE }}>いただいた声は、研修や配属の設計に活かします。</p>
                 </>
               )}
+            </div>
+          )}
+
+          {/* NEWS（記事） */}
+          {tab === "news" && (
+            <div className="px-6 pt-8">
+              <EdHeader en="News & Report" jp="NEWS" note="イベントの様子をお届け" />
+              {myArticles.length === 0 ? (
+                <p className="text-xs" style={{ color: MUTE }}>まだ記事はありません。</p>
+              ) : (
+                <div className="space-y-4">
+                  {myArticles.map((a) => (
+                    <button key={a.id} onClick={() => setActiveArticle(a)}
+                      className="w-full text-left bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
+                      {a.thumb && (
+                        <img src={a.thumb} alt="" className="w-full" style={{ height: 150, objectFit: "cover" }} />
+                      )}
+                      <div className="p-4">
+                        <p className="en-serif" style={{ fontSize: 12, color: MAUVE }}>{fmtDate(a.createdAt)}</p>
+                        <h3 className="jp-mincho font-bold mt-1" style={{ fontSize: 17 }}>{a.title}</h3>
+                        {a.body && <p className="text-xs mt-1.5 line-clamp-2" style={{ color: MUTE }}>{a.body}</p>}
+                        <span className="inline-flex items-center gap-1 mt-3 text-sm font-bold" style={{ color: ROSE }}>
+                          記事を読む <ChevronRight size={14} />
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* NEWS 記事の詳細（全画面・写真ギャラリー） */}
+          {activeArticle && (
+            <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: PAPER, ...studentFontStyle }}>
+              <div className="max-w-md mx-auto min-h-screen pb-20">
+                <div className="sticky top-0 z-10 px-5 py-3 flex items-center justify-between"
+                  style={{ background: PAPER, borderBottom: `1px solid ${HAIR}` }}>
+                  <p style={caps(9, MAUVE, "0.18em")}>News</p>
+                  <button onClick={() => setActiveArticle(null)} aria-label="閉じる" className="flex items-center gap-1 text-xs font-bold" style={{ color: MUTE }}>
+                    <X size={16} /> 閉じる
+                  </button>
+                </div>
+                <div className="px-6 pt-5">
+                  <p className="en-serif" style={{ fontSize: 12, color: MAUVE }}>{fmtDate(activeArticle.createdAt)}</p>
+                  <h1 className="jp-mincho font-bold mt-1" style={{ fontSize: 22, lineHeight: 1.4 }}>{activeArticle.title}</h1>
+                  {activeArticle.body && (
+                    <p className="text-sm mt-4 leading-relaxed whitespace-pre-wrap">{activeArticle.body}</p>
+                  )}
+                  {articleImages.length > 0 && (
+                    <div className="mt-6 space-y-5">
+                      {articleImages.map((img, i) => (
+                        <div key={img.id}>
+                          <img src={img.data} alt={`${activeArticle.title} ${i + 1}`} className="w-full" style={{ border: `1px solid ${HAIR}` }} />
+                          <button onClick={() => downloadDataUrl(img.data, `${activeArticle.title}_${i + 1}.jpg`)}
+                            className="mt-2 flex items-center gap-1.5 text-sm font-bold" style={{ color: ROSE, borderBottom: `1px solid ${ROSE}`, paddingBottom: 2 }}>
+                            <Download size={14} /> この写真を保存
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

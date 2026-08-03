@@ -317,3 +317,71 @@ export async function addNotice(text) {
 }
 
 export const deleteNotice = (id) => deleteDoc(doc(db, "notices", id));
+
+// =====================================================================
+// articles（NEWS記事。本文＋写真。写真は images サブコレクションに圧縮base64で保存）
+//   articles/{id} : { title, body, grad(null=全学年), published, createdAt }
+//   articles/{id}/images/{imgId} : { data(dataURL), order, createdAt }
+// =====================================================================
+export function listenPublishedArticles(cb) {
+  return onSnapshot(collection(db, "articles"), (snap) => {
+    const list = snap.docs
+      .map(withId)
+      .filter((a) => a.published)
+      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+    cb(list);
+  });
+}
+
+export function listenAllArticles(cb) {
+  return onSnapshot(collection(db, "articles"), (snap) => {
+    const list = snap.docs
+      .map(withId)
+      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+    cb(list);
+  });
+}
+
+export async function addArticle({ title, body = "", grad = null, published = true }) {
+  const ref = await addDoc(collection(db, "articles"), {
+    title,
+    body,
+    grad: grad ?? null,
+    published,
+    createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export const updateArticle = (id, patch) => updateDoc(doc(db, "articles", id), patch);
+
+export async function addArticleImage(articleId, dataUrl, order = 0) {
+  await addDoc(collection(db, "articles", articleId, "images"), {
+    data: dataUrl,
+    order,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export async function loadArticleImages(articleId) {
+  const snap = await getDocs(collection(db, "articles", articleId, "images"));
+  return snap.docs.map(withId).sort((a, b) => (a.order || 0) - (b.order || 0));
+}
+
+export function listenArticleImages(articleId, cb) {
+  return onSnapshot(collection(db, "articles", articleId, "images"), (snap) =>
+    cb(snap.docs.map(withId).sort((a, b) => (a.order || 0) - (b.order || 0)))
+  );
+}
+
+export const deleteArticleImage = (articleId, imgId) =>
+  deleteDoc(doc(db, "articles", articleId, "images", imgId));
+
+// 記事＋配下の画像を一括削除
+export async function deleteArticleCascade(articleId) {
+  const snap = await getDocs(collection(db, "articles", articleId, "images"));
+  const batch = writeBatch(db);
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  batch.delete(doc(db, "articles", articleId));
+  await batch.commit();
+}

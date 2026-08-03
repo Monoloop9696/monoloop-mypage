@@ -87,6 +87,19 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ---- articles（NEWS記事。公開記事は全学生が閲覧可・作成は管理者のみ）----
+    match /articles/{id} {
+      allow read: if isAdmin() || (signedIn() && myStudentExists() && resource.data.published == true);
+      allow write: if isAdmin();
+      // 記事内の写真（サブコレクション）。親記事が公開なら学生も閲覧可。
+      match /images/{imgId} {
+        allow read: if isAdmin()
+          || (signedIn() && myStudentExists()
+              && get(/databases/$(database)/documents/articles/$(id)).data.published == true);
+        allow write: if isAdmin();
+      }
+    }
+
     // ---- templates（管理者のみ）----
     match /templates/{id} {
       allow read, write: if isAdmin();

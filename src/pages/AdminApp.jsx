@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
 import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
+import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, lineBroadcast } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
@@ -15,6 +16,7 @@ import {
   updateStudent, addTemplate, deleteTemplate, loadAllRsvps, loadAllResponses,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
+  listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
 } from "../lib/firestore";
 
 const TEMPLATES = {
@@ -152,6 +154,58 @@ function AdminBody({
     if (!t) return;
     await addNotice(t);
     setNewNotice("");
+  };
+
+  // ---- NEWS記事 ----
+  const [articles, setArticles] = useState([]);
+  const [artTitle, setArtTitle] = useState("");
+  const [artBody, setArtBody] = useState("");
+  const [artGrad, setArtGrad] = useState(""); // "" = 全学年
+  const [artImages, setArtImages] = useState([]); // 圧縮済み dataURL 配列
+  const [artBusy, setArtBusy] = useState(false);
+  const [artErr, setArtErr] = useState("");
+  const [artDelId, setArtDelId] = useState(null);
+  useEffect(() => listenAllArticles(setArticles), []);
+
+  const onPickImages = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    setArtErr("");
+    setArtBusy(true);
+    try {
+      const out = [];
+      for (const f of files) out.push(await fileToCompressedDataURL(f));
+      setArtImages((prev) => [...prev, ...out].slice(0, 20));
+    } catch (ex) {
+      setArtErr(ex.message);
+    } finally {
+      setArtBusy(false);
+    }
+  };
+  const removeArtImage = (i) => setArtImages((prev) => prev.filter((_, idx) => idx !== i));
+  const submitArticle = async () => {
+    if (!artTitle.trim()) { setArtErr("タイトルを入力してください。"); return; }
+    setArtErr("");
+    setArtBusy(true);
+    try {
+      const grad = artGrad ? Number(artGrad) : null;
+      const id = await addArticle({ title: artTitle.trim(), body: artBody, grad, published: true });
+      for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
+      if (artImages[0]) {
+        const thumb = await dataUrlToThumb(artImages[0]);
+        if (thumb) await updateArticle(id, { thumb });
+      }
+      setArtTitle(""); setArtBody(""); setArtGrad(""); setArtImages([]);
+    } catch (ex) {
+      setArtErr(`投稿に失敗しました：${ex.message}`);
+    } finally {
+      setArtBusy(false);
+    }
+  };
+  const doDeleteArticle = async (id) => {
+    setArtDelId(null);
+    try { await deleteArticleCascade(id); } catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
 
   // cohorts 読み込み後、選択年度を初期化／整合
@@ -466,6 +520,7 @@ function AdminBody({
   const tabs = [
     { key: "dash", label: "概況", icon: BarChart3 },
     { key: "students", label: "内定者", icon: Users },
+    { key: "news", label: "記事", icon: Newspaper },
     { key: "line", label: "LINE配信", icon: Send },
   ];
 
@@ -1091,6 +1146,94 @@ function AdminBody({
               <p className="text-xs text-gray-400 mt-2 leading-relaxed">
                 辞退・削除済みの学生はログイン不可・LINE配信の対象外です。「復元」でアカウントとステータス（辞退→内定、承諾後辞退→承諾）が元に戻ります。
               </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "news" && (
+        <div className="px-4 pt-4 space-y-4">
+          <SectionTitle>NEWS記事を投稿</SectionTitle>
+          <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">タイトル<span className="text-red-500 ml-0.5">*</span></p>
+              <input value={artTitle} onChange={(e) => setArtTitle(e.target.value)} placeholder="例）内定者懇親会レポート" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
+              <textarea value={artBody} onChange={(e) => setArtBody(e.target.value)} rows={5} placeholder="イベントの様子や感想を記入…" className="w-full border border-gray-300 rounded-lg p-3 text-sm" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">公開対象</p>
+              <select value={artGrad} onChange={(e) => setArtGrad(e.target.value)} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-bold bg-white">
+                <option value="">全学年に公開</option>
+                {cohorts.map((c) => <option key={c.year} value={c.year}>{c.year}卒のみ</option>)}
+              </select>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">写真（複数選択可・自動で圧縮されます）</p>
+              <label className="flex items-center justify-center gap-2 border border-dashed border-gray-300 rounded-lg py-3 text-xs font-bold text-gray-500 cursor-pointer">
+                <ImagePlus size={16} /> 写真を選ぶ
+                <input type="file" accept="image/*" multiple onChange={onPickImages} className="hidden" />
+              </label>
+              {artImages.length > 0 && (
+                <div className="grid grid-cols-3 gap-2 mt-2">
+                  {artImages.map((src, i) => (
+                    <div key={i} className="relative">
+                      <img src={src} alt="" className="w-full rounded-lg" style={{ height: 80, objectFit: "cover" }} />
+                      <button onClick={() => removeArtImage(i)} aria-label="この写真を外す" className="absolute -top-1.5 -right-1.5 bg-white rounded-full border border-gray-300 p-0.5">
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {artErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{artErr}</p>}
+            {artBusy && <p className="text-xs text-gray-400">画像を処理中…</p>}
+            <button disabled={!artTitle.trim() || artBusy} onClick={submitArticle}
+              className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+              {artBusy ? "処理中…" : "記事を投稿する（学生に即時公開）"}
+            </button>
+          </div>
+
+          <SectionTitle>投稿済みの記事</SectionTitle>
+          {articles.length === 0 ? (
+            <p className="text-xs text-gray-400">まだ記事はありません。</p>
+          ) : (
+            <div className="space-y-2">
+              {articles.map((a) => (
+                <div key={a.id} className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3">
+                  {a.thumb ? (
+                    <img src={a.thumb} alt="" className="rounded-lg shrink-0" style={{ width: 52, height: 52, objectFit: "cover" }} />
+                  ) : (
+                    <div className="rounded-lg shrink-0 flex items-center justify-center" style={{ width: 52, height: 52, background: "#F3F4F6" }}>
+                      <Newspaper size={18} className="text-gray-300" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold truncate">{a.title}</p>
+                    <p className="text-xs text-gray-400">
+                      {a.createdAt?.toDate ? `${a.createdAt.toDate().getFullYear()}.${a.createdAt.toDate().getMonth() + 1}.${a.createdAt.toDate().getDate()}` : ""}
+                      ・{a.grad ? `${a.grad}卒` : "全学年"}・{a.published ? "公開中" : "非公開"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => updateArticle(a.id, { published: !a.published })}
+                      className="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">
+                      {a.published ? "非公開に" : "公開する"}
+                    </button>
+                    {artDelId === a.id ? (
+                      <>
+                        <button onClick={() => doDeleteArticle(a.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
+                        <button onClick={() => setArtDelId(null)} className="text-xs text-gray-400 px-1">取消</button>
+                      </>
+                    ) : (
+                      <button onClick={() => setArtDelId(a.id)} aria-label="記事を削除" className="text-gray-300 p-1"><Trash2 size={15} /></button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
