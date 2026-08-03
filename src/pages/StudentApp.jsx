@@ -270,10 +270,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
         <header className="sticky top-0 z-40 px-5 py-3.5 flex items-center justify-between"
           style={{ background: PAPER, borderBottom: `1px solid ${HAIR}` }}>
           <div className="flex items-center gap-2.5">
-            <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
-              <circle cx="13" cy="13" r="9" fill="none" stroke={ROSE} strokeWidth="3"
-                strokeDasharray="40 17" strokeLinecap="round" transform="rotate(40 13 13)" />
-            </svg>
+            <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 22, width: "auto" }} />
             <div>
               <p className="en-serif font-bold leading-none" style={{ fontSize: 15, fontStyle: "italic", color: ROSE }}>Monoloop</p>
               <p className="leading-none mt-1" style={caps(8, MAUVE, "0.2em")}>My Page</p>
@@ -546,24 +543,28 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     <X size={16} /> 閉じる
                   </button>
                 </div>
+                {/* 上：写真（全幅・インスタ風。各写真に保存ボタンを重ねる） */}
+                {articleImages.length > 0 && (
+                  <div>
+                    {articleImages.map((img, i) => (
+                      <div key={img.id} className="relative">
+                        <img src={img.data} alt={`${activeArticle.title} ${i + 1}`} className="w-full block" />
+                        <button onClick={() => downloadDataUrl(img.data, `${activeArticle.title}_${i + 1}.jpg`)}
+                          aria-label="この写真を保存"
+                          className="absolute bottom-2 right-2 flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-full shadow"
+                          style={{ background: "rgba(255,255,255,0.92)", color: ROSE }}>
+                          <Download size={13} /> 保存
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* 下：文章 */}
                 <div className="px-6 pt-5">
                   <p className="en-serif" style={{ fontSize: 12, color: MAUVE }}>{fmtDate(activeArticle.createdAt)}</p>
                   <h1 className="jp-mincho font-bold mt-1" style={{ fontSize: 22, lineHeight: 1.4 }}>{activeArticle.title}</h1>
                   {activeArticle.body && (
                     <p className="text-sm mt-4 leading-relaxed whitespace-pre-wrap">{activeArticle.body}</p>
-                  )}
-                  {articleImages.length > 0 && (
-                    <div className="mt-6 space-y-5">
-                      {articleImages.map((img, i) => (
-                        <div key={img.id}>
-                          <img src={img.data} alt={`${activeArticle.title} ${i + 1}`} className="w-full" style={{ border: `1px solid ${HAIR}` }} />
-                          <button onClick={() => downloadDataUrl(img.data, `${activeArticle.title}_${i + 1}.jpg`)}
-                            className="mt-2 flex items-center gap-1.5 text-sm font-bold" style={{ color: ROSE, borderBottom: `1px solid ${ROSE}`, paddingBottom: 2 }}>
-                            <Download size={14} /> この写真を保存
-                          </button>
-                        </div>
-                      ))}
-                    </div>
                   )}
                 </div>
               </div>

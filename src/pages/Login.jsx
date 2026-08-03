@@ -38,10 +38,7 @@ export default function Login() {
     <div className="min-h-screen" style={{ background: PAPER, ...studentFontStyle }}>
       <div className="max-w-md mx-auto px-6 pt-16 pb-16 ml-in">
         <div className="flex items-center gap-2.5">
-          <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
-            <circle cx="13" cy="13" r="9" fill="none" stroke={ROSE} strokeWidth="3"
-              strokeDasharray="40 17" strokeLinecap="round" transform="rotate(40 13 13)" />
-          </svg>
+          <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 24, width: "auto" }} />
           <div>
             <p className="en-serif font-bold leading-none" style={{ fontSize: 16, fontStyle: "italic", color: ROSE }}>
               Monoloop
