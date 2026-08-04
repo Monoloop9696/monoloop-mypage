@@ -1444,10 +1444,25 @@ function AdminBody({
             </div>
 
             <div>
-              <p className="text-xs font-bold text-gray-500 mb-2">メッセージ</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-gray-500">メッセージ</p>
+                <button onClick={() => setMsg((m) => m + "{name}")}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                  ＋ 名前を差し込む（{"{name}"}）
+                </button>
+              </div>
               <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={4}
-                placeholder={"例）【リマインド】内定者懇親会の出欠登録は 7/31 までです。マイページからご回答ください。"}
+                placeholder={"例）{name}さん、こんにちは。内定者懇親会の出欠登録をお願いします。"}
                 className="w-full border border-gray-300 rounded-lg p-3 text-sm" />
+              <p className="text-xs text-gray-500 mt-1.5">
+                文中に <span className="font-bold" style={{ color: BRAND }}>{"{name}"}</span> と入れると、送信時に各内定者のマイページ登録名に自動で置き換わります。
+              </p>
+              {/\{name\}|\{名前\}/i.test(msg) && (
+                <div className="mt-2 rounded-lg p-2.5 text-xs whitespace-pre-wrap" style={{ background: "#F4F7F6", color: INK }}>
+                  <span className="font-bold text-gray-500">差し込み例：</span>
+                  {msg.replace(/\{name\}|\{名前\}/gi, (activeStudents.find((s) => s.name)?.name) || "山田花子")}
+                </div>
+              )}
               <div className="mt-2">
                 {!showTplSave ? (
                   <button disabled={!msg} onClick={() => setShowTplSave(true)} className="text-xs font-bold disabled:opacity-40" style={{ color: BRAND }}>

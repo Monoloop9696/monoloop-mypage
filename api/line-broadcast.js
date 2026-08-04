@@ -1,6 +1,6 @@
 import { dbAdmin, FieldValue } from "./_lib/firebaseAdmin.js";
 import { readJson, sendJson, methodGuard, requireAdmin } from "./_lib/util.js";
-import { multicast } from "./_lib/line.js";
+import { multicast, pushMessage } from "./_lib/line.js";
 import { sendEmail } from "./_lib/resend.js";
 
 // タスク未完了者判定のための進捗計算
@@ -66,10 +66,25 @@ export default async function handler(req, res) {
       });
     }
 
-    const lineUsers = recipients.filter((s) => s.lineUserId).map((s) => s.lineUserId);
+    // {name} / {名前} を各受信者のマイページ登録名に置換（差し込み）
+    const hasPlaceholder = /\{name\}|\{名前\}/i.test(text);
+    const personalize = (t, s) => t.replace(/\{name\}|\{名前\}/gi, s.name || "");
+
+    const lineRecipients = recipients.filter((s) => s.lineUserId);
     const mailUsers = recipients.filter((s) => !s.lineUserId && s.email);
 
-    const lineCount = lineUsers.length ? await multicast(lineUsers, text) : 0;
+    // LINE：差し込みがある場合は1人ずつ個別送信（push）、無ければ従来どおり multicast
+    let lineCount = 0;
+    if (lineRecipients.length) {
+      if (hasPlaceholder) {
+        for (const s of lineRecipients) {
+          try { if (await pushMessage(s.lineUserId, personalize(text, s))) lineCount += 1; }
+          catch { /* 個別送信失敗はスキップ */ }
+        }
+      } else {
+        lineCount = await multicast(lineRecipients.map((s) => s.lineUserId), text);
+      }
+    }
 
     let mailCount = 0;
     for (const s of mailUsers) {
@@ -77,7 +92,7 @@ export default async function handler(req, res) {
         await sendEmail({
           to: s.email,
           subject: "【モノ・ループ】お知らせ",
-          text: `${s.name || ""}さん\n\n${text}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
+          text: `${s.name || ""}さん\n\n${personalize(text, s)}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
         });
         mailCount += 1;
       } catch {
