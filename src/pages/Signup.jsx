@@ -30,7 +30,8 @@ export default function Signup({ year }) {
   const [code, setCode] = useState("");
   const [changeEmail, setChangeEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
-  const [f, setF] = useState({ name: "", birth: "", univ: "", phone: "", zip: "", address: "" });
+  const [f, setF] = useState({ name: "", birth: "", univ: "", phone: "", zip: "", address: "", homeZip: "", homeAddress: "" });
+  const [livesAtHome, setLivesAtHome] = useState(false);
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [consent, setConsent] = useState(false);
@@ -97,6 +98,10 @@ export default function Signup({ year }) {
       setRegError("必須項目をすべて入力してください。");
       return;
     }
+    if (!livesAtHome && !f.homeAddress.trim()) {
+      setRegError("実家の住所を入力してください（実家にお住まいの場合はチェックを入れてください）。");
+      return;
+    }
     if (changeEmail && !newEmail.includes("@")) {
       setRegError("変更後のメールアドレスの形式が正しくありません。");
       return;
@@ -134,6 +139,9 @@ export default function Signup({ year }) {
           phone: f.phone.trim(),
           zip: f.zip.trim(),
           address: f.address.trim(),
+          livesAtHome,
+          homeZip: livesAtHome ? f.zip.trim() : f.homeZip.trim(),
+          homeAddress: livesAtHome ? f.address.trim() : f.homeAddress.trim(),
         },
       });
       // 作成成功 → そのままログイン。以降は App のルーティングが学生画面へ
@@ -268,10 +276,33 @@ export default function Signup({ year }) {
                     placeholder="330-0854" className="w-full p-3.5 text-sm bg-white" style={inp} />
                 </div>
                 <div className="col-span-2">
-                  <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>住所（書類送付先）<span style={{ color: GOLD }}> *</span></p>
+                  <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>現住所（書類送付先）<span style={{ color: GOLD }}> *</span></p>
                   <input value={f.address} onChange={(e) => setF({ ...f, address: e.target.value })}
                     placeholder="埼玉県さいたま市大宮区〇〇 1-2-3" className="w-full p-3.5 text-sm bg-white" style={inp} />
                 </div>
+              </div>
+
+              {/* 実家住所 */}
+              <div>
+                <label className="flex items-center gap-2 text-xs" style={{ color: MUTE }}>
+                  <input type="checkbox" checked={livesAtHome}
+                    onChange={(e) => setLivesAtHome(e.target.checked)} />
+                  現在、実家に住んでいます（実家＝上の現住所）
+                </label>
+                {!livesAtHome && (
+                  <div className="mt-2 grid grid-cols-3 gap-3">
+                    <div>
+                      <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>郵便番号</p>
+                      <input value={f.homeZip} onChange={(e) => setF({ ...f, homeZip: e.target.value })}
+                        placeholder="330-0854" className="w-full p-3.5 text-sm bg-white" style={inp} />
+                    </div>
+                    <div className="col-span-2">
+                      <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>実家の住所<span style={{ color: GOLD }}> *</span></p>
+                      <input value={f.homeAddress} onChange={(e) => setF({ ...f, homeAddress: e.target.value })}
+                        placeholder="別の場合はこちらに記入してください" className="w-full p-3.5 text-sm bg-white" style={inp} />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2" style={{ borderTop: `1px solid ${HAIR}` }}>

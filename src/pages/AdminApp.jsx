@@ -1497,7 +1497,8 @@ function AdminBody({
           ["生年月日", d.birth || "-"],
           ["メールアドレス", d.email || "-"],
           ["電話番号", d.phone || "-"],
-          ["住所", (d.zip || d.address) ? `〒${d.zip || "-"} ${d.address || ""}` : "-"],
+          ["現住所", (d.zip || d.address) ? `〒${d.zip || "-"} ${d.address || ""}` : "-"],
+          ["実家住所", d.livesAtHome ? "現住所と同じ（実家在住）" : ((d.homeZip || d.homeAddress) ? `〒${d.homeZip || "-"} ${d.homeAddress || ""}` : "-")],
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
         ];
