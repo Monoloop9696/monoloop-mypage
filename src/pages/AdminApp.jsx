@@ -495,6 +495,15 @@ function AdminBody({
     setTplName("");
     setShowTplSave(false);
   };
+  const removeTemplate = async (id) => {
+    setConfirmDel(null);
+    try {
+      await deleteTemplate(id);
+      if (selectedTpl === `saved:${id}`) setSelectedTpl("");
+    } catch (ex) {
+      setBanner(`テンプレの削除に失敗しました：${ex.message}`);
+    }
+  };
 
   // ---- ステータス変更・退会・復元 ----
   const changeStatus = (id, v) => {
@@ -1425,12 +1434,6 @@ function AdminBody({
                     className="w-full py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
                     この文面を使う
                   </button>
-                  {selectedTpl.startsWith("saved:") && (
-                    <button onClick={async () => { await deleteTemplate(selectedTpl.slice(6)); setSelectedTpl(""); }}
-                      className="w-full py-2 rounded-lg text-xs font-bold border border-gray-300 text-gray-500 bg-white">
-                      このテンプレを削除
-                    </button>
-                  )}
                 </div>
                 <div className="rounded-lg p-2.5 overflow-y-auto" style={{ background: "#8CABCE", maxHeight: 190, minHeight: 96 }}>
                   <p className="text-white font-bold mb-1.5" style={{ fontSize: 10 }}>受信プレビュー</p>
@@ -1441,6 +1444,27 @@ function AdminBody({
                   )}
                 </div>
               </div>
+
+              {savedTemplates.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-[11px] font-bold text-gray-400 mb-1">保存したテンプレの管理</p>
+                  <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                    {savedTemplates.map((t) => (
+                      <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                        <p className="text-xs font-bold text-gray-700 truncate min-w-0">{t.name}</p>
+                        {confirmDel === `tpl:${t.id}` ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => removeTemplate(t.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                            <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setConfirmDel(`tpl:${t.id}`)} aria-label={`テンプレ「${t.name}」を削除`} className="text-gray-300 p-1 shrink-0"><Trash2 size={15} /></button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
