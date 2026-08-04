@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, ChevronUp, ChevronDown,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -230,6 +230,7 @@ function AdminBody({
   const [detailStudent, setDetailStudent] = useState(null);
   const [listFilter, setListFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [dragIndex, setDragIndex] = useState(null);
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [expandedSurvey, setExpandedSurvey] = useState(null);
 
@@ -442,12 +443,36 @@ function AdminBody({
     setJourneys((prev) => ({ ...prev, [selectedYear]: list }));
     saveJourney(selectedYear, list);
   };
-  const moveJourney = (idx, dir) => {
-    const list = [...(journeys[selectedYear] || [])];
-    const j = idx + dir;
-    if (j < 0 || j >= list.length) return;
-    [list[idx], list[j]] = [list[j], list[idx]];
-    setYearJourneyAndSave(list);
+  // ---- Journey ドラッグ並び替え（PC=長押しドラッグ / スマホ=ドラッグ、Pointer Events で統一）----
+  const jRowRefs = useRef([]);
+  const onJDragStart = (e, index) => {
+    e.preventDefault();
+    setDragIndex(index);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
+  };
+  const onJDragMove = (e) => {
+    if (dragIndex === null) return;
+    const y = e.clientY;
+    const list = journeys[selectedYear] || [];
+    let target = list.length - 1;
+    for (let k = 0; k < jRowRefs.current.length; k++) {
+      const el = jRowRefs.current[k];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) { target = k; break; }
+    }
+    if (target !== dragIndex && target >= 0 && target < list.length) {
+      const nl = [...list];
+      const [moved] = nl.splice(dragIndex, 1);
+      nl.splice(target, 0, moved);
+      setJourneys((prev) => ({ ...prev, [selectedYear]: nl }));
+      setDragIndex(target);
+    }
+  };
+  const onJDragEnd = () => {
+    if (dragIndex === null) return;
+    setDragIndex(null);
+    saveJourney(selectedYear, journeysRef.current[selectedYear] || []);
   };
   // 1ステップを更新して即保存（リンク種別のセレクトなど）
   const updateJourneyAndSave = (id, patch) => {
@@ -949,13 +974,23 @@ function AdminBody({
             <SectionTitle>Journey（入社までの道のり）</SectionTitle>
             <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
               {yearJourney.map((m, i) => (
-                <div key={m.id} className="flex items-start gap-2">
-                  <div className="flex flex-col items-center shrink-0 pt-1">
-                    <button onClick={() => moveJourney(i, -1)} disabled={i === 0}
-                      aria-label="上へ移動" className="text-gray-400 disabled:opacity-25 p-0.5"><ChevronUp size={15} /></button>
-                    <span className="text-xs font-bold text-gray-400 w-5 text-center">{String(i + 1).padStart(2, "0")}</span>
-                    <button onClick={() => moveJourney(i, 1)} disabled={i === yearJourney.length - 1}
-                      aria-label="下へ移動" className="text-gray-400 disabled:opacity-25 p-0.5"><ChevronDown size={15} /></button>
+                <div key={m.id} ref={(el) => (jRowRefs.current[i] = el)}
+                  className="flex items-start gap-2 rounded-lg transition-shadow"
+                  style={dragIndex === i
+                    ? { background: "#FCE3EF", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", userSelect: "none" }
+                    : { userSelect: dragIndex !== null ? "none" : "auto" }}>
+                  <div className="flex flex-col items-center shrink-0 pt-1.5">
+                    <button
+                      onPointerDown={(e) => onJDragStart(e, i)}
+                      onPointerMove={onJDragMove}
+                      onPointerUp={onJDragEnd}
+                      onPointerCancel={onJDragEnd}
+                      aria-label={`ステップ「${m.label}」をドラッグして並び替え`}
+                      className="text-gray-400 cursor-grab active:cursor-grabbing p-0.5"
+                      style={{ touchAction: "none" }}>
+                      <GripVertical size={16} />
+                    </button>
+                    <span className="text-xs font-bold text-gray-400 w-5 text-center mt-0.5">{String(i + 1).padStart(2, "0")}</span>
                   </div>
                   <div className="flex-1 space-y-1.5 min-w-0">
                     <input value={m.label} onChange={(e) => updateJourneyLocal(m.id, { label: e.target.value })} onBlur={persistJourney}
@@ -999,7 +1034,7 @@ function AdminBody({
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed border-gray-300 text-gray-500">
                 + ステップを追加
               </button>
-              <p className="text-xs text-gray-400">左の ▲▼ で順番を入れ替えられます。変更は学生画面のホームに即時反映されます。</p>
+              <p className="text-xs text-gray-400">左の <span className="align-middle">⠿</span> を掴んで上下にドラッグすると並び替えできます（PCは長押しドラッグ、スマホはドラッグ）。変更は学生画面のホームに即時反映されます。</p>
             </div>
           </div>
 
