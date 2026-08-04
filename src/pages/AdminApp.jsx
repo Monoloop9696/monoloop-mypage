@@ -13,20 +13,12 @@ import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, deleteSurveyCascade,
-  updateStudent, addTemplate, deleteTemplate, loadAllRsvps, loadAllResponses,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses,
+  addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
 } from "../lib/firestore";
-
-const TEMPLATES = {
-  "内定者（承諾前）":
-    "【モノループ採用】内定承諾のご回答について\n内定承諾のご回答期限は 7/31（金） です。マイページからご回答をお願いします。\n迷っていることがあれば、このLINEで気軽にご相談ください。",
-  "内定承諾者":
-    "【ご案内】内定者懇親会（8/7）について\nご承諾ありがとうございます！8/7（金）の内定者懇親会の出欠登録は 7/31 までです。マイページからご登録ください。",
-  "タスク未完了者":
-    "【リマインド】未完了のタスクがあります\nマイページのホーム画面から、アンケート・出欠登録の状況をご確認ください。",
-};
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadline: "" };
 const EMPTY_SV = { title: "", due: "", time: "約3分", q1: "", opts: "", q2: "", multi: false };
@@ -221,7 +213,9 @@ function AdminBody({
   const [editingDraftId, setEditingDraftId] = useState(null);
   const [showTplSave, setShowTplSave] = useState(false);
   const [tplName, setTplName] = useState("");
+  const [tplSaveCat, setTplSaveCat] = useState("");
   const [selectedTpl, setSelectedTpl] = useState("");
+  const [showTplManager, setShowTplManager] = useState(false);
   const [showSurveyForm, setShowSurveyForm] = useState(false);
   const [sv, setSv] = useState(EMPTY_SV);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
@@ -482,27 +476,24 @@ function AdminBody({
   };
   const linkKindOf = (m) => (!m.link ? "" : /^https?:\/\//.test(m.link) ? "url" : m.link);
 
-  // ---- テンプレ ----
-  const tplBody = selectedTpl.startsWith("builtin:")
-    ? TEMPLATES[selectedTpl.slice(8)]
-    : selectedTpl.startsWith("saved:")
-    ? (savedTemplates.find((t) => String(t.id) === selectedTpl.slice(6)) || {}).body || ""
-    : "";
+  // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
+  // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
+  const templateCategories = savedTemplates.filter((t) => t._type === "category");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category");
+  const sortedCategories = [...templateCategories].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const templatesInCat = (catId) =>
+    realTemplates
+      .filter((t) => (t.categoryId || null) === (catId || null))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ja"));
+  const selectedTplId = selectedTpl.startsWith("tpl:") ? selectedTpl.slice(4) : "";
+  const tplBody = (savedTemplates.find((t) => String(t.id) === selectedTplId) || {}).body || "";
 
   const saveTemplate = async () => {
     const name = tplName.trim() || msg.split("\n")[0].slice(0, 14);
-    await addTemplate({ name, body: msg });
+    await addTemplate({ name, body: msg, categoryId: tplSaveCat || null, order: templatesInCat(tplSaveCat).length });
     setTplName("");
+    setTplSaveCat("");
     setShowTplSave(false);
-  };
-  const removeTemplate = async (id) => {
-    setConfirmDel(null);
-    try {
-      await deleteTemplate(id);
-      if (selectedTpl === `saved:${id}`) setSelectedTpl("");
-    } catch (ex) {
-      setBanner(`テンプレの削除に失敗しました：${ex.message}`);
-    }
   };
 
   // ---- ステータス変更・退会・復元 ----
@@ -1413,20 +1404,30 @@ function AdminBody({
             </div>
 
             <div>
-              <p className="text-xs font-bold text-gray-500 mb-2">テンプレート</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-gray-500">テンプレート</p>
+                <button onClick={() => setShowTplManager((v) => !v)}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                  {showTplManager ? "編集を閉じる" : "種別・テンプレを編集"}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-2 items-start">
                 <div className="space-y-2">
                   <select value={selectedTpl} onChange={(e) => setSelectedTpl(e.target.value)}
                     className="w-full border border-gray-300 rounded-lg p-2.5 text-xs font-bold bg-white">
                     <option value="">テンプレを選択…</option>
-                    <optgroup label="定型テンプレ">
-                      <option value="builtin:内定者（承諾前）">内定承諾リマインド（承諾前）</option>
-                      <option value="builtin:内定承諾者">懇親会のご案内（承諾者）</option>
-                      <option value="builtin:タスク未完了者">タスク未完了リマインド</option>
-                    </optgroup>
-                    {savedTemplates.length > 0 && (
-                      <optgroup label="保存したテンプレ">
-                        {savedTemplates.map((t) => (<option key={t.id} value={`saved:${t.id}`}>{t.name}</option>))}
+                    {sortedCategories.map((c) => {
+                      const list = templatesInCat(c.id);
+                      if (list.length === 0) return null;
+                      return (
+                        <optgroup key={c.id} label={c.name}>
+                          {list.map((t) => (<option key={t.id} value={`tpl:${t.id}`}>{t.name}</option>))}
+                        </optgroup>
+                      );
+                    })}
+                    {templatesInCat(null).length > 0 && (
+                      <optgroup label="未分類">
+                        {templatesInCat(null).map((t) => (<option key={t.id} value={`tpl:${t.id}`}>{t.name}</option>))}
                       </optgroup>
                     )}
                   </select>
@@ -1445,25 +1446,8 @@ function AdminBody({
                 </div>
               </div>
 
-              {savedTemplates.length > 0 && (
-                <div className="mt-3">
-                  <p className="text-[11px] font-bold text-gray-400 mb-1">保存したテンプレの管理</p>
-                  <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
-                    {savedTemplates.map((t) => (
-                      <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2">
-                        <p className="text-xs font-bold text-gray-700 truncate min-w-0">{t.name}</p>
-                        {confirmDel === `tpl:${t.id}` ? (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button onClick={() => removeTemplate(t.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
-                            <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => setConfirmDel(`tpl:${t.id}`)} aria-label={`テンプレ「${t.name}」を削除`} className="text-gray-300 p-1 shrink-0"><Trash2 size={15} /></button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              {showTplManager && (
+                <TemplateManager categories={sortedCategories} templates={realTemplates} setBanner={setBanner} />
               )}
             </div>
 
@@ -1493,11 +1477,18 @@ function AdminBody({
                     + このメッセージをテンプレとして保存
                   </button>
                 ) : (
-                  <div className="flex gap-2 items-center">
+                  <div className="space-y-2">
                     <input value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="テンプレ名（例：懇親会リマインド）"
-                      className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs" />
-                    <button onClick={saveTemplate} className="text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
-                    <button onClick={() => { setShowTplSave(false); setTplName(""); }} className="text-xs text-gray-400 px-1">取消</button>
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs" />
+                    <div className="flex gap-2 items-center">
+                      <select value={tplSaveCat} onChange={(e) => setTplSaveCat(e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-lg px-2 py-2 text-xs bg-white">
+                        <option value="">種別：未分類</option>
+                        {sortedCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                      </select>
+                      <button onClick={saveTemplate} className="text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
+                      <button onClick={() => { setShowTplSave(false); setTplName(""); setTplSaveCat(""); }} className="text-xs text-gray-400 px-1">取消</button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1536,23 +1527,34 @@ function AdminBody({
           ["生年月日", d.birth || "-"],
           ["メールアドレス", d.email || "-"],
           ["電話番号", d.phone || "-"],
-          ["現住所", (d.zip || d.address) ? `〒${d.zip || "-"} ${d.address || ""}` : "-"],
-          ["実家住所", d.livesAtHome ? "現住所と同じ（実家在住）" : ((d.homeZip || d.homeAddress) ? `〒${d.homeZip || "-"} ${d.homeAddress || ""}` : "-")],
+          ["郵便番号", d.zip ? `〒${d.zip}` : "-"],
+          ["住所", d.address || "-"],
+          ...(d.livesAtHome
+            ? [["実家住所", "現住所と同じ（実家在住）"]]
+            : [
+                ["実家の郵便番号", d.homeZip ? `〒${d.homeZip}` : "-"],
+                ["実家の住所", d.homeAddress || "-"],
+              ]),
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
         ];
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-6">
-            <div className="bg-white rounded-2xl w-full max-w-sm max-h-96 overflow-y-auto">
-              <div className="p-5">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-xs text-gray-400">内定者情報</p>
-                    <p className="text-lg font-bold mt-0.5">{d.name}</p>
-                  </div>
-                  <button onClick={() => setDetailStudent(null)} aria-label="閉じる"><X size={20} className="text-gray-400" /></button>
+            <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
+              {/* 固定ヘッダー：右上に閉じる（戻る）ボタンを常時表示。スクロールで隠れない */}
+              <div className="flex items-start justify-between gap-3 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">内定者情報</p>
+                  <p className="text-lg font-bold mt-0.5 truncate">{d.name}</p>
                 </div>
-                <div className="mt-3 divide-y divide-gray-100">
+                <button onClick={() => setDetailStudent(null)} aria-label="閉じる"
+                  className="shrink-0 -mt-1 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100">
+                  <X size={20} />
+                </button>
+              </div>
+              {/* スクロール領域：情報のみスクロール */}
+              <div className="p-5 pt-2 overflow-y-auto">
+                <div className="divide-y divide-gray-100">
                   {rows.map(([k, v]) => (
                     <div key={k} className="py-2.5 flex justify-between gap-3 text-sm">
                       <span className="text-xs text-gray-500 pt-0.5 shrink-0">{k}</span>
@@ -1617,6 +1619,162 @@ function AdminBody({
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+// テンプレの種別（カテゴリ）とテンプレ本体を管理する
+function TemplateManager({ categories, templates, setBanner }) {
+  const [catName, setCatName] = useState("");
+  const [confirmCat, setConfirmCat] = useState(null);
+  const [confirmTpl, setConfirmTpl] = useState(null);
+  const [tForm, setTForm] = useState(null); // {id?, name, body, categoryId}
+
+  const inCat = (cid) =>
+    templates
+      .filter((t) => (t.categoryId || null) === (cid || null))
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ja"));
+
+  const addCat = async () => {
+    const name = catName.trim();
+    if (!name) return;
+    try { await addTemplateCategory({ name, order: categories.length }); setCatName(""); }
+    catch (ex) { setBanner(`種別の追加に失敗しました：${ex.message}`); }
+  };
+  const renameCat = async (id, name) => {
+    try { await updateTemplateCategory(id, { name }); }
+    catch (ex) { setBanner(`種別の更新に失敗しました：${ex.message}`); }
+  };
+  const moveCat = async (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= categories.length) return;
+    try {
+      await Promise.all([
+        updateTemplateCategory(categories[idx].id, { order: j }),
+        updateTemplateCategory(categories[j].id, { order: idx }),
+      ]);
+    } catch (ex) { setBanner(`並び替えに失敗しました：${ex.message}`); }
+  };
+  const removeCat = async (id) => {
+    setConfirmCat(null);
+    try {
+      await Promise.all(inCat(id).map((t) => updateTemplate(t.id, { categoryId: null })));
+      await deleteTemplateCategory(id);
+    } catch (ex) { setBanner(`種別の削除に失敗しました：${ex.message}`); }
+  };
+  const saveTpl = async () => {
+    if (!tForm) return;
+    const name = (tForm.name || "").trim() || (tForm.body || "").split("\n")[0].slice(0, 14);
+    if (!(tForm.body || "").trim()) { setBanner("テンプレの本文を入力してください。"); return; }
+    try {
+      if (tForm.id) await updateTemplate(tForm.id, { name, body: tForm.body, categoryId: tForm.categoryId || null });
+      else await addTemplate({ name, body: tForm.body, categoryId: tForm.categoryId || null, order: inCat(tForm.categoryId).length });
+      setTForm(null);
+    } catch (ex) { setBanner(`テンプレの保存に失敗しました：${ex.message}`); }
+  };
+  const removeTpl = async (id) => {
+    setConfirmTpl(null);
+    try { await deleteTemplate(id); }
+    catch (ex) { setBanner(`テンプレの削除に失敗しました：${ex.message}`); }
+  };
+
+  const groups = [...categories.map((c) => ({ id: c.id, name: c.name })), { id: null, name: "未分類" }];
+
+  return (
+    <div className="mt-3 border border-gray-200 rounded-lg p-3 space-y-4" style={{ background: "#FAFBFC" }}>
+      {/* 種別（カテゴリ） */}
+      <div>
+        <p className="text-[11px] font-bold text-gray-400 mb-1.5">種別（カテゴリ）</p>
+        <div className="space-y-1.5">
+          {categories.length === 0 && <p className="text-xs text-gray-400">種別がありません。下で追加してください。</p>}
+          {categories.map((c, i) => (
+            <div key={c.id} className="flex items-center gap-1.5">
+              <div className="flex flex-col shrink-0">
+                <button onClick={() => moveCat(i, -1)} disabled={i === 0} className="text-gray-400 disabled:opacity-25 leading-none text-xs">▲</button>
+                <button onClick={() => moveCat(i, 1)} disabled={i === categories.length - 1} className="text-gray-400 disabled:opacity-25 leading-none text-xs">▼</button>
+              </div>
+              <input defaultValue={c.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.name) renameCat(c.id, v); }}
+                className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-bold" />
+              {confirmCat === c.id ? (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => removeCat(c.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
+                  <button onClick={() => setConfirmCat(null)} className="text-xs px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmCat(c.id)} aria-label={`種別「${c.name}」を削除`} className="text-gray-300 p-1 shrink-0"><Trash2 size={14} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 items-center mt-2">
+          <input value={catName} onChange={(e) => setCatName(e.target.value)} placeholder="新しい種別（例：承諾前・イベント）"
+            className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+          <button onClick={addCat} disabled={!catName.trim()} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>種別を追加</button>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-1">種別を削除しても、その中のテンプレは「未分類」に移動します（テンプレ自体は消えません）。</p>
+      </div>
+
+      {/* テンプレ一覧 */}
+      <div>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className="text-[11px] font-bold text-gray-400">テンプレ</p>
+          {!tForm && (
+            <button onClick={() => setTForm({ name: "", body: "", categoryId: "" })} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: BRAND }}>＋ テンプレを追加</button>
+          )}
+        </div>
+
+        {tForm && (
+          <div className="border border-gray-200 rounded-lg p-2.5 space-y-2 mb-2 bg-white">
+            <input value={tForm.name} onChange={(e) => setTForm({ ...tForm, name: e.target.value })} placeholder="テンプレ名"
+              className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-bold" />
+            <select value={tForm.categoryId || ""} onChange={(e) => setTForm({ ...tForm, categoryId: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+              <option value="">種別：未分類</option>
+              {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+            </select>
+            <textarea value={tForm.body} onChange={(e) => setTForm({ ...tForm, body: e.target.value })} rows={4}
+              placeholder={"本文（{name} で登録名を差し込めます）"} className="w-full border border-gray-300 rounded-lg p-2.5 text-xs" />
+            <div className="flex gap-2">
+              <button onClick={saveTpl} className="flex-1 py-2 rounded-lg text-xs font-bold text-white" style={{ background: BRAND }}>保存</button>
+              <button onClick={() => setTForm(null)} className="px-3 py-2 rounded-lg text-xs font-bold border border-gray-300 text-gray-500 bg-white">取消</button>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {groups.map((g) => {
+            const list = inCat(g.id);
+            if (list.length === 0) return null;
+            return (
+              <div key={g.id ?? "none"}>
+                <p className="text-[11px] font-bold mb-1" style={{ color: BRAND }}>{g.name}</p>
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 bg-white">
+                  {list.map((t) => (
+                    <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <p className="text-xs font-bold text-gray-700 truncate min-w-0">{t.name}</p>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {confirmTpl === t.id ? (
+                          <>
+                            <button onClick={() => removeTpl(t.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
+                            <button onClick={() => setConfirmTpl(null)} className="text-xs px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => setTForm({ id: t.id, name: t.name || "", body: t.body || "", categoryId: t.categoryId || "" })}
+                              className="text-xs font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>編集</button>
+                            <button onClick={() => setConfirmTpl(t.id)} aria-label={`テンプレ「${t.name}」を削除`} className="text-gray-300 p-1"><Trash2 size={14} /></button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {templates.length === 0 && <p className="text-xs text-gray-400">テンプレがありません。「＋ テンプレを追加」で作成できます。</p>}
+        </div>
+      </div>
     </div>
   );
 }

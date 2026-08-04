@@ -298,17 +298,29 @@ export function listenTemplates(cb) {
   return onSnapshot(collection(db, "templates"), (snap) => cb(snap.docs.map(withId)));
 }
 
-export async function addTemplate({ name, body, createdBy }) {
+export async function addTemplate({ name, body, categoryId = null, order = 0, createdBy }) {
   const ref = await addDoc(collection(db, "templates"), {
     name,
     body,
+    categoryId: categoryId || null,
+    order,
     createdBy: createdBy || null,
     createdAt: serverTimestamp(),
   });
   return ref.id;
 }
 
+export const updateTemplate = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteTemplate = (id) => deleteDoc(doc(db, "templates", id));
+
+// テンプレの種別（カテゴリ）は templates コレクション内に _type:"category" のドキュメントとして保存
+// （新コレクションを作らないので Firestore ルールの追加デプロイが不要）
+export async function addTemplateCategory({ name, order = 0 }) {
+  const ref = await addDoc(collection(db, "templates"), { _type: "category", name, order, createdAt: serverTimestamp() });
+  return ref.id;
+}
+export const updateTemplateCategory = (id, patch) => updateDoc(doc(db, "templates", id), patch);
+export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
 
 // =====================================================================
 // notices（お知らせ。全学年に表示。管理者が任意のタイミングで追加）

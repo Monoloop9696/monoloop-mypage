@@ -100,7 +100,7 @@ service cloud.firestore {
       }
     }
 
-    // ---- templates（管理者のみ）----
+    // ---- templates（管理者のみ）。種別(カテゴリ)も _type:"category" のドキュメントとしてここに保存 ----
     match /templates/{id} {
       allow read, write: if isAdmin();
     }
