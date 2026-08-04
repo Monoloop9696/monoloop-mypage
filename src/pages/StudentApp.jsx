@@ -12,7 +12,7 @@ import {
 import {
   listenStudent, listenPublishedEvents, listenPublishedSurveys, listenJourney,
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
-  listenArticleImages, setRsvp, submitResponse, updateStudent,
+  listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent,
 } from "../lib/firestore";
 import { downloadDataUrl } from "../lib/image";
 
@@ -157,9 +157,20 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     myRsvps.forEach((r) => { m[r.eventId] = r.answer; });
     return m;
   }, [myRsvps]);
+  const arrivedMap = useMemo(() => {
+    const m = {};
+    myRsvps.forEach((r) => { if (r.arrived) m[r.eventId] = true; });
+    return m;
+  }, [myRsvps]);
   const responseSet = useMemo(() => new Set(myResponses.map((r) => r.surveyId)), [myResponses]);
 
-  const myEvents = events.map((e) => ({ ...e, rsvp: rsvpMap[e.id] ?? null }));
+  // 到着ボタンの当日判定用（YYYY-MM-DD）
+  const todayStr = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  })();
+
+  const myEvents = events.map((e) => ({ ...e, rsvp: rsvpMap[e.id] ?? null, arrived: !!arrivedMap[e.id] }));
   const mySurveys = surveys.map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
@@ -176,6 +187,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const doRsvp = (id, v) => {
     if (readOnly) return;
     setRsvp(id, uid, v);
+  };
+  const doArrive = (id) => {
+    if (readOnly) return;
+    markArrived(id, uid);
   };
 
   const submitSurvey = async () => {
@@ -459,6 +474,28 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         欠席する
                       </button>
                     </div>
+                    {/* 到着受付（出席回答者のみ・イベント当日に押下可） */}
+                    {e.rsvp === "yes" && (
+                      <div className="mt-3">
+                        {e.arrived ? (
+                          <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+                            style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
+                            <Check size={15} /> 到着を受け付けました
+                          </div>
+                        ) : e.dateStr === todayStr ? (
+                          <button onClick={() => doArrive(e.id)} disabled={readOnly}
+                            className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
+                            <MapPin size={15} /> 会場に到着したら押す
+                          </button>
+                        ) : (
+                          <div className="w-full py-2.5 text-xs font-bold text-center"
+                            style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
+                            当日にこちらから到着を受け付けます
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </article>
               ))}

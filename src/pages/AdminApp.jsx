@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -238,12 +238,18 @@ function AdminBody({
     rsvps.forEach((r) => { m[`${r.eventId}_${r.uid}`] = r.answer; });
     return m;
   }, [rsvps]);
+  const arrivedMap = useMemo(() => {
+    const m = {};
+    rsvps.forEach((r) => { if (r.arrived) m[`${r.eventId}_${r.uid}`] = true; });
+    return m;
+  }, [rsvps]);
   const respMap = useMemo(() => {
     const m = {};
     responses.forEach((r) => { m[`${r.surveyId}_${r.uid}`] = { q1: r.q1 || [], q2: r.q2 || "" }; });
     return m;
   }, [responses]);
 
+  const arrivedOf = (st, e) => !!arrivedMap[`${e.id}_${st.id}`];
   const rsvpOf = (st, e) => {
     const a = rsvpMap[`${e.id}_${st.id}`];
     return a === "yes" ? "出席" : a === "no" ? "欠席" : "未回答";
@@ -500,8 +506,12 @@ function AdminBody({
   };
 
   const exportAttendanceCsv = (e) => {
-    const header = ["氏名", "大学", "ステータス", "出欠"];
-    const rows = activeStudents.map((st) => [st.name, st.univ, statusLabel(st), rsvpOf(st, e)]);
+    const header = ["氏名", "大学", "ステータス", "出欠", "到着"];
+    const rows = activeStudents.map((st) => {
+      const r = rsvpOf(st, e);
+      const arr = r === "出席" ? (arrivedOf(st, e) ? "到着済" : "未到着") : "-";
+      return [st.name, st.univ, statusLabel(st), r, arr];
+    });
     downloadCsv(`出欠_${e.title}_${selectedYear}卒.csv`, [header, ...rows]);
   };
 
@@ -587,6 +597,11 @@ function AdminBody({
                 {showEventForm ? "閉じる" : "+ イベントを追加"}
               </button>
             </div>
+            <div className="flex justify-end -mt-1 mb-2">
+              <button onClick={refreshAnswers} className="flex items-center gap-1 text-xs font-bold text-gray-400">
+                <RefreshCw size={12} /> 到着・出欠を更新
+              </button>
+            </div>
 
             {showEventForm && (
               <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
@@ -661,6 +676,7 @@ function AdminBody({
             {yearEvents.map((e) => {
               const list = activeStudents.map((st) => ({ st, r: rsvpOf(st, e) }));
               const yes = list.filter((x) => x.r === "出席").length;
+              const arrivedCount = list.filter((x) => x.r === "出席" && arrivedOf(x.st, e)).length;
               const open = expandedEvent === e.id;
               return (
                 <div key={e.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
@@ -672,6 +688,7 @@ function AdminBody({
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-xs text-gray-500">参加 {yes}/{totalActive}</p>
+                        {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#1E874B" }}>到着 {arrivedCount}/{yes}</p>}
                         <p className="text-xs mt-0.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
                       </div>
                     </div>
@@ -685,16 +702,31 @@ function AdminBody({
                         const g = list.filter((x) => x.r === k);
                         return (
                           <div key={k}>
-                            <p className="text-xs font-bold text-gray-500 mb-1">{k}（{g.length}名）</p>
+                            <p className="text-xs font-bold text-gray-500 mb-1">
+                              {k}（{g.length}名）
+                              {k === "出席" && g.length > 0 && (
+                                <span className="ml-1.5" style={{ color: "#1E874B" }}>／到着 {arrivedCount}名・未到着 {g.length - arrivedCount}名</span>
+                              )}
+                            </p>
                             <div className="flex flex-wrap gap-1.5">
                               {g.length === 0 && <span className="text-xs text-gray-300">なし</span>}
-                              {g.map((x) => (
-                                <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full"
-                                  style={k === "出席" ? { background: BRAND_LIGHT, color: BRAND } : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" }}>
-                                  {x.st.name}
-                                </span>
-                              ))}
+                              {g.map((x) => {
+                                const arr = k === "出席" && arrivedOf(x.st, e);
+                                return (
+                                  <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1"
+                                    style={
+                                      k === "出席"
+                                        ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
+                                        : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" }
+                                    }>
+                                    {arr && <CheckCircle2 size={11} />}{x.st.name}
+                                  </span>
+                                );
+                              })}
                             </div>
+                            {k === "出席" && g.length > 0 && (
+                              <p className="text-[11px] text-gray-400 mt-1">緑＝到着済み／ピンク＝未到着</p>
+                            )}
                           </div>
                         );
                       })}

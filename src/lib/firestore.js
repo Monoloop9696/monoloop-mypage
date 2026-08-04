@@ -221,12 +221,26 @@ export const setCohortPassword = (year, initialPassword) =>
 // rsvps/{eventId}_{uid}
 // =====================================================================
 export const setRsvp = (eventId, uid, answer) =>
-  setDoc(doc(db, "rsvps", `${eventId}_${uid}`), {
-    eventId,
-    uid,
-    answer,
-    updatedAt: serverTimestamp(),
-  });
+  setDoc(
+    doc(db, "rsvps", `${eventId}_${uid}`),
+    {
+      eventId,
+      uid,
+      answer,
+      updatedAt: serverTimestamp(),
+      // 欠席に変更した場合は到着状態をリセット（merge で既存の arrived を保持しつつ上書き）
+      ...(answer === "no" ? { arrived: false, arrivedAt: null } : {}),
+    },
+    { merge: true }
+  );
+
+// イベント当日の到着受付（学生が自分の rsvp に arrived を付与）
+export const markArrived = (eventId, uid) =>
+  setDoc(
+    doc(db, "rsvps", `${eventId}_${uid}`),
+    { eventId, uid, arrived: true, arrivedAt: serverTimestamp() },
+    { merge: true }
+  );
 
 export function listenMyRsvps(uid, cb) {
   const q = query(collection(db, "rsvps"), where("uid", "==", uid));
