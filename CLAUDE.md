@@ -2,7 +2,7 @@
 
 このファイルは、プロジェクトの現状・構成・運用手順・残タスクをまとめた作業引き継ぎ用ドキュメントです。
 
-最終更新: 2026-08-03
+最終更新: 2026-08-04
 
 ---
 
@@ -90,12 +90,16 @@ npm run dev      # http://localhost:5173（vite.config.js の devApiPlugin で /
 ※ `vercel dev` は使えない（対話ログイン必要）。ローカルAPIは devApiPlugin 経由。
 
 ### 本番デプロイ = git push（自動）
-`main` に push すると Vercel が自動ビルド&本番反映。私が push する場合は GitHub PAT が必要:
+`main` に push すると Vercel が自動ビルド&本番反映。
+
+**push 運用ルール（2026-08-04 更新）:**
+- GitHub 認証は **Windows 資格情報マネージャーに保存済み**のため、`git push origin main` は **Claude（アシスタント）が実行**してよい（PAT の埋め込みは不要）。
 ```powershell
-git remote set-url origin "https://<user>:<PAT>@github.com/Monoloop9696/monoloop-mypage.git"
 git push origin main
-git remote set-url origin "https://github.com/Monoloop9696/monoloop-mypage.git"  # トークンを残さない
 ```
+- ただし **push は本番反映にあたる**ため、実行前に必ず **「今回の変更内容の要約」をユーザーに提示し、承認を得てから** push すること。無断 push は禁止。
+- 承認は push ごと・その都度取得する（一度の承認を後続の push に流用しない）。
+
 手動デプロイ（代替）: `vercel deploy --prod --yes --token <VERCELトークン>`（都度発行）。
 
 ### Firestore ルールのデプロイ
