@@ -258,7 +258,10 @@ function AdminBody({
   const answerOf = (st, s) => respMap[`${s.id}_${st.id}`] || null;
 
   // ---- 年度スコープ ----
-  const yearStudents = students.filter((s) => (s.grad || 2027) === selectedYear);
+  // 氏名を常にあいうえお順（日本語ロケール照合）で。ここを起点に一覧・出欠グループ・CSVも同順になる
+  const yearStudents = students
+    .filter((s) => (s.grad || 2027) === selectedYear)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ja"));
   const activeStudents = yearStudents.filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
   const totalActive = activeStudents.length;
   const accepted = activeStudents.filter((s) => s.status === "承諾").length;
