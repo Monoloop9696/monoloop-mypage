@@ -128,6 +128,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [articles, setArticles] = useState([]);
   const [activeArticle, setActiveArticle] = useState(null);
   const [articleImages, setArticleImages] = useState([]);
+  // プレビュー（readOnly）確認用のローカル状態。DBには保存しない
+  const [previewRsvp, setPreviewRsvp] = useState({});
+  const [previewArrived, setPreviewArrived] = useState({});
 
   useEffect(() => listenNotices(setNotices), []);
   useEffect(() => listenPublishedArticles(setArticles), []);
@@ -170,7 +173,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
   })();
 
-  const myEvents = events.map((e) => ({ ...e, rsvp: rsvpMap[e.id] ?? null, arrived: !!arrivedMap[e.id] }));
+  const myEvents = events.map((e) => ({
+    ...e,
+    rsvp: readOnly ? (previewRsvp[e.id] ?? null) : (rsvpMap[e.id] ?? null),
+    arrived: readOnly ? !!previewArrived[e.id] : !!arrivedMap[e.id],
+  }));
   const mySurveys = surveys.map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
@@ -185,11 +192,19 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const loop = pickLoopChan(student, myEvents);
 
   const doRsvp = (id, v) => {
-    if (readOnly) return;
+    if (readOnly) {
+      // プレビューでは画面上だけ切り替え（保存しない）
+      setPreviewRsvp((m) => ({ ...m, [id]: v }));
+      if (v === "no") setPreviewArrived((m) => ({ ...m, [id]: false }));
+      return;
+    }
     setRsvp(id, uid, v);
   };
   const doArrive = (id) => {
-    if (readOnly) return;
+    if (readOnly) {
+      setPreviewArrived((m) => ({ ...m, [id]: true }));
+      return;
+    }
     markArrived(id, uid);
   };
 
@@ -465,11 +480,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       <p className="flex items-center gap-2"><ClipboardList size={12} /> 回答期限：{e.deadline}</p>
                     </div>
                     <div className="flex gap-2.5 mt-5">
-                      <button onClick={() => doRsvp(e.id, "yes")} disabled={readOnly} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
+                      <button onClick={() => doRsvp(e.id, "yes")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
                         style={e.rsvp === "yes" ? { background: ROSE, color: IVORY, border: `1px solid ${ROSE}` } : { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` }}>
                         出席する
                       </button>
-                      <button onClick={() => doRsvp(e.id, "no")} disabled={readOnly} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
+                      <button onClick={() => doRsvp(e.id, "no")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
                         style={e.rsvp === "no" ? { background: "#6E5A62", color: "#fff", border: "1px solid #6E5A62" } : { background: "#fff", color: MUTE, border: `1px solid ${HAIR}` }}>
                         欠席する
                       </button>
@@ -482,8 +497,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                             style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
                             <Check size={15} /> 到着を受け付けました
                           </div>
-                        ) : e.dateStr === todayStr ? (
-                          <button onClick={() => doArrive(e.id)} disabled={readOnly}
+                        ) : (readOnly || e.dateStr === todayStr) ? (
+                          <button onClick={() => doArrive(e.id)}
                             className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
                             style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
                             <MapPin size={15} /> 会場に到着したら押す
