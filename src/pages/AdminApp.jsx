@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, ChevronUp, ChevronDown,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -229,6 +229,7 @@ function AdminBody({
   const [pendingStatus, setPendingStatus] = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
   const [listFilter, setListFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [expandedEvent, setExpandedEvent] = useState(null);
   const [expandedSurvey, setExpandedSurvey] = useState(null);
 
@@ -286,23 +287,47 @@ function AdminBody({
     return { done, total };
   };
 
+  // 検索（名前・大学・住所・メール・電話・郵便番号・生年月日を横断）
+  const q = searchQuery.trim().toLowerCase();
+  const matchesSearch = (s) =>
+    !q || [s.name, s.univ, s.address, s.email, s.phone, s.zip, s.birth]
+      .some((v) => (v || "").toString().toLowerCase().includes(q));
+
   const activeList = activeStudents;
   const retiredList = yearStudents.filter((s) => s.deleted || s.status === "辞退" || s.status === "承諾後辞退");
-  const filteredActive = activeList.filter((s) => listFilter === "all" || s.status === listFilter);
+  const filteredActive = activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s));
   const filteredRetired = retiredList.filter((s) =>
-    listFilter === "all" ? true
-    : listFilter === "削除済" ? s.deleted
-    : s.status === listFilter
+    matchesSearch(s) && (
+      listFilter === "all" ? true
+      : listFilter === "削除済" ? s.deleted
+      : s.status === listFilter
+    )
   );
   const showActiveSection = ["all", "内定", "承諾"].includes(listFilter);
   const showRetiredSection =
     listFilter === "all" ? retiredList.length > 0 : ["辞退", "承諾後辞退", "削除済"].includes(listFilter);
 
-  const targetCount =
-    target === "全員" ? activeStudents.length
+  // 配信対象。イベント別は "event:<eventId>:<group>"（group = yes/no/none）で表現
+  const isEventTarget = target.startsWith("event:");
+  const [, tEventId, tGroup] = isEventTarget ? target.split(":") : [];
+  const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
+  const groupLabelOf = (g) => (g === "yes" ? "出席者" : g === "no" ? "欠席者" : "未回答者");
+
+  const targetCount = isEventTarget
+    ? (targetEvent
+        ? activeStudents.filter((s) => {
+            const r = rsvpOf(s, targetEvent);
+            return tGroup === "yes" ? r === "出席" : tGroup === "no" ? r === "欠席" : r === "未回答";
+          }).length
+        : 0)
+    : target === "全員" ? activeStudents.length
     : target === "内定者（承諾前）" ? preAccept
     : target === "内定承諾者" ? accepted
     : activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; }).length;
+
+  const targetLabel = isEventTarget
+    ? `${targetEvent ? targetEvent.title : "イベント"}・${groupLabelOf(tGroup)}`
+    : target;
 
   // ---- アカウント配布 / 卒年度管理 ----
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -417,6 +442,13 @@ function AdminBody({
     setJourneys((prev) => ({ ...prev, [selectedYear]: list }));
     saveJourney(selectedYear, list);
   };
+  const moveJourney = (idx, dir) => {
+    const list = [...(journeys[selectedYear] || [])];
+    const j = idx + dir;
+    if (j < 0 || j >= list.length) return;
+    [list[idx], list[j]] = [list[j], list[idx]];
+    setYearJourneyAndSave(list);
+  };
   // 1ステップを更新して即保存（リンク種別のセレクトなど）
   const updateJourneyAndSave = (id, patch) => {
     const list = (journeys[selectedYear] || []).map((x) => (x.id === id ? { ...x, ...patch } : x));
@@ -482,8 +514,8 @@ function AdminBody({
     setSending(true);
     setBanner("");
     try {
-      const r = await lineBroadcast({ target, body: msg, grad: selectedYear });
-      setSent({ target, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
+      const r = await lineBroadcast({ target, targetLabel, body: msg, grad: selectedYear });
+      setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
       setMsg("");
     } catch (ex) {
       setBanner(`配信に失敗しました：${ex.message}`);
@@ -918,7 +950,13 @@ function AdminBody({
             <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
               {yearJourney.map((m, i) => (
                 <div key={m.id} className="flex items-start gap-2">
-                  <span className="text-xs font-bold text-gray-400 pt-2.5 w-5 shrink-0">{String(i + 1).padStart(2, "0")}</span>
+                  <div className="flex flex-col items-center shrink-0 pt-1">
+                    <button onClick={() => moveJourney(i, -1)} disabled={i === 0}
+                      aria-label="上へ移動" className="text-gray-400 disabled:opacity-25 p-0.5"><ChevronUp size={15} /></button>
+                    <span className="text-xs font-bold text-gray-400 w-5 text-center">{String(i + 1).padStart(2, "0")}</span>
+                    <button onClick={() => moveJourney(i, 1)} disabled={i === yearJourney.length - 1}
+                      aria-label="下へ移動" className="text-gray-400 disabled:opacity-25 p-0.5"><ChevronDown size={15} /></button>
+                  </div>
                   <div className="flex-1 space-y-1.5 min-w-0">
                     <input value={m.label} onChange={(e) => updateJourneyLocal(m.id, { label: e.target.value })} onBlur={persistJourney}
                       placeholder="ステップ名" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-bold" />
@@ -961,7 +999,7 @@ function AdminBody({
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed border-gray-300 text-gray-500">
                 + ステップを追加
               </button>
-              <p className="text-xs text-gray-400">変更は学生画面のホームに即時反映されます。</p>
+              <p className="text-xs text-gray-400">左の ▲▼ で順番を入れ替えられます。変更は学生画面のホームに即時反映されます。</p>
             </div>
           </div>
 
@@ -1092,6 +1130,20 @@ function AdminBody({
               </div>
             );
           })()}
+
+          <div className="mb-3">
+            <p className="text-xs font-bold text-gray-500 mb-1.5">検索</p>
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="名前・大学・住所・メール・電話など"
+                className="w-full border border-gray-300 rounded-lg pl-9 pr-9 py-2.5 text-sm" />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} aria-label="検索をクリア"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 p-0.5"><X size={15} /></button>
+              )}
+            </div>
+          </div>
 
           <div className="mb-4">
             <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（ステータス）</p>
@@ -1277,16 +1329,42 @@ function AdminBody({
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-2">配信対象</p>
+
+              {/* ステータス別 */}
+              <p className="text-[11px] font-bold text-gray-400 mb-1">ステータス別</p>
               <div className="flex flex-wrap gap-2">
                 {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
                   <button key={t} onClick={() => setTarget(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
-                    style={target === t ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
+                    style={!isEventTarget && target === t ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
                     {t}
                   </button>
                 ))}
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                対象：{targetCount}名（未連携者にはメールで自動送信）。辞退者は配信対象から自動的に除外されます。
+
+              {/* イベント参加状況で送る */}
+              <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">イベント参加状況で送る</p>
+              <select value={isEventTarget ? tEventId : ""}
+                onChange={(e) => setTarget(e.target.value ? `event:${e.target.value}:yes` : "全員")}
+                className="w-full border border-gray-300 rounded-lg p-2.5 text-xs font-bold bg-white">
+                <option value="">イベントを選択…</option>
+                {yearEvents.map((e) => (<option key={e.id} value={e.id}>{e.title}</option>))}
+              </select>
+              {isEventTarget && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {["yes", "no", "none"].map((g) => (
+                    <button key={g} onClick={() => setTarget(`event:${tEventId}:${g}`)} className="text-xs font-bold px-3 py-2 rounded-full border"
+                      style={tGroup === g ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
+                      {groupLabelOf(g)}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-xs font-bold mt-3" style={{ color: BRAND }}>
+                配信対象：{targetLabel}　{targetCount}名
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                未連携者にはメールで自動送信されます。辞退者は配信対象から自動的に除外されます。
               </p>
             </div>
 

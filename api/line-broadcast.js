@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
 
   try {
-    const { target, body, grad } = await readJson(req);
+    const { target, targetLabel, body, grad } = await readJson(req);
     const y = Number(grad);
     const text = String(body || "").trim();
     if (!text) return sendJson(res, 400, { error: "メッセージが空です。" });
@@ -35,7 +35,22 @@ export default async function handler(req, res) {
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
 
-    if (target === "内定者（承諾前）") {
+    if (typeof target === "string" && target.startsWith("event:")) {
+      // イベント参加状況で絞り込み： event:<eventId>:<group>（group = yes/no/none）
+      const [, eventId, group] = target.split(":");
+      const rsnap = await dbAdmin.collection("rsvps").where("eventId", "==", eventId).get();
+      const yes = new Set(), no = new Set();
+      rsnap.docs.forEach((d) => {
+        const r = d.data();
+        if (r.answer === "yes") yes.add(r.uid);
+        else if (r.answer === "no") no.add(r.uid);
+      });
+      recipients = recipients.filter((s) => {
+        if (group === "yes") return yes.has(s.id);
+        if (group === "no") return no.has(s.id);
+        return !yes.has(s.id) && !no.has(s.id); // none = 未回答
+      });
+    } else if (target === "内定者（承諾前）") {
       recipients = recipients.filter((s) => s.status === "内定");
     } else if (target === "内定承諾者") {
       recipients = recipients.filter((s) => s.status === "承諾");
@@ -72,7 +87,7 @@ export default async function handler(req, res) {
 
     // 配信ログ
     await dbAdmin.collection("broadcasts").add({
-      target: target || "全員",
+      target: targetLabel || target || "全員",
       body: text,
       grad: y,
       count: recipients.length,
