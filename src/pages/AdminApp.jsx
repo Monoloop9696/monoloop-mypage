@@ -1459,7 +1459,7 @@ function AdminBody({
                 <p className="text-xs font-bold text-gray-500">メッセージ</p>
                 <button onClick={() => setMsg((m) => m + "{name}")}
                   className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
-                  ＋ 名前を差し込む　{"{name}"}
+                  ＋ 名前を差し込む
                 </button>
               </div>
               <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={4}
