@@ -1520,21 +1520,12 @@ function AdminBody({
         const d = students.find((x) => x.id === detailStudent);
         if (!d) return null;
         const p = progressOf(d);
+        // 編集不可（自己申告の原本・ログインID・自動集計）はビュー専用
         const rows = [
           ["卒年度", `${d.grad || 2027}年卒`],
           ["ステータス", statusLabel(d)],
-          ["大学", d.univ || "-"],
           ["生年月日", d.birth || "-"],
           ["メールアドレス", d.email || "-"],
-          ["電話番号", d.phone || "-"],
-          ["郵便番号", d.zip ? `〒${d.zip}` : "-"],
-          ["住所", d.address || "-"],
-          ...(d.livesAtHome
-            ? [["実家住所", "現住所と同じ（実家在住）"]]
-            : [
-                ["実家の郵便番号", d.homeZip ? `〒${d.homeZip}` : "-"],
-                ["実家の住所", d.homeAddress || "-"],
-              ]),
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
         ];
@@ -1554,10 +1545,10 @@ function AdminBody({
               </div>
               {/* スクロール領域：情報のみスクロール */}
               <div className="p-5 pt-3 overflow-y-auto">
-                <div className="pb-3 mb-1 border-b border-gray-100">
-                  <p className="text-xs text-gray-500 mb-1">フリガナ<span className="text-gray-400">（管理者が編集できます）</span></p>
-                  <KanaEditor key={d.id} student={d} setBanner={setBanner} />
-                </div>
+                <p className="text-xs font-bold text-gray-500 mb-1.5">編集できる項目</p>
+                <StudentEditor key={d.id} student={d} setBanner={setBanner} />
+
+                <p className="text-xs font-bold text-gray-500 mt-4 mb-1">その他（編集不可）</p>
                 <div className="divide-y divide-gray-100">
                   {rows.map(([k, v]) => (
                     <div key={k} className="py-2.5 flex justify-between gap-3 text-sm">
@@ -1566,7 +1557,7 @@ function AdminBody({
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-gray-400 mt-3 leading-relaxed">住所・生年月日などは学生本人がマイページ登録時に入力した情報です。</p>
+                <p className="text-xs text-gray-400 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
               </div>
             </div>
           </div>
@@ -1627,24 +1618,63 @@ function AdminBody({
   );
 }
 
-// 学生のフリガナを管理者が編集する
-function KanaEditor({ student, setBanner }) {
-  const [val, setVal] = useState(student.kana || "");
+// 学生の連絡先などを管理者が編集する（氏名・生年月日・メールは編集不可）
+function StudentEditor({ student, setBanner }) {
+  const [d, setD] = useState({
+    kana: student.kana || "", univ: student.univ || "", phone: student.phone || "",
+    zip: student.zip || "", address: student.address || "",
+    livesAtHome: student.livesAtHome === true,
+    homeZip: student.homeZip || "", homeAddress: student.homeAddress || "",
+  });
   const [saving, setSaving] = useState(false);
-  const dirty = val.trim() !== (student.kana || "");
+  const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
+
+  const zipRe = /^\d{3}-\d{4}$/;
+  const phoneRe = /^\d{2,4}-\d{2,4}-\d{3,4}$/;
+
   const save = async () => {
+    if (d.phone.trim() && !phoneRe.test(d.phone.trim())) { setBanner("電話番号はハイフン入りで入力してください（例：090-1234-5678）。"); return; }
+    if (d.zip.trim() && !zipRe.test(d.zip.trim())) { setBanner("郵便番号はハイフン入りで入力してください（例：123-4567）。"); return; }
+    if (!d.livesAtHome && d.homeZip.trim() && !zipRe.test(d.homeZip.trim())) { setBanner("実家の郵便番号はハイフン入りで入力してください（例：123-4567）。"); return; }
     setSaving(true);
-    try { await updateStudent(student.id, { kana: val.trim() }); }
-    catch (ex) { setBanner(`フリガナの保存に失敗しました：${ex.message}`); }
+    try {
+      await updateStudent(student.id, {
+        kana: d.kana.trim(), univ: d.univ.trim(), phone: d.phone.trim(),
+        zip: d.zip.trim(), address: d.address.trim(),
+        livesAtHome: d.livesAtHome,
+        homeZip: d.livesAtHome ? d.zip.trim() : d.homeZip.trim(),
+        homeAddress: d.livesAtHome ? d.address.trim() : d.homeAddress.trim(),
+      });
+      setBanner("");
+    } catch (ex) { setBanner(`保存に失敗しました：${ex.message}`); }
     finally { setSaving(false); }
   };
+
+  const L = ({ children }) => <p className="text-[11px] font-bold text-gray-400 mb-1">{children}</p>;
+  const cls = "w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm";
+
   return (
-    <div className="flex gap-2 items-center">
-      <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="サトウ ミサキ"
-        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
-      <button onClick={save} disabled={!dirty || saving}
-        className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 shrink-0" style={{ background: BRAND }}>
-        {saving ? "保存中…" : dirty ? "保存" : "保存済み"}
+    <div className="space-y-2.5">
+      <div><L>フリガナ</L><input value={d.kana} onChange={(e) => set("kana", e.target.value)} placeholder="サトウ ミサキ" className={cls} /></div>
+      <div><L>大学・学部</L><input value={d.univ} onChange={(e) => set("univ", e.target.value)} placeholder="早稲田大学 商学部" className={cls} /></div>
+      <div><L>電話番号（ハイフン必須）</L><input value={d.phone} onChange={(e) => set("phone", e.target.value)} placeholder="090-1234-5678" className={cls} /></div>
+      <div className="grid grid-cols-3 gap-2">
+        <div><L>郵便番号</L><input value={d.zip} onChange={(e) => set("zip", e.target.value)} placeholder="123-4567" className={cls} /></div>
+        <div className="col-span-2"><L>現住所</L><input value={d.address} onChange={(e) => set("address", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-gray-500">
+        <input type="checkbox" checked={d.livesAtHome} onChange={(e) => set("livesAtHome", e.target.checked)} />
+        実家に住んでいる（実家＝現住所と同じ）
+      </label>
+      {!d.livesAtHome && (
+        <div className="grid grid-cols-3 gap-2">
+          <div><L>実家の郵便番号</L><input value={d.homeZip} onChange={(e) => set("homeZip", e.target.value)} placeholder="123-4567" className={cls} /></div>
+          <div className="col-span-2"><L>実家の住所</L><input value={d.homeAddress} onChange={(e) => set("homeAddress", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
+        </div>
+      )}
+      <button onClick={save} disabled={saving}
+        className="w-full py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+        {saving ? "保存中…" : "編集内容を保存"}
       </button>
     </div>
   );

@@ -102,6 +102,21 @@ export default function Signup({ year }) {
       setRegError("実家の住所を入力してください（実家にお住まいの場合はチェックを入れてください）。");
       return;
     }
+    // 電話番号・郵便番号はハイフン必須
+    const phoneRe = /^\d{2,4}-\d{2,4}-\d{3,4}$/;
+    const zipRe = /^\d{3}-\d{4}$/;
+    if (!phoneRe.test(f.phone.trim())) {
+      setRegError("電話番号はハイフン入りで入力してください（例：090-1234-5678）。");
+      return;
+    }
+    if (f.zip.trim() && !zipRe.test(f.zip.trim())) {
+      setRegError("郵便番号はハイフン入りで入力してください（例：123-4567）。");
+      return;
+    }
+    if (!livesAtHome && f.homeZip.trim() && !zipRe.test(f.homeZip.trim())) {
+      setRegError("実家の郵便番号はハイフン入りで入力してください（例：123-4567）。");
+      return;
+    }
     if (changeEmail && !newEmail.includes("@")) {
       setRegError("変更後のメールアドレスの形式が正しくありません。");
       return;
