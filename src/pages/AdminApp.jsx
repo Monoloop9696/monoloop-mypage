@@ -222,6 +222,9 @@ function AdminBody({
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
+  const [editDetail, setEditDetail] = useState(false);
+  // 学生を開き直すたびに編集モードは解除（開いた直後は必ず閲覧表示）
+  useEffect(() => { setEditDetail(false); }, [detailStudent]);
   const [listFilter, setListFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
@@ -1520,44 +1523,69 @@ function AdminBody({
         const d = students.find((x) => x.id === detailStudent);
         if (!d) return null;
         const p = progressOf(d);
-        // 編集不可（自己申告の原本・ログインID・自動集計）はビュー専用
+        // 閲覧表示（従来どおりの並び）。フリガナ・郵便番号・住所も含めて一覧表示
         const rows = [
+          ["フリガナ", d.kana || "-"],
           ["卒年度", `${d.grad || 2027}年卒`],
           ["ステータス", statusLabel(d)],
+          ["大学", d.univ || "-"],
           ["生年月日", d.birth || "-"],
           ["メールアドレス", d.email || "-"],
+          ["電話番号", d.phone || "-"],
+          ["郵便番号", d.zip ? `〒${d.zip}` : "-"],
+          ["住所", d.address || "-"],
+          ...(d.livesAtHome
+            ? [["実家住所", "現住所と同じ（実家在住）"]]
+            : [
+                ["実家の郵便番号", d.homeZip ? `〒${d.homeZip}` : "-"],
+                ["実家の住所", d.homeAddress || "-"],
+              ]),
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
         ];
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-6">
             <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
-              {/* 固定ヘッダー：右上に閉じる（戻る）ボタンを常時表示。スクロールで隠れない */}
-              <div className="flex items-start justify-between gap-3 p-5 pb-3 border-b border-gray-100 shrink-0">
+              {/* 固定ヘッダー：名前の横に編集、右上に閉じる（スクロールで隠れない） */}
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
                   <p className="text-xs text-gray-400">内定者情報</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{d.name}</p>
                 </div>
-                <button onClick={() => setDetailStudent(null)} aria-label="閉じる"
-                  className="shrink-0 -mt-1 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100">
-                  <X size={20} />
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {!editDetail && (
+                    <button onClick={() => setEditDetail(true)}
+                      className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                      編集
+                    </button>
+                  )}
+                  <button onClick={() => setDetailStudent(null)} aria-label="閉じる"
+                    className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100">
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
               {/* スクロール領域：情報のみスクロール */}
               <div className="p-5 pt-3 overflow-y-auto">
-                <p className="text-xs font-bold text-gray-500 mb-1.5">編集できる項目</p>
-                <StudentEditor key={d.id} student={d} setBanner={setBanner} />
-
-                <p className="text-xs font-bold text-gray-500 mt-4 mb-1">その他（編集不可）</p>
-                <div className="divide-y divide-gray-100">
-                  {rows.map(([k, v]) => (
-                    <div key={k} className="py-2.5 flex justify-between gap-3 text-sm">
-                      <span className="text-xs text-gray-500 pt-0.5 shrink-0">{k}</span>
-                      <span className="font-medium text-right break-all">{v}</span>
+                {editDetail ? (
+                  <>
+                    <p className="text-xs font-bold text-gray-500 mb-1.5">編集できる項目</p>
+                    <StudentEditor key={d.id} student={d} setBanner={setBanner} onDone={() => setEditDetail(false)} />
+                    <p className="text-xs text-gray-400 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="divide-y divide-gray-100">
+                      {rows.map(([k, v]) => (
+                        <div key={k} className="py-2.5 flex justify-between gap-3 text-sm">
+                          <span className="text-xs text-gray-500 pt-0.5 shrink-0">{k}</span>
+                          <span className="font-medium text-right break-all">{v}</span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <p className="text-xs text-gray-400 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
+                    <p className="text-xs text-gray-400 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1619,7 +1647,7 @@ function AdminBody({
 }
 
 // 学生の連絡先などを管理者が編集する（氏名・生年月日・メールは編集不可）
-function StudentEditor({ student, setBanner }) {
+function StudentEditor({ student, setBanner, onDone }) {
   const [d, setD] = useState({
     kana: student.kana || "", univ: student.univ || "", phone: student.phone || "",
     zip: student.zip || "", address: student.address || "",
@@ -1646,6 +1674,7 @@ function StudentEditor({ student, setBanner }) {
         homeAddress: d.livesAtHome ? d.address.trim() : d.homeAddress.trim(),
       });
       setBanner("");
+      if (onDone) onDone();
     } catch (ex) { setBanner(`保存に失敗しました：${ex.message}`); }
     finally { setSaving(false); }
   };
@@ -1672,10 +1701,18 @@ function StudentEditor({ student, setBanner }) {
           <div className="col-span-2"><L>実家の住所</L><input value={d.homeAddress} onChange={(e) => set("homeAddress", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
         </div>
       )}
-      <button onClick={save} disabled={saving}
-        className="w-full py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-        {saving ? "保存中…" : "編集内容を保存"}
-      </button>
+      <div className="flex gap-2">
+        <button onClick={save} disabled={saving}
+          className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+          {saving ? "保存中…" : "編集内容を保存"}
+        </button>
+        {onDone && (
+          <button onClick={onDone} disabled={saving}
+            className="px-3 py-2 rounded-lg text-xs font-bold border border-gray-300 text-gray-500 bg-white">
+            取消
+          </button>
+        )}
+      </div>
     </div>
   );
 }
