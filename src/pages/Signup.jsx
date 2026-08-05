@@ -30,7 +30,7 @@ export default function Signup({ year }) {
   const [code, setCode] = useState("");
   const [changeEmail, setChangeEmail] = useState(false);
   const [newEmail, setNewEmail] = useState("");
-  const [f, setF] = useState({ name: "", birth: "", univ: "", phone: "", zip: "", address: "", homeZip: "", homeAddress: "" });
+  const [f, setF] = useState({ name: "", kana: "", birth: "", univ: "", phone: "", zip: "", address: "", homeZip: "", homeAddress: "" });
   const [livesAtHome, setLivesAtHome] = useState(false);
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
@@ -94,7 +94,7 @@ export default function Signup({ year }) {
   // Step3: アカウント作成
   const completeReg = async () => {
     setRegError("");
-    if (!f.name || !f.birth || !f.univ || !f.phone || !f.address) {
+    if (!f.name || !f.kana || !f.birth || !f.univ || !f.phone || !f.address) {
       setRegError("必須項目をすべて入力してください。");
       return;
     }
@@ -134,6 +134,7 @@ export default function Signup({ year }) {
         privacyConsent: true,
         profile: {
           name: f.name.trim(),
+          kana: f.kana.trim(),
           birth: f.birth,
           univ: f.univ.trim(),
           phone: f.phone.trim(),
@@ -247,6 +248,11 @@ export default function Signup({ year }) {
                 <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>氏名<span style={{ color: GOLD }}> *</span></p>
                 <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })}
                   placeholder="佐藤 美咲" className="w-full p-3.5 text-sm bg-white" style={inp} />
+              </div>
+              <div>
+                <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>フリガナ<span style={{ color: GOLD }}> *</span></p>
+                <input value={f.kana} onChange={(e) => setF({ ...f, kana: e.target.value })}
+                  placeholder="サトウ ミサキ" className="w-full p-3.5 text-sm bg-white" style={inp} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

@@ -254,10 +254,10 @@ function AdminBody({
   const answerOf = (st, s) => respMap[`${s.id}_${st.id}`] || null;
 
   // ---- 年度スコープ ----
-  // 氏名を常にあいうえお順（日本語ロケール照合）で。ここを起点に一覧・出欠グループ・CSVも同順になる
+  // 常にあいうえお順。フリガナ(kana)があればそれで、無ければ氏名で照合。ここを起点に一覧・出欠グループ・CSVも同順
   const yearStudents = students
     .filter((s) => (s.grad || 2027) === selectedYear)
-    .sort((a, b) => (a.name || "").localeCompare(b.name || "", "ja"));
+    .sort((a, b) => (a.kana || a.name || "").localeCompare(b.kana || b.name || "", "ja"));
   const activeStudents = yearStudents.filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
   const totalActive = activeStudents.length;
   const accepted = activeStudents.filter((s) => s.status === "承諾").length;
@@ -557,10 +557,10 @@ function AdminBody({
     : s.status === "辞退" ? "内定辞退" : "承諾後辞退";
 
   const exportStudentsCsv = () => {
-    const header = ["氏名", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗"];
+    const header = ["氏名", "フリガナ", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗"];
     const rows = yearStudents.map((s) => {
       const p = progressOf(s);
-      return [s.name, s.univ, `${s.grad || selectedYear}`, statusLabel(s), s.email, s.phone, s.zip, s.address, s.birth, s.lineUserId ? "連携済" : "未連携", `${p.done}/${p.total}`];
+      return [s.name, s.kana || "", s.univ, `${s.grad || selectedYear}`, statusLabel(s), s.email, s.phone, s.zip, s.address, s.birth, s.lineUserId ? "連携済" : "未連携", `${p.done}/${p.total}`];
     });
     downloadCsv(`内定者一覧_${selectedYear}卒.csv`, [header, ...rows]);
   };
@@ -1553,7 +1553,11 @@ function AdminBody({
                 </button>
               </div>
               {/* スクロール領域：情報のみスクロール */}
-              <div className="p-5 pt-2 overflow-y-auto">
+              <div className="p-5 pt-3 overflow-y-auto">
+                <div className="pb-3 mb-1 border-b border-gray-100">
+                  <p className="text-xs text-gray-500 mb-1">フリガナ<span className="text-gray-400">（管理者が編集できます）</span></p>
+                  <KanaEditor key={d.id} student={d} setBanner={setBanner} />
+                </div>
                 <div className="divide-y divide-gray-100">
                   {rows.map(([k, v]) => (
                     <div key={k} className="py-2.5 flex justify-between gap-3 text-sm">
@@ -1619,6 +1623,29 @@ function AdminBody({
           );
         })}
       </nav>
+    </div>
+  );
+}
+
+// 学生のフリガナを管理者が編集する
+function KanaEditor({ student, setBanner }) {
+  const [val, setVal] = useState(student.kana || "");
+  const [saving, setSaving] = useState(false);
+  const dirty = val.trim() !== (student.kana || "");
+  const save = async () => {
+    setSaving(true);
+    try { await updateStudent(student.id, { kana: val.trim() }); }
+    catch (ex) { setBanner(`フリガナの保存に失敗しました：${ex.message}`); }
+    finally { setSaving(false); }
+  };
+  return (
+    <div className="flex gap-2 items-center">
+      <input value={val} onChange={(e) => setVal(e.target.value)} placeholder="サトウ ミサキ"
+        className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+      <button onClick={save} disabled={!dirty || saving}
+        className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 shrink-0" style={{ background: BRAND }}>
+        {saving ? "保存中…" : dirty ? "保存" : "保存済み"}
+      </button>
     </div>
   );
 }

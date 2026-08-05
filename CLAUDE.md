@@ -56,7 +56,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 
 ## 4. データモデル（Firestore）
 
-- `students/{uid}`: name, univ, birth, email, phone, zip, address, grad, joinDate, status(内定/承諾/辞退/承諾後辞退), deleted, lineUserId, linkCode, createdAt
+- `students/{uid}`: name, kana(フリガナ・あいうえお順の並び替えに使用), univ, birth, email, phone, zip, address, livesAtHome, homeZip, homeAddress, grad, joinDate, status(内定/承諾/辞退/承諾後辞退), deleted, lineUserId, linkCode, createdAt
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
 - `events/{id}`: title, dateStr, time, date(Timestamp), place, deadline, copy, grad, published
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no)
@@ -66,7 +66,8 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `notices/{id}`: text, createdAt（全学年に表示）
 - `articles/{id}`: title, body, grad(null=全学年), published, thumb, createdAt
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order
-- `templates/{id}` / `broadcasts/{id}` / `authCodes/{email}`(サーバー専用)
+- `templates/{id}`: LINE配信テンプレ。本体は {name, body, categoryId, order}、種別(カテゴリ)は同コレクション内の {_type:"category", name, order} ドキュメントとして保持（新コレクションを作らずルール追加デプロイを回避）
+- `broadcasts/{id}` / `authCodes/{email}`(サーバー専用)
 
 ## 5. 環境変数 / 秘密情報
 

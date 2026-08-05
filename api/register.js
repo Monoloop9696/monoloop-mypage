@@ -76,6 +76,7 @@ export default async function handler(req, res) {
     // students ドキュメント作成
     await dbAdmin.collection("students").doc(userRecord.uid).set({
       name: profile.name,
+      kana: profile.kana || "",
       univ: profile.univ,
       birth: profile.birth,
       email: accountEmail,
