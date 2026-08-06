@@ -49,12 +49,9 @@ export default async function handler(req, res) {
     events.map(async (ev) => {
       try {
         const userId = ev.source && ev.source.userId;
-        if (ev.type === "follow" && ev.replyToken) {
-          await replyMessage(
-            ev.replyToken,
-            "モノ・ループ公式アカウントへようこそ。マイページの「LINE連携」に表示されている連携コード（MN-XXXX）をこのトークに送信してください。"
-          );
-        } else if (ev.type === "message" && ev.message && ev.message.type === "text" && ev.replyToken) {
+        // 公式LINEの友だち追加(follow)時は自動メッセージを送らない。
+        // メッセージ送信はコード送信による「連携完了時」と、ユーザーが自分でメッセージを送った場合の案内のみ。
+        if (ev.type === "message" && ev.message && ev.message.type === "text" && ev.replyToken) {
           const text = String(ev.message.text || "").trim().toUpperCase();
           if (CODE_RE.test(text) && userId) {
             await bindLinkCode(text, userId, ev.replyToken);
