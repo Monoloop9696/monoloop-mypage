@@ -14,16 +14,11 @@ async function bindLinkCode(code, lineUserId, replyToken) {
     .limit(1)
     .get();
 
-  if (q.empty) {
-    await replyMessage(replyToken, "連携コードが見つかりませんでした。マイページの「LINE連携」に表示されているコード（MN-XXXX）をご確認のうえ、もう一度送信してください。");
-    return;
-  }
+  // コードが見つからない・無効アカウントの場合は返信せず終了（送信は連携完了時のみ）
+  if (q.empty) return;
   const docRef = q.docs[0].ref;
   const st = q.docs[0].data();
-  if (st.deleted) {
-    await replyMessage(replyToken, "このアカウントは現在ご利用いただけません。採用担当までお問い合わせください。");
-    return;
-  }
+  if (st.deleted) return;
   await docRef.update({ lineUserId });
   await replyMessage(replyToken, `${st.name || ""}さん、LINE連携が完了しました。今後、イベントのリマインドや大切なお知らせをこちらにお届けします。`);
 }
@@ -49,17 +44,12 @@ export default async function handler(req, res) {
     events.map(async (ev) => {
       try {
         const userId = ev.source && ev.source.userId;
-        // 公式LINEの友だち追加(follow)時は自動メッセージを送らない。
-        // メッセージ送信はコード送信による「連携完了時」と、ユーザーが自分でメッセージを送った場合の案内のみ。
+        // メッセージは「連携完了時」の1通のみ。友だち追加(follow)や
+        // その他のユーザー送信メッセージには返信しない。
         if (ev.type === "message" && ev.message && ev.message.type === "text" && ev.replyToken) {
           const text = String(ev.message.text || "").trim().toUpperCase();
           if (CODE_RE.test(text) && userId) {
             await bindLinkCode(text, userId, ev.replyToken);
-          } else {
-            await replyMessage(
-              ev.replyToken,
-              "連携するには、マイページの「LINE連携」に表示されている連携コード（MN-XXXX）を送信してください。"
-            );
           }
         }
       } catch {
