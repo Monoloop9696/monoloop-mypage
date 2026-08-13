@@ -18,6 +18,7 @@ import {
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
+  loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadline: "" };
@@ -154,6 +155,8 @@ function AdminBody({
   const [artBusy, setArtBusy] = useState(false);
   const [artErr, setArtErr] = useState("");
   const [artDelId, setArtDelId] = useState(null);
+  const [editingArticleId, setEditingArticleId] = useState(null); // null=新規投稿モード
+  const [artNotify, setArtNotify] = useState(true); // 投稿時に対象者の公式LINEへ通知
   useEffect(() => listenAllArticles(setArticles), []);
 
   const onPickImages = async (e) => {
@@ -173,28 +176,69 @@ function AdminBody({
     }
   };
   const removeArtImage = (i) => setArtImages((prev) => prev.filter((_, idx) => idx !== i));
+  const resetArtForm = () => {
+    setArtTitle(""); setArtBody(""); setArtGrad(""); setArtImages([]); setEditingArticleId(null);
+  };
+  // 記事投稿時に対象者の公式LINEへお知らせ（LINEのみ・メールは送らない）
+  const notifyArticleLine = async (title, grad) => {
+    const body = `【新着記事】${title}\nマイページのNEWSでご覧いただけます。`;
+    const years = grad ? [grad] : cohorts.map((c) => c.year);
+    for (const y of years) {
+      try { await lineBroadcast({ target: "全員", targetLabel: `記事「${title}」`, body, grad: y, lineOnly: true }); }
+      catch { /* 通知失敗でも投稿自体は成功させる */ }
+    }
+  };
   const submitArticle = async () => {
     if (!artTitle.trim()) { setArtErr("タイトルを入力してください。"); return; }
     setArtErr("");
     setArtBusy(true);
     try {
       const grad = artGrad ? Number(artGrad) : null;
-      const id = await addArticle({ title: artTitle.trim(), body: artBody, grad, published: true });
-      for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
-      if (artImages[0]) {
-        const thumb = await dataUrlToThumb(artImages[0]);
-        if (thumb) await updateArticle(id, { thumb });
+      const title = artTitle.trim();
+      if (editingArticleId) {
+        // 更新：本文等を更新し、画像は一旦全削除して現在の内容で再登録
+        const id = editingArticleId;
+        await updateArticle(id, { title, body: artBody, grad });
+        const existing = await loadArticleImages(id);
+        for (const im of existing) await deleteArticleImage(id, im.id);
+        for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
+        const thumb = artImages[0] ? await dataUrlToThumb(artImages[0]) : null;
+        await updateArticle(id, { thumb: thumb || null });
+      } else {
+        const id = await addArticle({ title, body: artBody, grad, published: true });
+        for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
+        if (artImages[0]) {
+          const thumb = await dataUrlToThumb(artImages[0]);
+          if (thumb) await updateArticle(id, { thumb });
+        }
+        if (artNotify) await notifyArticleLine(title, grad);
       }
-      setArtTitle(""); setArtBody(""); setArtGrad(""); setArtImages([]);
+      resetArtForm();
     } catch (ex) {
-      setArtErr(`投稿に失敗しました：${ex.message}`);
+      setArtErr(`${editingArticleId ? "更新" : "投稿"}に失敗しました：${ex.message}`);
     } finally {
       setArtBusy(false);
     }
   };
+  const startEditArticle = async (a) => {
+    setArtErr("");
+    setEditingArticleId(a.id);
+    setArtTitle(a.title || "");
+    setArtBody(a.body || "");
+    setArtGrad(a.grad ? String(a.grad) : "");
+    setArtImages([]);
+    setArtBusy(true);
+    try { const imgs = await loadArticleImages(a.id); setArtImages(imgs.map((im) => im.data)); }
+    catch { /* 画像読み込み失敗は空のまま */ }
+    finally { setArtBusy(false); }
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const doDeleteArticle = async (id) => {
     setArtDelId(null);
-    try { await deleteArticleCascade(id); } catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+    try {
+      await deleteArticleCascade(id);
+      if (editingArticleId === id) resetArtForm();
+    } catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
 
   // cohorts 読み込み後、選択年度を初期化／整合
@@ -1275,7 +1319,7 @@ function AdminBody({
 
       {tab === "news" && (
         <div className="px-4 pt-4 space-y-4">
-          <SectionTitle>NEWS記事を投稿</SectionTitle>
+          <SectionTitle>{editingArticleId ? "記事を編集" : "NEWS記事を投稿"}</SectionTitle>
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-1">タイトル<span className="text-red-500 ml-0.5">*</span></p>
@@ -1311,12 +1355,26 @@ function AdminBody({
                 </div>
               )}
             </div>
+            {!editingArticleId && (
+              <label className="flex items-start gap-2 text-xs" style={{ color: INK }}>
+                <input type="checkbox" checked={artNotify} onChange={(e) => setArtNotify(e.target.checked)} className="mt-0.5" />
+                <span>投稿時に<span className="font-bold" style={{ color: LINE_GREEN }}>対象者の公式LINE</span>へお知らせを送る（LINE連携済みの方のみ。メールは送りません）</span>
+              </label>
+            )}
             {artErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{artErr}</p>}
-            {artBusy && <p className="text-xs text-gray-400">画像を処理中…</p>}
-            <button disabled={!artTitle.trim() || artBusy} onClick={submitArticle}
-              className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-              {artBusy ? "処理中…" : "記事を投稿する（学生に即時公開）"}
-            </button>
+            {artBusy && <p className="text-xs text-gray-400">処理中…</p>}
+            <div className="flex gap-2">
+              <button disabled={!artTitle.trim() || artBusy} onClick={submitArticle}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+                {artBusy ? "処理中…" : editingArticleId ? "記事を更新する" : (artNotify ? "投稿してLINE通知（即時公開）" : "記事を投稿する（即時公開）")}
+              </button>
+              {editingArticleId && (
+                <button onClick={resetArtForm} disabled={artBusy}
+                  className="px-3 py-2.5 rounded-xl text-sm font-bold border border-gray-300 text-gray-500 bg-white">
+                  取消
+                </button>
+              )}
+            </div>
           </div>
 
           <SectionTitle>投稿済みの記事</SectionTitle>
@@ -1341,6 +1399,10 @@ function AdminBody({
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button onClick={() => startEditArticle(a)}
+                      className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                      編集
+                    </button>
                     <button onClick={() => updateArticle(a.id, { published: !a.published })}
                       className="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">
                       {a.published ? "非公開に" : "公開する"}

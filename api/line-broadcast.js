@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
 
   try {
-    const { target, targetLabel, body, grad } = await readJson(req);
+    const { target, targetLabel, body, grad, lineOnly } = await readJson(req);
     const y = Number(grad);
     const text = String(body || "").trim();
     if (!text) return sendJson(res, 400, { error: "メッセージが空です。" });
@@ -86,17 +86,20 @@ export default async function handler(req, res) {
       }
     }
 
+    // lineOnly の場合はメール送信をスキップ（記事のLINE通知など、LINEのみ送りたいケース）
     let mailCount = 0;
-    for (const s of mailUsers) {
-      try {
-        await sendEmail({
-          to: s.email,
-          subject: "【モノ・ループ】お知らせ",
-          text: `${s.name || ""}さん\n\n${personalize(text, s)}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
-        });
-        mailCount += 1;
-      } catch {
-        /* 個別メール失敗はスキップ */
+    if (!lineOnly) {
+      for (const s of mailUsers) {
+        try {
+          await sendEmail({
+            to: s.email,
+            subject: "【モノ・ループ】お知らせ",
+            text: `${s.name || ""}さん\n\n${personalize(text, s)}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
+          });
+          mailCount += 1;
+        } catch {
+          /* 個別メール失敗はスキップ */
+        }
       }
     }
 
