@@ -359,6 +359,7 @@ function AdminBody({
 
   const activeList = activeStudents;
   const retiredList = yearStudents.filter((s) => s.deleted || s.status === "辞退" || s.status === "承諾後辞退");
+  const testList = yearStudents.filter((s) => !s.deleted && s.status === "テスト");
   const filteredActive = activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s));
   const filteredRetired = retiredList.filter((s) =>
     matchesSearch(s) && (
@@ -367,7 +368,9 @@ function AdminBody({
       : s.status === listFilter
     )
   );
+  const filteredTest = testList.filter(matchesSearch);
   const showActiveSection = ["all", "内定", "承諾"].includes(listFilter);
+  const showTestSection = listFilter === "all" ? testList.length > 0 : listFilter === "テスト";
   const showRetiredSection =
     listFilter === "all" ? retiredList.length > 0 : ["辞退", "承諾後辞退", "削除済"].includes(listFilter);
 
@@ -622,6 +625,7 @@ function AdminBody({
   // ---- CSV ----
   const statusLabel = (s) =>
     s.deleted && s.status !== "辞退" && s.status !== "承諾後辞退" ? "アカウント削除済"
+    : s.status === "テスト" ? "テスト"
     : s.status === "内定" ? "内定（承諾前）"
     : s.status === "承諾" ? "内定承諾済"
     : s.status === "辞退" ? "内定辞退" : "承諾後辞退";
@@ -1272,6 +1276,7 @@ function AdminBody({
               <option value="承諾">承諾済</option>
               <option value="辞退">内定辞退</option>
               <option value="承諾後辞退">承諾後辞退</option>
+              <option value="テスト">テスト</option>
               <option value="削除済">削除済</option>
             </select>
           </div>
@@ -1308,11 +1313,12 @@ function AdminBody({
                         <>
                           <select value={s.status} onChange={(e) => changeStatus(s.id, e.target.value)} aria-label={`${s.name}のステータス`}
                             className="text-xs font-bold rounded-lg border px-2 py-1.5"
-                            style={s.status === "承諾" ? { borderColor: BRAND, background: BRAND_LIGHT, color: BRAND } : s.status === "内定" ? { borderColor: "#F5D08C", background: "#FFF7E6", color: "#B45309" } : { borderColor: "#D1D5DB", background: "#F3F4F6", color: "#6B7280" }}>
+                            style={s.status === "承諾" ? { borderColor: BRAND, background: BRAND_LIGHT, color: BRAND } : s.status === "内定" ? { borderColor: "#F5D08C", background: "#FFF7E6", color: "#B45309" } : s.status === "テスト" ? { borderColor: "#C7B8DE", background: "#F3EEFA", color: "#7C5FB0" } : { borderColor: "#D1D5DB", background: "#F3F4F6", color: "#6B7280" }}>
                             <option value="内定">内定（承諾前）</option>
                             <option value="承諾">内定承諾済</option>
                             <option value="辞退">内定辞退</option>
                             <option value="承諾後辞退">承諾後辞退</option>
+                            <option value="テスト">テスト</option>
                           </select>
                           <button onClick={() => setConfirmDeleteId(s.id)} aria-label={`${s.name}のアカウントを削除`} className="text-gray-300 p-1"><Trash2 size={15} /></button>
                         </>
@@ -1321,6 +1327,45 @@ function AdminBody({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {showTestSection && (
+            <div className="mt-5">
+              <SectionTitle>テストアカウント</SectionTitle>
+              <div className="bg-white border rounded-xl divide-y divide-gray-100" style={{ borderColor: "#E4D9F2" }}>
+                {filteredTest.length === 0 && <p className="p-4 text-xs text-gray-400">該当する学生がいません</p>}
+                {filteredTest.map((s) => (
+                  <div key={s.id} className="p-3 flex items-center justify-between gap-2">
+                    <button onClick={() => setDetailStudent(s.id)} className="min-w-0 text-left">
+                      <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} style={{ color: "#7C5FB0" }} /></p>
+                      <p className="text-xs text-gray-500">{s.univ}</p>
+                      <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "#F3EEFA", color: "#7C5FB0" }}>テスト</span>
+                    </button>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {confirmDeleteId === s.id ? (
+                        <>
+                          <button onClick={() => trashDelete(s.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                        </>
+                      ) : (
+                        <>
+                          <select value={s.status} onChange={(e) => changeStatus(s.id, e.target.value)} aria-label={`${s.name}のステータス`}
+                            className="text-xs font-bold rounded-lg border px-2 py-1.5" style={{ borderColor: "#C7B8DE", background: "#F3EEFA", color: "#7C5FB0" }}>
+                            <option value="内定">内定（承諾前）</option>
+                            <option value="承諾">内定承諾済</option>
+                            <option value="辞退">内定辞退</option>
+                            <option value="承諾後辞退">承諾後辞退</option>
+                            <option value="テスト">テスト</option>
+                          </select>
+                          <button onClick={() => setConfirmDeleteId(s.id)} aria-label={`${s.name}のアカウントを削除`} className="text-gray-300 p-1"><Trash2 size={15} /></button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">テストアカウントは内定者数・LINE一括配信・出欠集計の対象外です。動作確認用にお使いください。</p>
             </div>
           )}
 
