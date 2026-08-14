@@ -309,6 +309,14 @@ export async function loadResponsesForSurvey(surveyId) {
   return snap.docs.map((d) => d.data());
 }
 
+// LINE/メール一括配信の履歴（管理者のみ read 可）。新しい順
+export async function loadBroadcasts() {
+  const snap = await getDocs(collection(db, "broadcasts"));
+  return snap.docs
+    .map(withId)
+    .sort((a, b) => (b.sentAt?.toMillis?.() || 0) - (a.sentAt?.toMillis?.() || 0));
+}
+
 export async function loadAllResponses() {
   const snap = await getDocs(collection(db, "responses"));
   return snap.docs.map((d) => d.data());

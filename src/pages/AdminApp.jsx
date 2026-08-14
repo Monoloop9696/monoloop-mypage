@@ -14,7 +14,7 @@ import {
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
   addSurveyTemplate, deleteSurveyTemplate,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -175,6 +175,14 @@ function AdminBody({
   };
   useEffect(() => { loadQuestions(); }, []);
   const unansweredQ = questions.filter((q) => !q.answer).length;
+
+  // ---- 配信履歴 ----
+  const [broadcasts, setBroadcasts] = useState([]);
+  const refreshBroadcasts = async () => {
+    try { setBroadcasts(await loadBroadcasts()); }
+    catch (ex) { setBanner(`配信履歴の取得に失敗しました：${ex.message}`); }
+  };
+  useEffect(() => { if (tab === "line") refreshBroadcasts(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -675,6 +683,7 @@ function AdminBody({
     try {
       const r = await lineBroadcast({ target, targetLabel, body: msg, grad: selectedYear });
       setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
+      refreshBroadcasts();
       setMsg("");
     } catch (ex) {
       setBanner(`配信に失敗しました：${ex.message}`);
@@ -1821,6 +1830,37 @@ function AdminBody({
               </div>
             </div>
           )}
+
+          {/* 配信履歴 */}
+          <div>
+            <div className="flex items-center justify-between">
+              <SectionTitle>配信履歴</SectionTitle>
+              <button onClick={refreshBroadcasts} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
+                <RefreshCw size={12} /> 更新
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mb-2">
+              このアプリから送った一括配信の記録です。※LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません（API送信のため）。
+            </p>
+            {broadcasts.length === 0 ? (
+              <p className="text-xs text-gray-400">まだ配信はありません。</p>
+            ) : (
+              <div className="space-y-2">
+                {broadcasts.map((b) => (
+                  <div key={b.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold truncate">{b.target || "全員"}</p>
+                      <p className="text-xs text-gray-400 shrink-0">{b.sentAt?.toDate ? b.sentAt.toDate().toLocaleString("ja-JP") : "—"}</p>
+                    </div>
+                    <p className="text-xs mt-1" style={{ color: LINE_GREEN }}>
+                      LINE {b.lineCount ?? 0}件<span className="text-gray-400"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
+                    </p>
+                    {b.body && <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 whitespace-pre-wrap">{b.body}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
