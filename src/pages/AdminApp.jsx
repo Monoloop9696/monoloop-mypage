@@ -8,7 +8,7 @@ import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
-import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast } from "../lib/api";
+import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
@@ -189,7 +189,10 @@ function AdminBody({
     try { await deleteBroadcast(id); await refreshBroadcasts(); }
     catch (ex) { setBanner(`配信履歴の削除に失敗しました：${ex.message}`); }
   };
-  useEffect(() => { if (tab === "line") { refreshBroadcasts(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 今月のLINE送信数（無料枠200/月・毎月リセット）
+  const [quota, setQuota] = useState(null);
+  const refreshQuota = async () => { try { setQuota(await getLineQuota()); } catch { /* 取得失敗は表示なし */ } };
+  useEffect(() => { if (tab === "line") { refreshBroadcasts(); refreshQuota(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -423,6 +426,23 @@ function AdminBody({
   const targetLabel = isEventTarget
     ? `${targetEvent ? targetEvent.title : "イベント"}・${groupLabelOf(tGroup)}`
     : target;
+
+  // この配信で使うLINE送信数（＝連携済みの宛先数）。無料枠の消費見込み
+  const targetRecipientList = (() => {
+    if (isEventTarget) {
+      if (!targetEvent) return [];
+      return activeStudents.filter((s) => {
+        const r = rsvpOf(s, targetEvent);
+        return tGroup === "yes" ? r === "出席" : tGroup === "no" ? r === "欠席" : r === "未回答";
+      });
+    }
+    if (target === "内定者（承諾前）") return activeStudents.filter((s) => s.status === "内定");
+    if (target === "内定承諾者") return activeStudents.filter((s) => s.status === "承諾");
+    if (target === "タスク未完了者") return activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; });
+    return activeStudents; // 全員
+  })();
+  const lineTargetCount = targetRecipientList.filter((s) => s.lineUserId).length;
+  const overQuota = quota && quota.remaining != null && lineTargetCount > quota.remaining;
 
   // ---- アカウント配布 / 卒年度管理 ----
   const origin = typeof window !== "undefined" ? window.location.origin : "";
@@ -691,6 +711,7 @@ function AdminBody({
       const r = await lineBroadcast({ target, targetLabel, body: msg, grad: selectedYear });
       setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
       refreshBroadcasts();
+      refreshQuota();
       setMsg("");
     } catch (ex) {
       setBanner(`配信に失敗しました：${ex.message}`);
@@ -1689,6 +1710,32 @@ function AdminBody({
           <div className="rounded-xl p-3 text-xs" style={{ background: "#FFF7E6", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
             ここから送った内容は、<span className="font-bold">LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません</span>（API送信のため）。送信内容・実績はこの画面下部の「配信履歴」でご確認ください。各受信者のトークには通常どおり届きます。
           </div>
+
+          {/* 今月のLINE送信数（無料枠） */}
+          {quota && quota.limit != null && (() => {
+            const pct = quota.limit ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
+            const low = quota.remaining <= 20;
+            const color = quota.remaining <= 0 ? "#DC2626" : low ? "#B45309" : LINE_GREEN;
+            return (
+              <div className="bg-white border rounded-xl p-3" style={{ borderColor: low ? "#F5D08C" : "#E5E7EB" }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-gray-600">今月のLINE送信数（無料枠）</p>
+                  <button onClick={refreshQuota} className="flex items-center gap-1 text-xs font-bold text-gray-400"><RefreshCw size={11} /> 更新</button>
+                </div>
+                <p className="text-sm font-bold mt-1" style={{ color }}>
+                  {quota.used} / {quota.limit} 通<span className="text-xs font-normal text-gray-500 ml-1.5">（残り {quota.remaining} 通）</span>
+                </p>
+                <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">毎月リセットされます。枠を超えると送信できません。未連携者へのメールは枠の対象外です。</p>
+              </div>
+            );
+          })()}
+          {quota && quota.limit == null && (
+            <p className="text-xs text-gray-400">送信数の上限は設定されていません（無制限プラン）。</p>
+          )}
+
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-2">配信対象</p>
@@ -1821,10 +1868,18 @@ function AdminBody({
                 )}
               </div>
             </div>
-            <button disabled={!msg || sending} onClick={send}
-              className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: LINE_GREEN }}>
-              <Send size={16} /> {sending ? "送信中…" : "LINEで一括送信"}
-            </button>
+            <div>
+              {quota && quota.limit != null && (
+                <p className="text-xs mb-1.5" style={{ color: overQuota ? "#DC2626" : "#6B7280" }}>
+                  この配信でLINE <span className="font-bold">{lineTargetCount}通</span> を使用予定（今月の残り {quota.remaining} 通）
+                  {overQuota && <span className="font-bold">／残り枠が不足しています。対象を分けるか翌月に送信してください。</span>}
+                </p>
+              )}
+              <button disabled={!msg || sending || overQuota} onClick={send}
+                className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: LINE_GREEN }}>
+                <Send size={16} /> {sending ? "送信中…" : overQuota ? "送信枠が不足しています" : "LINEで一括送信"}
+              </button>
+            </div>
           </div>
 
           {sent && (
