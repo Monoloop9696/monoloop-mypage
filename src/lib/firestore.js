@@ -140,6 +140,21 @@ export function listenAllSurveys(cb) {
   return onSnapshot(collection(db, "surveys"), (snap) => cb(snap.docs.map(withId)));
 }
 
+// 新形式(questions[])と旧形式(q1/opts/multi/q2)を吸収して設問配列を返す
+// question = { id, type: "single"|"multi"|"text", label, options[], required }
+export function surveyQuestions(s) {
+  if (s && Array.isArray(s.questions) && s.questions.length) return s.questions;
+  const out = [];
+  if (s && s.q1) out.push({ id: "q1", type: s.multi ? "multi" : "single", label: s.q1, options: s.opts || [], required: true });
+  if (s && s.q2) out.push({ id: "q2", type: "text", label: s.q2, required: false });
+  return out;
+}
+// レスポンスを { [qid]: value }（配列＝選択 / 文字列＝記述）に正規化
+export function responseAnswers(r) {
+  if (r && r.answers) return r.answers;
+  return { q1: (r && r.q1) || [], q2: (r && r.q2) || "" };
+}
+
 export async function addSurvey(data) {
   const ref = await addDoc(collection(db, "surveys"), {
     ...data,
@@ -150,6 +165,13 @@ export async function addSurvey(data) {
 
 export const updateSurvey = (id, patch) => updateDoc(doc(db, "surveys", id), patch);
 export const deleteSurvey = (id) => deleteDoc(doc(db, "surveys", id));
+
+// アンケートのテンプレート（回答期限以外を保存）。templates コレクションに _type:"surveyTemplate" で保存＝ルール追加不要
+export async function addSurveyTemplate({ name, data }) {
+  const ref = await addDoc(collection(db, "templates"), { _type: "surveyTemplate", name, data, createdAt: serverTimestamp() });
+  return ref.id;
+}
+export const deleteSurveyTemplate = (id) => deleteDoc(doc(db, "templates", id));
 
 // アンケート削除＋関連する回答(responses)も一括削除
 export async function deleteSurveyCascade(surveyId) {
@@ -267,12 +289,12 @@ export async function loadAllRsvps() {
 // =====================================================================
 // responses/{surveyId}_{uid}
 // =====================================================================
-export const submitResponse = (surveyId, uid, { q1, q2 }) =>
+// answers = { [questionId]: value }（value は文字列＝自由記述 / 配列＝選択）
+export const submitResponse = (surveyId, uid, answers) =>
   setDoc(doc(db, "responses", `${surveyId}_${uid}`), {
     surveyId,
     uid,
-    q1: q1 || [],
-    q2: q2 || "",
+    answers: answers || {},
     submittedAt: serverTimestamp(),
   });
 

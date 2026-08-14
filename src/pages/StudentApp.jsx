@@ -13,7 +13,7 @@ import {
 import {
   listenStudent, listenPublishedEvents, listenPublishedSurveys, listenJourney,
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
-  listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent,
+  listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent, surveyQuestions,
 } from "../lib/firestore";
 import { askQuestion, listQuestions } from "../lib/api";
 import { downloadDataUrl } from "../lib/image";
@@ -141,9 +141,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [qText, setQText] = useState("");
   const [qBusy, setQBusy] = useState(false);
   const [qErr, setQErr] = useState("");
-  const [ans1, setAns1] = useState("");
-  const [ans2, setAns2] = useState("");
-  const [ansMulti, setAnsMulti] = useState([]);
+  const [svAnswers, setSvAnswers] = useState({});
   const [profileForm, setProfileForm] = useState({
     zip: student.zip || "", address: student.address || "",
     phone: student.phone || "", emergency: student.emergency || "",
@@ -263,12 +261,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
   const submitSurvey = async () => {
     if (readOnly) return;
-    await submitResponse(activeSurvey.id, uid, {
-      q1: activeSurvey.multi ? ansMulti : ans1 ? [ans1] : [],
-      q2: ans2,
-    });
+    await submitResponse(activeSurvey.id, uid, svAnswers);
     setActiveSurvey(null);
-    setAns1(""); setAns2(""); setAnsMulti([]);
+    setSvAnswers({});
   };
 
   const saveProfile = async () => {
@@ -644,7 +639,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
                 {items.map((s, i) => (
                   <button key={s.id} disabled={s.done || isEnded}
-                    onClick={() => { setActiveSurvey(s); setAns1(""); setAns2(""); setAnsMulti([]); }}
+                    onClick={() => { setActiveSurvey(s); setSvAnswers({}); }}
                     className="w-full text-left px-5 py-5 flex items-center gap-4"
                     style={{ borderBottom: i < items.length - 1 ? `1px solid ${HAIR}` : "none", opacity: (s.done || isEnded) ? 0.65 : 1 }}>
                     <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE : GOLD, width: 30 }}>0{i + 1}</span>
@@ -904,51 +899,73 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             </div>
           )}
 
-          {/* アンケート回答モーダル */}
-          {activeSurvey && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
-              <div className="w-full max-w-md p-6 max-h-96 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER }}>
-                <div className="flex items-start justify-between mb-5">
-                  <div>
-                    <p style={caps(9, GOLD)}>Survey</p>
-                    <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{activeSurvey.title}</p>
+          {/* アンケート回答モーダル（動的設問） */}
+          {activeSurvey && (() => {
+            const qs = surveyQuestions(activeSurvey);
+            const toArr = (v) => (Array.isArray(v) ? v : (v ? [v] : []));
+            const setChoice = (q, o) => setSvAnswers((a) => {
+              if (q.type === "multi") {
+                const cur = toArr(a[q.id]);
+                return { ...a, [q.id]: cur.includes(o) ? cur.filter((x) => x !== o) : [...cur, o] };
+              }
+              return { ...a, [q.id]: [o] };
+            });
+            const setText = (q, val) => setSvAnswers((a) => ({ ...a, [q.id]: val }));
+            const valid = qs.every((q) => {
+              if (q.required === false) return true;
+              const v = svAnswers[q.id];
+              return q.type === "text" ? !!(v && v.toString().trim()) : toArr(v).length > 0;
+            });
+            return (
+              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
+                <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
+                  <div className="flex items-start justify-between mb-5">
+                    <div>
+                      <p style={caps(9, GOLD)}>Survey</p>
+                      <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{activeSurvey.title}</p>
+                    </div>
+                    <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
                   </div>
-                  <button onClick={() => setActiveSurvey(null)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                  <div className="space-y-6">
+                    {qs.map((q, qi) => (
+                      <div key={q.id}>
+                        <p className="text-sm font-bold mb-2">
+                          Q{qi + 1}. {q.label}
+                          {q.type !== "text" && <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>{q.type === "multi" ? "（複数選択可）" : "（1つ選択）"}</span>}
+                          {q.required === false && <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>（任意）</span>}
+                        </p>
+                        {q.type === "text" ? (
+                          <textarea value={svAnswers[q.id] || ""} onChange={(e) => setText(q, e.target.value)} rows={3}
+                            placeholder="自由にご記入ください" className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                        ) : (
+                          <div className="space-y-2">
+                            {(q.options || []).map((o) => {
+                              const selected = toArr(svAnswers[q.id]).includes(o);
+                              return (
+                                <button key={o} onClick={() => setChoice(q, o)}
+                                  className="w-full text-left px-4 py-3 text-sm bg-white flex items-center gap-2.5"
+                                  style={selected ? { border: `1px solid ${ROSE}`, color: ROSE, fontWeight: 700 } : { border: `1px solid ${HAIR}` }}>
+                                  <span className="inline-flex items-center justify-center shrink-0"
+                                    style={{ width: 16, height: 16, borderRadius: q.type === "multi" ? 3 : 999, border: `1.5px solid ${selected ? ROSE : "#C9BFC3"}`, background: selected ? ROSE : "#fff" }}>
+                                    {selected && <Check size={11} color="#fff" strokeWidth={3} />}
+                                  </span>
+                                  {o}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button disabled={readOnly || !valid} onClick={submitSurvey}
+                    className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                    {readOnly ? "プレビュー（送信不可）" : "回答を送信する"}
+                  </button>
                 </div>
-                <p className="text-sm font-bold mb-2">
-                  Q1. {activeSurvey.q1}
-                  <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>{activeSurvey.multi ? "（複数選択可）" : "（1つ選択）"}</span>
-                </p>
-                <div className="space-y-2 mb-5">
-                  {(activeSurvey.opts || []).map((o) => {
-                    const selected = activeSurvey.multi ? ansMulti.includes(o) : ans1 === o;
-                    return (
-                      <button key={o}
-                        onClick={() => activeSurvey.multi
-                          ? setAnsMulti(ansMulti.includes(o) ? ansMulti.filter((x) => x !== o) : [...ansMulti, o])
-                          : setAns1(o)}
-                        className="w-full text-left px-4 py-3 text-sm bg-white flex items-center gap-2.5"
-                        style={selected ? { border: `1px solid ${ROSE}`, color: ROSE, fontWeight: 700 } : { border: `1px solid ${HAIR}` }}>
-                        <span className="inline-flex items-center justify-center shrink-0"
-                          style={{ width: 16, height: 16, borderRadius: activeSurvey.multi ? 3 : 999,
-                            border: `1.5px solid ${selected ? ROSE : "#C9BFC3"}`, background: selected ? ROSE : "#fff" }}>
-                          {selected && <Check size={11} color="#fff" strokeWidth={3} />}
-                        </span>
-                        {o}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-sm font-bold mb-2">Q2. {activeSurvey.q2}</p>
-                <textarea value={ans2} onChange={(e) => setAns2(e.target.value)} rows={3}
-                  placeholder="自由にご記入ください" className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
-                <button disabled={readOnly || (activeSurvey.multi ? ansMulti.length === 0 : !ans1)} onClick={submitSurvey}
-                  className="w-full mt-5 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
-                  {readOnly ? "プレビュー（送信不可）" : "回答を送信する"}
-                </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* 下部ナビ（ダークピル） */}
           <nav className="fixed bottom-4 left-1/2 z-40 w-full max-w-md px-6" style={{ transform: "translateX(-50%)" }}>

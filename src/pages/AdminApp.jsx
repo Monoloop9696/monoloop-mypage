@@ -12,7 +12,8 @@ import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion } from 
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
-  addSurvey, deleteSurveyCascade,
+  addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
+  addSurveyTemplate, deleteSurveyTemplate,
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
@@ -22,7 +23,14 @@ import {
 } from "../lib/firestore";
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadline: "" };
-const EMPTY_SV = { title: "", dueDate: "", time: "約3分", q1: "", opts: "", q2: "", multi: false };
+const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [] };
+const newQuestion = (type = "single") => ({
+  id: `q_${Math.random().toString(36).slice(2, 9)}`,
+  type,
+  label: "",
+  options: type === "text" ? [] : ["", ""],
+  required: true,
+});
 
 export default function AdminApp() {
   const { signOut } = useAuth();
@@ -271,6 +279,10 @@ function AdminBody({
   const [showTplManager, setShowTplManager] = useState(false);
   const [showSurveyForm, setShowSurveyForm] = useState(false);
   const [sv, setSv] = useState(EMPTY_SV);
+  const [editingSurveyId, setEditingSurveyId] = useState(null); // 下書き/公開済みの編集
+  const [svTplName, setSvTplName] = useState("");
+  const [svShowTplSave, setSvShowTplSave] = useState(false);
+  const [selectedSvTpl, setSelectedSvTpl] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -302,7 +314,7 @@ function AdminBody({
   }, [rsvps]);
   const respMap = useMemo(() => {
     const m = {};
-    responses.forEach((r) => { m[`${r.surveyId}_${r.uid}`] = { q1: r.q1 || [], q2: r.q2 || "" }; });
+    responses.forEach((r) => { m[`${r.surveyId}_${r.uid}`] = responseAnswers(r); });
     return m;
   }, [responses]);
 
@@ -340,6 +352,7 @@ function AdminBody({
     .sort((a, b) => (a.dateStr || "").localeCompare(b.dateStr || ""));
   const yearDrafts = events.filter((e) => (e.grad || 2027) === selectedYear && !e.published);
   const yearSurveys = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published !== false);
+  const yearSurveyDrafts = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published === false);
 
   // ---- 学生ごとの進捗 ----
   const progressOf = (st) => {
@@ -481,22 +494,69 @@ function AdminBody({
   };
 
   // ---- アンケート ----
-  const doAddSurvey = async () => {
-    await addSurvey({
-      title: sv.title,
-      dueDate: sv.dueDate || null,
-      due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
-      time: sv.time || "約3分",
-      q1: sv.q1,
-      opts: sv.opts.split(/[、,]/).map((x) => x.trim()).filter(Boolean),
-      q2: sv.q2 || "その他・自由記述（任意）",
-      multi: sv.multi,
-      grad: selectedYear,
-      published: true,
-    });
-    setSv(EMPTY_SV);
-    setShowSurveyForm(false);
+  const surveyPayload = (published) => ({
+    title: sv.title.trim(),
+    dueDate: sv.dueDate || null,
+    due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
+    time: sv.time || "約3分",
+    questions: (sv.questions || []).map((q) => ({
+      id: q.id, type: q.type, label: (q.label || "").trim(),
+      options: q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean),
+      required: q.required !== false,
+    })),
+    grad: selectedYear,
+    published,
+  });
+  const surveyValid = () =>
+    sv.title.trim() && sv.questions.length > 0 &&
+    sv.questions.every((q) => q.label.trim() && (q.type === "text" || (q.options || []).map((o) => o.trim()).filter(Boolean).length >= 1));
+  const resetSurveyForm = () => { setSv(EMPTY_SV); setEditingSurveyId(null); setSelectedSvTpl(""); setSvShowTplSave(false); setSvTplName(""); };
+  const submitSurvey = async (published) => {
+    if (!surveyValid()) { setBanner("アンケート名と、各設問のタイトル・選択肢（選択式）を入力してください。"); return; }
+    try {
+      if (editingSurveyId) await updateSurvey(editingSurveyId, surveyPayload(published));
+      else await addSurvey(surveyPayload(published));
+      resetSurveyForm(); setShowSurveyForm(false);
+    } catch (ex) { setBanner(`保存に失敗しました：${ex.message}`); }
   };
+  const editSurvey = (s) => {
+    setEditingSurveyId(s.id);
+    setSv({
+      title: s.title || "", dueDate: s.dueDate || "", time: s.time || "約3分",
+      questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+    });
+    setShowSurveyForm(true);
+  };
+  const publishSurveyDraft = (s) => updateSurvey(s.id, { published: true });
+  // アンケートのテンプレート（回答期限は保存しない）
+  const saveSurveyTemplate = async () => {
+    if (!surveyValid()) { setBanner("先にアンケート内容を入力してください。"); return; }
+    const name = svTplName.trim() || sv.title.trim() || "無題テンプレ";
+    const data = { title: sv.title.trim(), time: sv.time || "約3分", questions: surveyPayload(true).questions };
+    try { await addSurveyTemplate({ name, data }); setSvTplName(""); setSvShowTplSave(false); }
+    catch (ex) { setBanner(`テンプレ保存に失敗：${ex.message}`); }
+  };
+  const loadSurveyTemplate = (tplId) => {
+    const t = surveyTemplates.find((x) => x.id === tplId);
+    if (!t || !t.data) return;
+    setSv({
+      title: t.data.title || "", dueDate: "", time: t.data.time || "約3分",
+      questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+    });
+  };
+  // 設問ビルダー操作
+  const addSvQuestion = (type) => setSv((p) => ({ ...p, questions: [...p.questions, newQuestion(type)] }));
+  const updateSvQuestion = (id, patch) => setSv((p) => ({ ...p, questions: p.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)) }));
+  const removeSvQuestion = (id) => setSv((p) => ({ ...p, questions: p.questions.filter((q) => q.id !== id) }));
+  const moveSvQuestion = (idx, dir) => setSv((p) => {
+    const arr = [...p.questions]; const j = idx + dir;
+    if (j < 0 || j >= arr.length) return p;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    return { ...p, questions: arr };
+  });
+  const setSvOption = (qid, oi, val) => setSv((p) => ({ ...p, questions: p.questions.map((q) => (q.id === qid ? { ...q, options: q.options.map((o, i) => (i === oi ? val : o)) } : q)) }));
+  const addSvOption = (qid) => setSv((p) => ({ ...p, questions: p.questions.map((q) => (q.id === qid ? { ...q, options: [...q.options, ""] } : q)) }));
+  const removeSvOption = (qid, oi) => setSv((p) => ({ ...p, questions: p.questions.map((q) => (q.id === qid ? { ...q, options: q.options.filter((_, i) => i !== oi) } : q)) }));
 
   // ---- Journey ----
   const yearJourney = journeys[selectedYear] || [];
@@ -552,7 +612,8 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate");
+  const surveyTemplates = savedTemplates.filter((t) => t._type === "surveyTemplate");
   const sortedCategories = [...templateCategories].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const templatesInCat = (catId) =>
     realTemplates
@@ -650,10 +711,16 @@ function AdminBody({
   };
 
   const exportSurveyCsv = (s) => {
-    const header = ["氏名", "大学", "回答状況", `Q1:${s.q1}`, `Q2:${s.q2}`];
+    const qs = surveyQuestions(s);
+    const header = ["氏名", "大学", "回答状況", ...qs.map((q, i) => `Q${i + 1}:${q.label}`)];
     const rows = activeStudents.map((st) => {
       const a = answerOf(st, s);
-      return [st.name, st.univ, a ? "回答済" : "未回答", a ? (a.q1 || []).join(" / ") : "", a ? a.q2 : ""];
+      const cells = qs.map((q) => {
+        if (!a) return "";
+        const v = a[q.id];
+        return Array.isArray(v) ? v.join(" / ") : (v || "");
+      });
+      return [st.name, st.univ, a ? "回答済" : "未回答", ...cells];
     });
     downloadCsv(`アンケート回答_${s.title}_${selectedYear}卒.csv`, [header, ...rows]);
   };
@@ -903,7 +970,7 @@ function AdminBody({
           <div>
             <div className="flex items-center justify-between">
               <SectionTitle>アンケート回答率</SectionTitle>
-              <button onClick={() => setShowSurveyForm(!showSurveyForm)}
+              <button onClick={() => { if (showSurveyForm) resetSurveyForm(); setShowSurveyForm(!showSurveyForm); }}
                 className="text-xs font-bold px-3 py-1.5 rounded-lg mb-3 border"
                 style={showSurveyForm ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
                 {showSurveyForm ? "閉じる" : "+ アンケートを追加"}
@@ -912,6 +979,22 @@ function AdminBody({
 
             {showSurveyForm && (
               <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
+                {editingSurveyId && <p className="text-xs font-bold" style={{ color: BRAND }}>✎ 編集中</p>}
+
+                {!editingSurveyId && surveyTemplates.length > 0 && (
+                  <div className="flex gap-2 items-center">
+                    <select value={selectedSvTpl} onChange={(e) => { setSelectedSvTpl(e.target.value); if (e.target.value) loadSurveyTemplate(e.target.value); }}
+                      className="flex-1 border border-gray-300 rounded-lg p-2 text-xs bg-white">
+                      <option value="">テンプレから作成…</option>
+                      {surveyTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                    {selectedSvTpl && (
+                      <button onClick={async () => { await deleteSurveyTemplate(selectedSvTpl); setSelectedSvTpl(""); }}
+                        className="text-xs font-bold px-2 py-2 rounded-lg border border-gray-300 text-gray-500 bg-white">テンプレ削除</button>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">アンケート名<span className="text-red-500 ml-0.5">*</span></p>
                   <input value={sv.title} onChange={(e) => setSv({ ...sv, title: e.target.value })}
@@ -929,37 +1012,90 @@ function AdminBody({
                       placeholder="例）約3分" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   </div>
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">質問1の回答形式</p>
-                  <div className="flex gap-2">
-                    {[[false, "単一選択（1つだけ）"], [true, "複数選択可"]].map(([v, label]) => (
-                      <button key={label} onClick={() => setSv({ ...sv, multi: v })}
-                        className="flex-1 py-2 rounded-lg text-xs font-bold border"
-                        style={sv.multi === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
-                        {label}
-                      </button>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-500">設問</p>
+                  {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。</p>}
+                  {sv.questions.map((q, i) => (
+                    <div key={q.id} className="border border-gray-200 rounded-lg p-3 space-y-2" style={{ background: "#FAFBFC" }}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-gray-400">Q{i + 1}</span>
+                        <select value={q.type} onChange={(e) => updateSvQuestion(q.id, { type: e.target.value, options: e.target.value === "text" ? [] : (q.options.length ? q.options : ["", ""]) })}
+                          className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
+                          <option value="single">単一選択</option>
+                          <option value="multi">複数選択</option>
+                          <option value="text">自由記述</option>
+                        </select>
+                        <label className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
+                          <input type="checkbox" checked={q.required !== false} onChange={(e) => updateSvQuestion(q.id, { required: e.target.checked })} />必須
+                        </label>
+                        <button onClick={() => moveSvQuestion(i, -1)} disabled={i === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
+                        <button onClick={() => moveSvQuestion(i, 1)} disabled={i === sv.questions.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
+                        <button onClick={() => removeSvQuestion(q.id)} aria-label="設問を削除" className="text-gray-300"><Trash2 size={14} /></button>
+                      </div>
+                      <input value={q.label} onChange={(e) => updateSvQuestion(q.id, { label: e.target.value })}
+                        placeholder="設問文（例：参加しやすい時間帯は？）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+                      {q.type !== "text" && (
+                        <div className="space-y-1.5">
+                          {q.options.map((o, oi) => (
+                            <div key={oi} className="flex items-center gap-1.5">
+                              <input value={o} onChange={(e) => setSvOption(q.id, oi, e.target.value)}
+                                placeholder={`選択肢${oi + 1}`} className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                              <button onClick={() => removeSvOption(q.id, oi)} disabled={q.options.length <= 1} aria-label="選択肢を削除" className="text-gray-300 disabled:opacity-25"><X size={14} /></button>
+                            </div>
+                          ))}
+                          <button onClick={() => addSvOption(q.id)} className="text-xs font-bold" style={{ color: BRAND }}>＋ 選択肢を追加</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
+                      <button key={t} onClick={() => addSvQuestion(t)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
                     ))}
                   </div>
                 </div>
+
                 <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">質問1（選択式）<span className="text-red-500 ml-0.5">*</span></p>
-                  <input value={sv.q1} onChange={(e) => setSv({ ...sv, q1: e.target.value })}
-                    placeholder="例）参加しやすい研修の時間帯は？" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  {!svShowTplSave ? (
+                    <button onClick={() => setSvShowTplSave(true)} className="text-xs font-bold" style={{ color: BRAND }}>＋ この内容をテンプレとして保存（期限以外）</button>
+                  ) : (
+                    <div className="flex gap-2 items-center">
+                      <input value={svTplName} onChange={(e) => setSvTplName(e.target.value)} placeholder="テンプレ名" className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                      <button onClick={saveSurveyTemplate} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
+                      <button onClick={() => { setSvShowTplSave(false); setSvTplName(""); }} className="text-xs text-gray-400 px-1">取消</button>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">選択肢（「、」区切りで入力）<span className="text-red-500 ml-0.5">*</span></p>
-                  <input value={sv.opts} onChange={(e) => setSv({ ...sv, opts: e.target.value })}
-                    placeholder="例）平日午前、平日午後、土曜" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+
+                <div className="flex gap-2">
+                  <button onClick={() => submitSurvey(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border" style={{ borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                    下書き保存
+                  </button>
+                  <button onClick={() => submitSurvey(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>
+                    {editingSurveyId ? "更新して公開" : "公開する"}
+                  </button>
                 </div>
-                <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">質問2（自由記述）</p>
-                  <input value={sv.q2} onChange={(e) => setSv({ ...sv, q2: e.target.value })}
-                    placeholder="例）研修で扱ってほしいテーマがあれば教えてください" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
-                </div>
-                <button disabled={!sv.title || !sv.q1 || !sv.opts.trim()} onClick={doAddSurvey}
-                  className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                  アンケートを公開する（学生画面に即時反映）
-                </button>
+              </div>
+            )}
+
+            {/* アンケート下書き */}
+            {yearSurveyDrafts.length > 0 && (
+              <div className="mb-3 space-y-2">
+                <p className="text-xs font-bold text-gray-500">下書き（{yearSurveyDrafts.length}）</p>
+                {yearSurveyDrafts.map((s) => (
+                  <div key={s.id} className="bg-white border rounded-xl p-3 flex items-center justify-between gap-2" style={{ borderColor: "#F5D08C" }}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold truncate">{s.title || "（無題）"}</p>
+                      <p className="text-xs text-gray-400">設問 {surveyQuestions(s).length}問・下書き</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button onClick={() => editSurvey(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>編集</button>
+                      <button onClick={() => publishSurveyDraft(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>公開</button>
+                      <button onClick={() => doDeleteSurvey(s.id)} className="text-gray-300 p-1"><Trash2 size={15} /></button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -971,10 +1107,7 @@ function AdminBody({
                 <div key={s.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
                   <button onClick={() => setExpandedSurvey(open ? null : s.id)} className="w-full text-left p-4">
                     <div className="flex justify-between text-sm gap-2">
-                      <p className="font-bold min-w-0">
-                        {s.title}
-                        {s.multi && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EAF0FB", color: "#3B6BC7" }}>複数選択可</span>}
-                      </p>
+                      <p className="font-bold min-w-0 truncate">{s.title}</p>
                       <div className="text-right shrink-0">
                         <p className="text-xs text-gray-500">{done}/{totalActive} 回答</p>
                         <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
@@ -988,41 +1121,49 @@ function AdminBody({
                     const detail = activeStudents.map((st) => ({ st, a: answerOf(st, s) }));
                     const answered = detail.filter((x) => x.a);
                     const unanswered = detail.filter((x) => !x.a);
-                    const freeTexts = answered.filter((x) => x.a.q2);
+                    const qs = surveyQuestions(s);
+                    const toArr = (v) => (Array.isArray(v) ? v : (v ? [v] : []));
                     return (
                       <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-4">
-                        <div>
-                          <p className="text-xs font-bold text-gray-500 mb-2">
-                            Q1. {s.q1}<span className="font-normal text-gray-400 ml-1">{s.multi ? "（複数選択可）" : ""}</span>
-                          </p>
-                          {(s.opts || []).map((o) => {
-                            const cnt = answered.filter((x) => (x.a.q1 || []).includes(o)).length;
+                        {qs.map((q, qi) => {
+                          if (q.type === "text") {
+                            const texts = answered.filter((x) => (x.a[q.id] || "").toString().trim());
                             return (
-                              <div key={o} className="mb-2">
-                                <div className="flex justify-between text-xs mb-0.5">
-                                  <span className="text-gray-700">{o}</span>
-                                  <span className="text-gray-400">{cnt}名</span>
-                                </div>
-                                <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                                  <div className="h-full rounded-full" style={{ width: `${answered.length ? (cnt / answered.length) * 100 : 0}%`, background: "#5B8DEF" }} />
-                                </div>
+                              <div key={q.id}>
+                                <p className="text-xs font-bold text-gray-500 mb-2">Q{qi + 1}. {q.label}（自由記述）</p>
+                                {texts.length === 0 ? (
+                                  <p className="text-xs text-gray-300">記述回答はまだありません</p>
+                                ) : texts.map((x) => (
+                                  <div key={x.st.id} className="bg-gray-50 rounded-lg p-3 mb-1.5">
+                                    <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap">{x.a[q.id]}</p>
+                                    <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
+                                  </div>
+                                ))}
                               </div>
                             );
-                          })}
-                        </div>
-                        <div>
-                          <p className="text-xs font-bold text-gray-500 mb-2">Q2. {s.q2}（自由記述）</p>
-                          {freeTexts.length === 0 ? (
-                            <p className="text-xs text-gray-300">記述回答はまだありません</p>
-                          ) : (
-                            freeTexts.map((x) => (
-                              <div key={x.st.id} className="bg-gray-50 rounded-lg p-3 mb-1.5">
-                                <p className="text-xs text-gray-800 leading-relaxed">{x.a.q2}</p>
-                                <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
-                              </div>
-                            ))
-                          )}
-                        </div>
+                          }
+                          return (
+                            <div key={q.id}>
+                              <p className="text-xs font-bold text-gray-500 mb-2">
+                                Q{qi + 1}. {q.label}<span className="font-normal text-gray-400 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
+                              </p>
+                              {(q.options || []).map((o) => {
+                                const cnt = answered.filter((x) => toArr(x.a[q.id]).includes(o)).length;
+                                return (
+                                  <div key={o} className="mb-2">
+                                    <div className="flex justify-between text-xs mb-0.5">
+                                      <span className="text-gray-700">{o}</span>
+                                      <span className="text-gray-400">{cnt}名</span>
+                                    </div>
+                                    <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                                      <div className="h-full rounded-full" style={{ width: `${answered.length ? (cnt / answered.length) * 100 : 0}%`, background: "#5B8DEF" }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
                         <div>
                           <p className="text-xs font-bold text-gray-500 mb-1">未回答（{unanswered.length}名）</p>
                           <div className="flex flex-wrap gap-1.5">
@@ -1036,6 +1177,7 @@ function AdminBody({
                           <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
                             <Download size={12} /> 回答をCSV出力
                           </button>
+                          <button onClick={() => editSurvey(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
                           {confirmDel === `survey:${s.id}` ? (
                             <>
                               <button onClick={() => doDeleteSurvey(s.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>

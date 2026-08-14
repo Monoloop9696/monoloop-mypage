@@ -60,8 +60,9 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
 - `events/{id}`: title, dateStr, time, date(Timestamp), place, deadline, copy, grad, published
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no)
-- `surveys/{id}`: title, due, time, q1, opts[], q2, multi, grad, published
-- `responses/{surveyId}_{uid}`: surveyId, uid, q1[], q2
+- `surveys/{id}`: title, dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
+- `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
+- アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
 - `journeys/{grad}`: steps[]（id,label,desc,type, 任意で link/cta）
 - `notices/{id}`: text, createdAt（全学年に表示）
 - `articles/{id}`: title, body, grad(null=全学年), published, thumb, createdAt
