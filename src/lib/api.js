@@ -51,3 +51,8 @@ export const setStudentAccount = (payload) =>
 // 管理者：LINE一括配信（未連携者はメール送信）
 export const lineBroadcast = (payload) =>
   post("/api/line-broadcast", payload, { authed: true });
+
+// 質問箱：投稿（学生）／一覧取得（学生=自分＋FAQ / 管理者=全件）／回答・公開・削除（管理者）
+export const askQuestion = (payload) => post("/api/question-ask", payload, { authed: true });
+export const listQuestions = () => post("/api/question-list", {}, { authed: true });
+export const answerQuestion = (payload) => post("/api/question-answer", payload, { authed: true });

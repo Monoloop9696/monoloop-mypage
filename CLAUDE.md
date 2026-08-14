@@ -68,6 +68,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order
 - `templates/{id}`: LINE配信テンプレ。本体は {name, body, categoryId, order}、種別(カテゴリ)は同コレクション内の {_type:"category", name, order} ドキュメントとして保持（新コレクションを作らずルール追加デプロイを回避）
 - `broadcasts/{id}` / `authCodes/{email}`(サーバー専用)
+- `questions/{id}`: 質問箱。{uid, name, grad, text, answer, answeredAt, answeredBy, public, createdAt}。**クライアントは直接触らず、必ず serverless API 経由**（`/api/question-ask`＝学生投稿, `/api/question-list`＝一覧, `/api/question-answer`＝管理者の回答/公開/削除）。Admin SDK で読み書きするため Firestore ルール追加が不要。回答時は質問者の公式LINEへ通知（連携時）。
 
 ## 5. 環境変数 / 秘密情報
 

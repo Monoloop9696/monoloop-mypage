@@ -47,6 +47,18 @@ export function adminEmails() {
     .filter(Boolean);
 }
 
+// Bearer トークンを検証し、ログイン済みユーザーなら decodedToken を返す（管理者/学生問わず）
+export async function requireUser(req) {
+  const header = req.headers.authorization || "";
+  const m = header.match(/^Bearer (.+)$/);
+  if (!m) return null;
+  try {
+    return await authAdmin.verifyIdToken(m[1]);
+  } catch {
+    return null;
+  }
+}
+
 // Bearer トークンを検証し、管理者クレームまたは ADMIN_EMAILS に該当すれば decodedToken を返す
 export async function requireAdmin(req) {
   const header = req.headers.authorization || "";

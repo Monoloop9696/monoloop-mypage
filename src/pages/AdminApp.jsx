@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -8,7 +8,7 @@ import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
-import { setStudentAccount, lineBroadcast } from "../lib/api";
+import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
@@ -158,6 +158,15 @@ function AdminBody({
   const [editingArticleId, setEditingArticleId] = useState(null); // null=新規投稿モード
   const [artNotify, setArtNotify] = useState(true); // 投稿時に対象者の公式LINEへ通知
   useEffect(() => listenAllArticles(setArticles), []);
+
+  // ---- 質問箱（API経由で取得・更新） ----
+  const [questions, setQuestions] = useState([]);
+  const loadQuestions = async () => {
+    try { const r = await listQuestions(); setQuestions(r.all || []); }
+    catch (ex) { setBanner(`質問の取得に失敗しました：${ex.message}`); }
+  };
+  useEffect(() => { loadQuestions(); }, []);
+  const unansweredQ = questions.filter((q) => !q.answer).length;
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -649,6 +658,7 @@ function AdminBody({
     { key: "dash", label: "概況", icon: BarChart3 },
     { key: "students", label: "内定者", icon: Users },
     { key: "news", label: "記事", icon: Newspaper },
+    { key: "qbox", label: "質問箱", icon: HelpCircle },
     { key: "line", label: "LINE配信", icon: Send },
   ];
 
@@ -1449,6 +1459,27 @@ function AdminBody({
         </div>
       )}
 
+      {tab === "qbox" && (
+        <div className="px-4 pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <SectionTitle>質問箱</SectionTitle>
+            <button onClick={loadQuestions} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
+              <RefreshCw size={12} /> 更新
+            </button>
+          </div>
+          <p className="text-xs text-gray-500">
+            未回答 <span className="font-bold" style={{ color: "#B45309" }}>{unansweredQ}</span> 件／全 {questions.length} 件。回答すると質問者の公式LINEへ通知します（連携時）。「公開」にすると学生全員の「みんなのQ&A」に匿名で表示されます。
+          </p>
+          {questions.length === 0 ? (
+            <p className="text-xs text-gray-400">まだ質問はありません。</p>
+          ) : (
+            questions.map((q) => (
+              <QuestionAdminCard key={q.id} q={q} reload={loadQuestions} setBanner={setBanner} />
+            ))
+          )}
+        </div>
+      )}
+
       {tab === "line" && (
         <div className="px-4 pt-4 space-y-4">
           <SectionTitle>LINE一括配信</SectionTitle>
@@ -1722,9 +1753,16 @@ function AdminBody({
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
+          const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5" style={{ color: active ? BRAND : "#9AA7A2" }}>
-              <Icon size={20} />
+            <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
+              <div className="relative">
+                <Icon size={20} />
+                {badge > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 text-white rounded-full font-bold flex items-center justify-center"
+                    style={{ background: "#DC2626", fontSize: 9, minWidth: 15, height: 15, padding: "0 3px" }}>{badge}</span>
+                )}
+              </div>
               <span className="text-xs font-bold">{t.label}</span>
             </button>
           );
@@ -1799,6 +1837,57 @@ function StudentEditor({ student, setBanner, onDone }) {
             className="px-3 py-2 rounded-lg text-xs font-bold border border-gray-300 text-gray-500 bg-white">
             取消
           </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 質問箱：1件分の回答・公開・削除
+function QuestionAdminCard({ q, reload, setBanner }) {
+  const [answer, setAnswer] = useState(q.answer || "");
+  const [isPublic, setIsPublic] = useState(q.public === true);
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const dateStr = q.createdAt ? new Date(q.createdAt).toLocaleString("ja-JP") : "";
+  const save = async () => {
+    setBusy(true);
+    try { await answerQuestion({ id: q.id, answer, isPublic }); await reload(); }
+    catch (ex) { setBanner(`保存に失敗しました：${ex.message}`); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    setConfirmDel(false); setBusy(true);
+    try { await answerQuestion({ id: q.id, remove: true }); await reload(); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-gray-400 truncate">{q.name || "（名前なし）"}{q.grad ? `・${q.grad}卒` : ""}{dateStr ? `・${dateStr}` : ""}</p>
+        {q.answer
+          ? <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EAF7EE", color: "#1E874B" }}>回答済み</span>
+          : <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FFF7E6", color: "#B45309" }}>未回答</span>}
+      </div>
+      <p className="text-sm whitespace-pre-wrap">{q.text}</p>
+      <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} rows={3}
+        placeholder="回答を入力…" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+      <label className="flex items-center gap-2 text-xs text-gray-600">
+        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
+        「みんなのQ&A」に匿名で公開する
+      </label>
+      <div className="flex items-center gap-2">
+        <button onClick={save} disabled={busy || !answer.trim()} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>
+          {busy ? "処理中…" : q.answer ? "更新" : "回答して通知"}
+        </button>
+        {confirmDel ? (
+          <>
+            <button onClick={remove} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+            <button onClick={() => setConfirmDel(false)} className="text-xs text-gray-400 px-1">取消</button>
+          </>
+        ) : (
+          <button onClick={() => setConfirmDel(true)} className="text-xs font-bold text-gray-400 ml-auto">削除</button>
         )}
       </div>
     </div>

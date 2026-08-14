@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Home, Calendar, ClipboardList, MessageCircle, Newspaper,
   ChevronRight, MapPin, Clock, X, Check, LogOut, Bell, Download,
+  Menu, HelpCircle, User, Send,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { EdHeader, FullLoader } from "../components/common";
@@ -14,6 +15,7 @@ import {
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
   listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent,
 } from "../lib/firestore";
+import { askQuestion, listQuestions } from "../lib/api";
 import { downloadDataUrl } from "../lib/image";
 
 const ADD_FRIEND_URL = import.meta.env.VITE_LINE_ADD_FRIEND_URL || "";
@@ -134,6 +136,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [tab, setTab] = useState("home");
   const [activeSurvey, setActiveSurvey] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [qData, setQData] = useState({ mine: [], faq: [] });
+  const [qText, setQText] = useState("");
+  const [qBusy, setQBusy] = useState(false);
+  const [qErr, setQErr] = useState("");
   const [ans1, setAns1] = useState("");
   const [ans2, setAns2] = useState("");
   const [ansMulti, setAnsMulti] = useState([]);
@@ -205,6 +212,26 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const mySurveys = surveys.map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
+
+  // 質問箱：開いたら読み込み
+  const loadQuestions = async () => {
+    if (readOnly) return;
+    try { const r = await listQuestions(); setQData({ mine: r.mine || [], faq: r.faq || [] }); }
+    catch { /* 取得失敗は空のまま */ }
+  };
+  useEffect(() => { if (tab === "questions" && !readOnly) loadQuestions(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const submitQuestion = async () => {
+    const t = qText.trim();
+    if (!t) return;
+    setQErr(""); setQBusy(true);
+    try {
+      await askQuestion({ text: t });
+      setQText("");
+      await loadQuestions();
+    } catch (ex) {
+      setQErr(ex.message || "送信に失敗しました。");
+    } finally { setQBusy(false); }
+  };
 
   const doneCount =
     mySurveys.filter((s) => s.done).length +
@@ -305,7 +332,6 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     { key: "event", label: "EVENTS", icon: Calendar },
     { key: "survey", label: "SURVEY", icon: ClipboardList },
     { key: "news", label: "NEWS", icon: Newspaper },
-    { key: "line", label: "LINE", icon: MessageCircle },
   ];
 
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
@@ -332,11 +358,34 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <p className="leading-none mt-1" style={caps(8, MAUVE, "0.2em")}>My Page</p>
             </div>
           </div>
-          {!readOnly && (
-            <button onClick={signOut} className="flex items-center gap-1 text-xs font-bold" style={{ color: MUTE }} aria-label="ログアウト">
-              <LogOut size={14} /> ログアウト
+          <div className="relative">
+            <button onClick={() => setMenuOpen((v) => !v)} className="p-1.5 rounded-full" style={{ color: MUTE }} aria-label="メニュー">
+              <Menu size={20} />
             </button>
-          )}
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 mt-1 z-50 bg-white rounded-xl shadow-xl overflow-hidden"
+                  style={{ border: `1px solid ${HAIR}`, minWidth: 176 }}>
+                  {[
+                    { label: "質問箱", icon: HelpCircle, onClick: () => setTab("questions") },
+                    { label: "LINE連携", icon: MessageCircle, onClick: () => setTab("line") },
+                    { label: "プロフィール", icon: User, onClick: () => setShowProfile(true) },
+                    { label: "ログアウト", icon: LogOut, onClick: signOut },
+                  ].map((m) => {
+                    const Icon = m.icon;
+                    return (
+                      <button key={m.label} onClick={() => { setMenuOpen(false); m.onClick(); }}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left"
+                        style={{ color: INK, borderBottom: `1px solid ${HAIR}` }}>
+                        <Icon size={15} style={{ color: MUTE }} /> {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         </header>
 
         {/* 上部アラート（未対応タスク） */}
@@ -755,6 +804,69 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   )}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* 質問箱 */}
+          {tab === "questions" && (
+            <div className="px-6 pt-8 space-y-6">
+              <EdHeader en="Q&A" jp="質問箱" note="採用担当に直接きけます" />
+              {readOnly ? (
+                <p className="text-xs" style={{ color: MUTE }}>プレビューでは質問箱はご利用いただけません。</p>
+              ) : (
+                <>
+                  <div className="bg-white ml-in p-5" style={{ border: `1px solid ${HAIR}` }}>
+                    <p className="jp-mincho font-bold" style={{ fontSize: 15 }}>質問を送る</p>
+                    <p className="text-xs mt-1" style={{ color: MUTE }}>内容は採用担当のみが確認します。回答が届くとLINEでお知らせします（連携時）。</p>
+                    <textarea value={qText} onChange={(e) => setQText(e.target.value)} rows={3}
+                      placeholder="例）内定式の服装について教えてください。"
+                      className="w-full mt-3 p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                    {qErr && <p className="text-xs mt-1" style={{ color: "#DC2626" }}>{qErr}</p>}
+                    <button disabled={!qText.trim() || qBusy} onClick={submitQuestion}
+                      className="w-full mt-2 py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"
+                      style={{ background: ROSE, color: IVORY }}>
+                      <Send size={15} /> {qBusy ? "送信中…" : "質問を送信"}
+                    </button>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold mb-2" style={{ color: ROSE }}>あなたの質問（{qData.mine.length}）</p>
+                    {qData.mine.length === 0 ? (
+                      <p className="text-xs" style={{ color: MUTE }}>まだ質問はありません。</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {qData.mine.map((q) => (
+                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}` }}>
+                            <p className="text-sm whitespace-pre-wrap">{q.text}</p>
+                            {q.answer ? (
+                              <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${HAIR}` }}>
+                                <p className="text-xs font-bold mb-1" style={{ color: ROSE }}>採用担当より</p>
+                                <p className="text-sm whitespace-pre-wrap" style={{ color: INK }}>{q.answer}</p>
+                              </div>
+                            ) : (
+                              <p className="text-xs mt-2" style={{ color: MUTE }}>回答をお待ちください。</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {qData.faq.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold mb-2" style={{ color: MAUVE }}>みんなのQ&A（{qData.faq.length}）</p>
+                      <div className="space-y-3">
+                        {qData.faq.map((q) => (
+                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}` }}>
+                            <p className="text-sm font-bold">Q. {q.text}</p>
+                            <p className="text-sm mt-2 whitespace-pre-wrap" style={{ color: INK }}>A. {q.answer}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
