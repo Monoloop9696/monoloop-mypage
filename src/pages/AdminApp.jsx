@@ -22,7 +22,7 @@ import {
 } from "../lib/firestore";
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadline: "" };
-const EMPTY_SV = { title: "", due: "", time: "約3分", q1: "", opts: "", q2: "", multi: false };
+const EMPTY_SV = { title: "", dueDate: "", time: "約3分", q1: "", opts: "", q2: "", multi: false };
 
 export default function AdminApp() {
   const { signOut } = useAuth();
@@ -459,7 +459,8 @@ function AdminBody({
   const doAddSurvey = async () => {
     await addSurvey({
       title: sv.title,
-      due: sv.due ? `${sv.due} まで` : "期限なし",
+      dueDate: sv.dueDate || null,
+      due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
       time: sv.time || "約3分",
       q1: sv.q1,
       opts: sv.opts.split(/[、,]/).map((x) => x.trim()).filter(Boolean),
@@ -880,8 +881,8 @@ function AdminBody({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">回答期限</p>
-                    <input value={sv.due} onChange={(e) => setSv({ ...sv, due: e.target.value })}
-                      placeholder="例）8/30" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    <input type="date" value={sv.dueDate} onChange={(e) => setSv({ ...sv, dueDate: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   </div>
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">所要時間の目安</p>

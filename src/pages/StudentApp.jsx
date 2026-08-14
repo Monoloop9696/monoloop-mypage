@@ -54,6 +54,24 @@ function pickLoopChan(student, events) {
   return LOOPCHAN.latenight;
 }
 
+// ホームの日付・時刻表示（毎秒更新）
+function HomeClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const wd = ["日", "月", "火", "水", "木", "金", "土"][now.getDay()];
+  const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日（${wd}）`;
+  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+  return (
+    <div className="flex items-baseline gap-2 mt-2">
+      <span className="text-sm font-bold" style={{ color: INK }}>{dateStr}</span>
+      <span className="en-serif" style={{ fontSize: 18, letterSpacing: "0.04em", color: ROSE }}>{timeStr}</span>
+    </div>
+  );
+}
+
 export default function StudentApp() {
   const { user, signOut } = useAuth();
   const [student, setStudent] = useState(undefined); // undefined=読み込み中, null=無し
@@ -284,9 +302,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
-  // 上部アラート：未対応タスクの集約
-  const pendingEvents = myEvents.filter((e) => e.rsvp === null).length;
-  const pendingSurveys = mySurveys.filter((s) => !s.done).length;
+  // 上部アラート：未対応タスクの集約（受付終了＝期日超過は対象外）
+  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !(e.dateStr && e.dateStr < todayStr)).length;
+  const pendingSurveys = mySurveys.filter((s) => !s.done && !(s.dueDate && s.dueDate < todayStr)).length;
   const alerts = [];
   if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
   if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
@@ -339,6 +357,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <div className="px-6 pt-8 pb-9 relative">
                   <p style={caps(10, ROSE)}>Monoloop Onboarding — Class of {grad}</p>
                   <h1 className="font-bold mt-3" style={{ fontSize: 20, color: INK }}>こんにちは、{studentName}さん。</h1>
+                  <HomeClock />
 
                   {/* ループちゃん＋吹き出し */}
                   <div className="flex items-end gap-3 mt-5">
@@ -459,101 +478,153 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           )}
 
           {/* イベント */}
-          {tab === "event" && (
-            <div className="px-6 pt-8 space-y-6">
-              <EdHeader en="Events" jp="イベント" note="出欠のご回答をお願いします" />
-              {myEvents.length === 0 && <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>}
-              {myEvents.map((e, i) => (
-                <article key={e.id} className={"bg-white ml-in " + (i === 1 ? "ml-in-1" : i === 2 ? "ml-in-2" : "")} style={{ border: `1px solid ${HAIR}` }}>
-                  <div className="p-6">
-                    <div className="flex items-start justify-between gap-3">
-                      <p className="en-serif" style={{ fontStyle: "italic", fontSize: 32, lineHeight: 1, color: ROSE }}>
-                        {e.num}<span className="ml-2" style={caps(10, MAUVE, "0.2em")}>{e.en}</span>
-                      </p>
-                      {statusTag(e)}
-                    </div>
-                    <h3 className="jp-mincho font-bold mt-3" style={{ fontSize: 19 }}>{e.title}</h3>
-                    {e.copy && <p className="text-xs mt-1.5" style={{ color: MUTE }}>{e.copy}</p>}
-                    <div className="mt-4 space-y-1.5 text-xs" style={{ color: MUTE }}>
-                      <p className="flex items-center gap-2"><Clock size={12} /> {e.date}</p>
-                      <p className="flex items-center gap-2"><MapPin size={12} /> {e.place}</p>
-                      <p className="flex items-center gap-2"><ClipboardList size={12} /> 回答期限：{e.deadline}</p>
-                    </div>
-                    <div className="flex gap-2.5 mt-5">
-                      <button onClick={() => doRsvp(e.id, "yes")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
-                        style={e.rsvp === "yes" ? { background: ROSE, color: IVORY, border: `1px solid ${ROSE}` } : { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` }}>
-                        出席する
-                      </button>
-                      <button onClick={() => doRsvp(e.id, "no")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
-                        style={e.rsvp === "no" ? { background: "#6E5A62", color: "#fff", border: "1px solid #6E5A62" } : { background: "#fff", color: MUTE, border: `1px solid ${HAIR}` }}>
-                        欠席する
-                      </button>
-                    </div>
-                    {/* 到着受付（出席回答者のみ・イベント当日に押下可） */}
-                    {e.rsvp === "yes" && (
-                      <div className="mt-3">
-                        {e.arrived ? (
-                          <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
-                            style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
-                            <Check size={15} /> 到着を受け付けました
-                          </div>
-                        ) : (readOnly || e.dateStr === todayStr) ? (
-                          <button onClick={() => doArrive(e.id)}
-                            className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                            style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
-                            <MapPin size={15} /> 会場に到着したら押す
-                          </button>
-                        ) : (
-                          <div className="w-full py-2.5 text-xs font-bold text-center"
-                            style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
-                            当日にこちらから到着を受け付けます
-                          </div>
-                        )}
-                      </div>
-                    )}
+          {tab === "event" && (() => {
+            const isPast = (e) => e.dateStr && e.dateStr < todayStr;
+            const ended = myEvents.filter(isPast);
+            const activeEv = myEvents.filter((e) => !isPast(e));
+            const unanswered = activeEv.filter((e) => e.rsvp === null);
+            const answered = activeEv.filter((e) => e.rsvp !== null);
+
+            const EventCard = (e, isEnded) => (
+              <article key={e.id} className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, opacity: isEnded ? 0.75 : 1 }}>
+                <div className="p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="en-serif" style={{ fontStyle: "italic", fontSize: 32, lineHeight: 1, color: ROSE }}>
+                      {e.num}<span className="ml-2" style={caps(10, MAUVE, "0.2em")}>{e.en}</span>
+                    </p>
+                    {isEnded
+                      ? <span className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{ background: "#F3F4F6", color: "#9CA3AF" }}>受付終了</span>
+                      : statusTag(e)}
                   </div>
-                </article>
-              ))}
-            </div>
-          )}
+                  <h3 className="jp-mincho font-bold mt-3" style={{ fontSize: 19 }}>{e.title}</h3>
+                  {e.copy && <p className="text-xs mt-1.5" style={{ color: MUTE }}>{e.copy}</p>}
+                  <div className="mt-4 space-y-1.5 text-xs" style={{ color: MUTE }}>
+                    <p className="flex items-center gap-2"><Clock size={12} /> {e.date}</p>
+                    <p className="flex items-center gap-2"><MapPin size={12} /> {e.place}</p>
+                    <p className="flex items-center gap-2"><ClipboardList size={12} /> 回答期限：{e.deadline}</p>
+                  </div>
+                  {isEnded ? (
+                    <p className="mt-4 text-xs font-bold" style={{ color: MUTE }}>
+                      あなたの回答：{e.rsvp === "yes" ? "出席" : e.rsvp === "no" ? "欠席" : "未回答"}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex gap-2.5 mt-5">
+                        <button onClick={() => doRsvp(e.id, "yes")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
+                          style={e.rsvp === "yes" ? { background: ROSE, color: IVORY, border: `1px solid ${ROSE}` } : { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` }}>
+                          出席する
+                        </button>
+                        <button onClick={() => doRsvp(e.id, "no")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
+                          style={e.rsvp === "no" ? { background: "#6E5A62", color: "#fff", border: "1px solid #6E5A62" } : { background: "#fff", color: MUTE, border: `1px solid ${HAIR}` }}>
+                          欠席する
+                        </button>
+                      </div>
+                      {e.rsvp === "yes" && (
+                        <div className="mt-3">
+                          {e.arrived ? (
+                            <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+                              style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
+                              <Check size={15} /> 到着を受け付けました
+                            </div>
+                          ) : (readOnly || e.dateStr === todayStr) ? (
+                            <button onClick={() => doArrive(e.id)}
+                              className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                              style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
+                              <MapPin size={15} /> 会場に到着したら押す
+                            </button>
+                          ) : (
+                            <div className="w-full py-2.5 text-xs font-bold text-center"
+                              style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
+                              当日にこちらから到着を受け付けます
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </article>
+            );
+
+            return (
+              <div className="px-6 pt-8 space-y-8">
+                <EdHeader en="Events" jp="イベント" note="出欠のご回答をお願いします" />
+                {myEvents.length === 0 && <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>}
+                {unanswered.length > 0 && (
+                  <div className="space-y-5">
+                    <p className="text-xs font-bold" style={{ color: ROSE }}>未回答（{unanswered.length}）</p>
+                    {unanswered.map((e) => EventCard(e, false))}
+                  </div>
+                )}
+                {answered.length > 0 && (
+                  <div className="space-y-5">
+                    <p className="text-xs font-bold" style={{ color: MAUVE }}>回答済み（{answered.length}）</p>
+                    {answered.map((e) => EventCard(e, false))}
+                  </div>
+                )}
+                {ended.length > 0 && (
+                  <div className="space-y-5">
+                    <p className="text-xs font-bold" style={{ color: MUTE }}>受付終了（{ended.length}）</p>
+                    {ended.map((e) => EventCard(e, true))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* アンケート */}
-          {tab === "survey" && (
-            <div className="px-6 pt-8">
-              <EdHeader en="Survey" jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} />
-              {mySurveys.length === 0 ? (
-                <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のアンケートはありません。</p>
-              ) : (
-                <>
-                  <div className="mb-6" style={{ height: 2, background: "#F0DFE0" }}>
-                    <div style={{ height: 2, width: `${mySurveys.length ? (surveyDoneCount / mySurveys.length) * 100 : 0}%`, background: GOLD, transition: "width .6s ease" }} />
-                  </div>
-                  <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
-                    {mySurveys.map((s, i) => (
-                      <button key={s.id} disabled={s.done}
-                        onClick={() => { setActiveSurvey(s); setAns1(""); setAns2(""); setAnsMulti([]); }}
-                        className="w-full text-left px-5 py-5 flex items-center gap-4"
-                        style={{ borderBottom: i < mySurveys.length - 1 ? `1px solid ${HAIR}` : "none", opacity: s.done ? 0.65 : 1 }}>
-                        <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: s.done ? MAUVE : GOLD, width: 30 }}>0{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="jp-mincho font-bold text-sm truncate" style={{ fontSize: 15 }}>{s.title}</p>
-                          <p className="text-xs mt-1" style={{ color: MUTE }}>
-                            {s.done ? "ご回答ありがとうございました" : `${s.due || "期限なし"} ・ 所要 ${s.time || "—"}`}
-                          </p>
-                        </div>
-                        {s.done ? (
-                          <span style={caps(9, MAUVE, "0.18em")}>Answered</span>
-                        ) : (
-                          <span className="flex items-center gap-1" style={caps(9, GOLD, "0.18em")}>Open <ChevronRight size={12} /></span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs mt-4" style={{ color: MUTE }}>いただいた声は、研修や配属の設計に活かします。</p>
-                </>
-              )}
-            </div>
-          )}
+          {tab === "survey" && (() => {
+            const isPast = (s) => s.dueDate && s.dueDate < todayStr;
+            const ended = mySurveys.filter(isPast);
+            const activeSv = mySurveys.filter((s) => !isPast(s));
+            const unanswered = activeSv.filter((s) => !s.done);
+            const answered = activeSv.filter((s) => s.done);
+
+            const SurveyList = (items, isEnded) => (
+              <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
+                {items.map((s, i) => (
+                  <button key={s.id} disabled={s.done || isEnded}
+                    onClick={() => { setActiveSurvey(s); setAns1(""); setAns2(""); setAnsMulti([]); }}
+                    className="w-full text-left px-5 py-5 flex items-center gap-4"
+                    style={{ borderBottom: i < items.length - 1 ? `1px solid ${HAIR}` : "none", opacity: (s.done || isEnded) ? 0.65 : 1 }}>
+                    <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE : GOLD, width: 30 }}>0{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="jp-mincho font-bold text-sm truncate" style={{ fontSize: 15 }}>{s.title}</p>
+                      <p className="text-xs mt-1" style={{ color: MUTE }}>
+                        {isEnded ? "受付は終了しました" : s.done ? "ご回答ありがとうございました" : `${s.due || "期限なし"} ・ 所要 ${s.time || "—"}`}
+                      </p>
+                    </div>
+                    {isEnded ? (
+                      <span style={caps(9, MUTE, "0.18em")}>Closed</span>
+                    ) : s.done ? (
+                      <span style={caps(9, MAUVE, "0.18em")}>Answered</span>
+                    ) : (
+                      <span className="flex items-center gap-1" style={caps(9, GOLD, "0.18em")}>Open <ChevronRight size={12} /></span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            );
+
+            return (
+              <div className="px-6 pt-8">
+                <EdHeader en="Survey" jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} />
+                {mySurveys.length === 0 ? (
+                  <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のアンケートはありません。</p>
+                ) : (
+                  <>
+                    <div className="mb-6" style={{ height: 2, background: "#F0DFE0" }}>
+                      <div style={{ height: 2, width: `${mySurveys.length ? (surveyDoneCount / mySurveys.length) * 100 : 0}%`, background: GOLD, transition: "width .6s ease" }} />
+                    </div>
+                    {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2" style={{ color: GOLD }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
+                    {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MAUVE }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
+                    {ended.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MUTE }}>受付終了（{ended.length}）</p>{SurveyList(ended, true)}</>)}
+                    <p className="text-xs mt-4" style={{ color: MUTE }}>いただいた声は、研修や配属の設計に活かします。</p>
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {/* NEWS（記事） */}
           {tab === "news" && (
