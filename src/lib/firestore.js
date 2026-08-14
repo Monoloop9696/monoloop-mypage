@@ -220,7 +220,8 @@ export const setCohortPassword = (year, initialPassword) =>
 // =====================================================================
 // rsvps/{eventId}_{uid}
 // =====================================================================
-export const setRsvp = (eventId, uid, answer) =>
+// changed=true（既回答から別の回答へ変更）のとき、管理者向けに changedAt/changeSeen を記録
+export const setRsvp = (eventId, uid, answer, changed = false) =>
   setDoc(
     doc(db, "rsvps", `${eventId}_${uid}`),
     {
@@ -230,9 +231,14 @@ export const setRsvp = (eventId, uid, answer) =>
       updatedAt: serverTimestamp(),
       // 欠席に変更した場合は到着状態をリセット（merge で既存の arrived を保持しつつ上書き）
       ...(answer === "no" ? { arrived: false, arrivedAt: null } : {}),
+      ...(changed ? { changedAt: serverTimestamp(), changeSeen: false } : {}),
     },
     { merge: true }
   );
+
+// 管理者が「回答変更」を確認済みにする
+export const markRsvpChangeSeen = (eventId, uid) =>
+  updateDoc(doc(db, "rsvps", `${eventId}_${uid}`), { changeSeen: true });
 
 // イベント当日の到着受付（学生が自分の rsvp に arrived を付与）
 export const markArrived = (eventId, uid) =>

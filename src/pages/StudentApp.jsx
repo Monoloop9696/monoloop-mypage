@@ -183,6 +183,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     myRsvps.forEach((r) => { if (r.arrived) m[r.eventId] = true; });
     return m;
   }, [myRsvps]);
+  const changedMap = useMemo(() => {
+    const m = {};
+    myRsvps.forEach((r) => { if (r.changedAt) m[r.eventId] = true; });
+    return m;
+  }, [myRsvps]);
   const responseSet = useMemo(() => new Set(myResponses.map((r) => r.surveyId)), [myResponses]);
 
   // 到着ボタンの当日判定用（YYYY-MM-DD）
@@ -195,6 +200,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     ...e,
     rsvp: readOnly ? (previewRsvp[e.id] ?? null) : (rsvpMap[e.id] ?? null),
     arrived: readOnly ? !!previewArrived[e.id] : !!arrivedMap[e.id],
+    changed: readOnly ? false : !!changedMap[e.id],
   }));
   const mySurveys = surveys.map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
@@ -216,7 +222,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
       if (v === "no") setPreviewArrived((m) => ({ ...m, [id]: false }));
       return;
     }
-    setRsvp(id, uid, v);
+    const prev = rsvpMap[id] ?? null;
+    const changed = prev !== null && prev !== v; // 既回答からの変更
+    setRsvp(id, uid, v, changed);
   };
   const doArrive = (id) => {
     if (readOnly) {
@@ -519,6 +527,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                           欠席する
                         </button>
                       </div>
+                      {e.changed && (
+                        <p className="text-xs mt-2" style={{ color: MUTE }}>回答を変更しました。担当者に共有されます。</p>
+                      )}
                       {e.rsvp === "yes" && (
                         <div className="mt-3">
                           {e.arrived ? (

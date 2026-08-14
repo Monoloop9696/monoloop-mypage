@@ -13,7 +13,7 @@ import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, deleteSurveyCascade,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -286,6 +286,11 @@ function AdminBody({
     rsvps.forEach((r) => { if (r.arrived) m[`${r.eventId}_${r.uid}`] = true; });
     return m;
   }, [rsvps]);
+  const changedMap = useMemo(() => {
+    const m = {};
+    rsvps.forEach((r) => { if (r.changedAt && !r.changeSeen) m[`${r.eventId}_${r.uid}`] = true; });
+    return m;
+  }, [rsvps]);
   const respMap = useMemo(() => {
     const m = {};
     responses.forEach((r) => { m[`${r.surveyId}_${r.uid}`] = { q1: r.q1 || [], q2: r.q2 || "" }; });
@@ -293,6 +298,14 @@ function AdminBody({
   }, [responses]);
 
   const arrivedOf = (st, e) => !!arrivedMap[`${e.id}_${st.id}`];
+  const changedOf = (st, e) => !!changedMap[`${e.id}_${st.id}`];
+  const ackEventChanges = async (e) => {
+    const targets = activeStudents.filter((st) => changedOf(st, e));
+    try {
+      await Promise.all(targets.map((st) => markRsvpChangeSeen(e.id, st.id)));
+      await refreshAnswers();
+    } catch (ex) { setBanner(`確認処理に失敗しました：${ex.message}`); }
+  };
   const rsvpOf = (st, e) => {
     const a = rsvpMap[`${e.id}_${st.id}`];
     return a === "yes" ? "出席" : a === "no" ? "欠席" : "未回答";
@@ -785,6 +798,7 @@ function AdminBody({
               const list = activeStudents.map((st) => ({ st, r: rsvpOf(st, e) }));
               const yes = list.filter((x) => x.r === "出席").length;
               const arrivedCount = list.filter((x) => x.r === "出席" && arrivedOf(x.st, e)).length;
+              const changedCount = list.filter((x) => (x.r === "出席" || x.r === "欠席") && changedOf(x.st, e)).length;
               const open = expandedEvent === e.id;
               return (
                 <div key={e.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
@@ -797,6 +811,7 @@ function AdminBody({
                       <div className="text-right shrink-0">
                         <p className="text-xs text-gray-500">参加 {yes}/{totalActive}</p>
                         {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#1E874B" }}>到着 {arrivedCount}/{yes}</p>}
+                        {changedCount > 0 && <p className="text-xs mt-0.5 font-bold" style={{ color: "#B45309" }}>回答変更 {changedCount}件</p>}
                         <p className="text-xs mt-0.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
                       </div>
                     </div>
@@ -820,6 +835,7 @@ function AdminBody({
                               {g.length === 0 && <span className="text-xs text-gray-300">なし</span>}
                               {g.map((x) => {
                                 const arr = k === "出席" && arrivedOf(x.st, e);
+                                const chg = (k === "出席" || k === "欠席") && changedOf(x.st, e);
                                 return (
                                   <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1"
                                     style={
@@ -828,6 +844,7 @@ function AdminBody({
                                         : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" }
                                     }>
                                     {arr && <CheckCircle2 size={11} />}{x.st.name}
+                                    {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
                                   </span>
                                 );
                               })}
@@ -838,10 +855,18 @@ function AdminBody({
                           </div>
                         );
                       })}
+                      {changedCount > 0 && (
+                        <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
+                      )}
                       <div className="flex items-center gap-2 flex-wrap mt-1">
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
                         </button>
+                        {changedCount > 0 && (
+                          <button onClick={() => ackEventChanges(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FFF7E6" }}>
+                            変更を確認（{changedCount}）
+                          </button>
+                        )}
                         {confirmDel === `event:${e.id}` ? (
                           <>
                             <button onClick={() => doDeleteEvent(e.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（出欠も消去）</button>
