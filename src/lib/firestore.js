@@ -378,10 +378,12 @@ export const deleteNotice = (id) => deleteDoc(doc(db, "notices", id));
 //   articles/{id}/images/{imgId} : { data(dataURL), order, createdAt }
 // =====================================================================
 export function listenPublishedArticles(cb) {
-  return onSnapshot(collection(db, "articles"), (snap) => {
+  // Security Rules（published==true のみ学生に許可）に合わせ、クエリ自体を published で絞る。
+  // 絞らずに全件取得すると学生ではクエリ全体が権限拒否され、1件も表示されない。
+  const qy = query(collection(db, "articles"), where("published", "==", true));
+  return onSnapshot(qy, (snap) => {
     const list = snap.docs
       .map(withId)
-      .filter((a) => a.published)
       .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
     cb(list);
   });
