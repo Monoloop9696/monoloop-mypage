@@ -103,7 +103,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 配信ログ
+    // 配信ログ（宛先の氏名も記録：あとで履歴から「誰に送ったか」を確認できる）
     await dbAdmin.collection("broadcasts").add({
       target: targetLabel || target || "全員",
       body: text,
@@ -111,6 +111,8 @@ export default async function handler(req, res) {
       count: recipients.length,
       lineCount,
       mailCount,
+      lineNames: lineRecipients.map((s) => s.name || "（名前なし）"),
+      mailNames: mailUsers.map((s) => s.name || "（名前なし）"),
       sentBy: admin.email || null,
       sentAt: FieldValue.serverTimestamp(),
     });

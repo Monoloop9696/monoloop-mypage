@@ -178,11 +178,13 @@ function AdminBody({
 
   // ---- 配信履歴 ----
   const [broadcasts, setBroadcasts] = useState([]);
+  const [expandedBc, setExpandedBc] = useState(null); // 展開中の配信id
+  const [bcLimit, setBcLimit] = useState(10); // 表示件数
   const refreshBroadcasts = async () => {
     try { setBroadcasts(await loadBroadcasts()); }
     catch (ex) { setBanner(`配信履歴の取得に失敗しました：${ex.message}`); }
   };
-  useEffect(() => { if (tab === "line") refreshBroadcasts(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === "line") { refreshBroadcasts(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -1849,18 +1851,66 @@ function AdminBody({
               <p className="text-xs text-gray-400">まだ配信はありません。</p>
             ) : (
               <div className="space-y-2">
-                {broadcasts.map((b) => (
-                  <div key={b.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-bold truncate">{b.target || "全員"}</p>
-                      <p className="text-xs text-gray-400 shrink-0">{b.sentAt?.toDate ? b.sentAt.toDate().toLocaleString("ja-JP") : "—"}</p>
+                {broadcasts.slice(0, bcLimit).map((b) => {
+                  const open = expandedBc === b.id;
+                  const hasNames = (b.lineNames && b.lineNames.length) || (b.mailNames && b.mailNames.length);
+                  return (
+                    <div key={b.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                      <button onClick={() => setExpandedBc(open ? null : b.id)} className="w-full text-left p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-bold truncate">{b.target || "全員"}</p>
+                          <p className="text-xs text-gray-400 shrink-0">{b.sentAt?.toDate ? b.sentAt.toDate().toLocaleString("ja-JP") : "—"}</p>
+                        </div>
+                        <p className="text-xs mt-1" style={{ color: LINE_GREEN }}>
+                          LINE {b.lineCount ?? 0}件<span className="text-gray-400"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
+                        </p>
+                        {b.body && <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 whitespace-pre-wrap">{b.body}</p>}
+                        <p className="text-xs mt-1.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "内容・宛先を見る ▼"}</p>
+                      </button>
+                      {open && (
+                        <div className="px-3 pb-3 border-t border-gray-100 pt-2.5 space-y-2.5">
+                          {b.body && (
+                            <div>
+                              <p className="text-[11px] font-bold text-gray-400 mb-1">本文</p>
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-2.5">{b.body}</p>
+                            </div>
+                          )}
+                          {hasNames ? (
+                            <>
+                              {b.lineNames && b.lineNames.length > 0 && (
+                                <div>
+                                  <p className="text-[11px] font-bold mb-1" style={{ color: LINE_GREEN }}>LINE送信（{b.lineNames.length}名）</p>
+                                  <div className="flex flex-wrap gap-1 overflow-y-auto" style={{ maxHeight: 132 }}>
+                                    {b.lineNames.map((n, i) => (
+                                      <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#E7F9EE", color: "#059947" }}>{n}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {b.mailNames && b.mailNames.length > 0 && (
+                                <div>
+                                  <p className="text-[11px] font-bold text-gray-500 mb-1">メール送信（{b.mailNames.length}名）</p>
+                                  <div className="flex flex-wrap gap-1 overflow-y-auto" style={{ maxHeight: 132 }}>
+                                    {b.mailNames.map((n, i) => (
+                                      <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#F3F4F6", color: "#6B7280" }}>{n}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-gray-400">この配信は宛先の記録がありません（機能追加より前の配信）。</p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-xs mt-1" style={{ color: LINE_GREEN }}>
-                      LINE {b.lineCount ?? 0}件<span className="text-gray-400"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
-                    </p>
-                    {b.body && <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 whitespace-pre-wrap">{b.body}</p>}
-                  </div>
-                ))}
+                  );
+                })}
+                {broadcasts.length > bcLimit && (
+                  <button onClick={() => setBcLimit((n) => n + 10)} className="w-full py-2 rounded-lg text-xs font-bold border border-gray-300 text-gray-500 bg-white">
+                    さらに表示（残り {broadcasts.length - bcLimit} 件）
+                  </button>
+                )}
               </div>
             )}
           </div>
