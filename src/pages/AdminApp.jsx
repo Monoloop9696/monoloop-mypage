@@ -1679,6 +1679,9 @@ function AdminBody({
       {tab === "line" && (
         <div className="px-4 pt-4 space-y-4">
           <SectionTitle>LINE一括配信</SectionTitle>
+          <div className="rounded-xl p-3 text-xs" style={{ background: "#FFF7E6", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
+            ここから送った内容は、<span className="font-bold">LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません</span>（API送信のため）。送信内容・実績はこの画面下部の「配信履歴」でご確認ください。各受信者のトークには通常どおり届きます。
+          </div>
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-2">配信対象</p>
