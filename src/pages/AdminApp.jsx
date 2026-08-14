@@ -8,7 +8,7 @@ import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
-import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion } from "../lib/api";
+import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
@@ -183,6 +183,11 @@ function AdminBody({
   const refreshBroadcasts = async () => {
     try { setBroadcasts(await loadBroadcasts()); }
     catch (ex) { setBanner(`配信履歴の取得に失敗しました：${ex.message}`); }
+  };
+  const removeBroadcast = async (id) => {
+    setConfirmDel(null);
+    try { await deleteBroadcast(id); await refreshBroadcasts(); }
+    catch (ex) { setBanner(`配信履歴の削除に失敗しました：${ex.message}`); }
   };
   useEffect(() => { if (tab === "line") { refreshBroadcasts(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1901,6 +1906,18 @@ function AdminBody({
                           ) : (
                             <p className="text-xs text-gray-400">この配信は宛先の記録がありません（機能追加より前の配信）。</p>
                           )}
+                          <div className="flex justify-end pt-1">
+                            {confirmDel === `bc:${b.id}` ? (
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => removeBroadcast(b.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>この履歴を削除</button>
+                                <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => setConfirmDel(`bc:${b.id}`)} className="flex items-center gap-1 text-xs font-bold" style={{ color: "#DC2626" }}>
+                                <Trash2 size={13} /> この履歴を削除
+                              </button>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>

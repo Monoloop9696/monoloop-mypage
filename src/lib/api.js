@@ -52,6 +52,9 @@ export const setStudentAccount = (payload) =>
 export const lineBroadcast = (payload) =>
   post("/api/line-broadcast", payload, { authed: true });
 
+// 管理者：配信履歴の削除
+export const deleteBroadcast = (id) => post("/api/broadcast-delete", { id }, { authed: true });
+
 // 質問箱：投稿（学生）／一覧取得（学生=自分＋FAQ / 管理者=全件）／回答・公開・削除（管理者）
 export const askQuestion = (payload) => post("/api/question-ask", payload, { authed: true });
 export const listQuestions = () => post("/api/question-list", {}, { authed: true });
