@@ -1707,9 +1707,6 @@ function AdminBody({
       {tab === "line" && (
         <div className="px-4 pt-4 space-y-4">
           <SectionTitle>LINE一括配信</SectionTitle>
-          <div className="rounded-xl p-3 text-xs" style={{ background: "#FFF7E6", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
-            ここから送った内容は、<span className="font-bold">LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません</span>（API送信のため）。送信内容・実績はこの画面下部の「配信履歴」でご確認ください。各受信者のトークには通常どおり届きます。
-          </div>
 
           {/* 今月のLINE送信数（無料枠） */}
           {quota && quota.limit != null && (() => {
@@ -1904,9 +1901,9 @@ function AdminBody({
                 <RefreshCw size={12} /> 更新
               </button>
             </div>
-            <p className="text-xs text-gray-500 mb-2">
-              このアプリから送った一括配信の記録です。※LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません（API送信のため）。
-            </p>
+            <div className="rounded-xl p-3 text-xs mb-2" style={{ background: "#FFF7E6", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
+              このアプリから送った一括配信の記録です。ここから送った内容は、<span className="font-bold">LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません</span>（API送信のため）。各受信者のトークには通常どおり届きます。
+            </div>
             {broadcasts.length === 0 ? (
               <p className="text-xs text-gray-400">まだ配信はありません。</p>
             ) : (
