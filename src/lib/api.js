@@ -59,6 +59,7 @@ export const deleteBroadcast = (id) => post("/api/broadcast-delete", { id }, { a
 export const getLineQuota = () => post("/api/line-quota", {}, { authed: true });
 
 // 質問箱：投稿（学生）／一覧取得（学生=自分＋FAQ / 管理者=全件）／回答・公開・削除（管理者）
-export const askQuestion = (payload) => post("/api/question-ask", payload, { authed: true });
-export const listQuestions = () => post("/api/question-list", {}, { authed: true });
-export const answerQuestion = (payload) => post("/api/question-answer", payload, { authed: true });
+// ※Vercel無料プランの関数数上限対策で /api/questions に action で集約
+export const askQuestion = (payload) => post("/api/questions", { action: "ask", ...payload }, { authed: true });
+export const listQuestions = () => post("/api/questions", { action: "list" }, { authed: true });
+export const answerQuestion = (payload) => post("/api/questions", { action: "answer", ...payload }, { authed: true });
