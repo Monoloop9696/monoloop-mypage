@@ -1,9 +1,10 @@
 // 画像ファイルを縮小＆JPEG圧縮して dataURL を返す。
 // Firestore の1ドキュメント上限(約1MB)に収まるよう、必要なら品質を段階的に下げる。
 export function fileToCompressedDataURL(file, opts = {}) {
-  const maxDim = opts.maxDim || 1280;
-  let quality = opts.quality || 0.72;
-  const maxLen = opts.maxLen || 900 * 1024; // dataURL文字列長の上限（≒バイト）
+  // 画質優先の既定値。Firestore の1ドキュメント上限(約1MB)ぎりぎりまで使う。
+  const maxDim = opts.maxDim || 1600;
+  let quality = opts.quality || 0.85;
+  const maxLen = opts.maxLen || 1000 * 1000; // dataURL文字列長の上限（≒バイト）。1MB制限内で最大化
 
   return new Promise((resolve, reject) => {
     if (!file || !file.type || !file.type.startsWith("image/")) {
@@ -14,21 +15,29 @@ export function fileToCompressedDataURL(file, opts = {}) {
     const img = new Image();
     img.onload = () => {
       URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxDim || height > maxDim) {
-        const s = maxDim / Math.max(width, height);
-        width = Math.round(width * s);
-        height = Math.round(height * s);
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-      let dataUrl = canvas.toDataURL("image/jpeg", quality);
-      while (dataUrl.length > maxLen && quality > 0.4) {
-        quality -= 0.1;
-        dataUrl = canvas.toDataURL("image/jpeg", quality);
+      // 指定の寸法・品質でJPEGのdataURLを作る
+      const render = (dimension, q) => {
+        let { width, height } = img;
+        if (width > dimension || height > dimension) {
+          const s = dimension / Math.max(width, height);
+          width = Math.round(width * s);
+          height = Math.round(height * s);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        return canvas.toDataURL("image/jpeg", q);
+      };
+      let dim = maxDim;
+      let q = quality;
+      let dataUrl = render(dim, q);
+      // まず品質を段階的に下げ（0.5まで）、それでも大きければ寸法を下げる（画質優先）
+      while (dataUrl.length > maxLen) {
+        if (q > 0.5) q = Math.max(0.5, q - 0.07);
+        else if (dim > 800) { dim = Math.round(dim * 0.85); q = quality; }
+        else break;
+        dataUrl = render(dim, q);
       }
       if (dataUrl.length > maxLen) {
         reject(new Error("画像サイズが大きすぎます。別の写真をお試しください。"));
