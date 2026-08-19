@@ -332,7 +332,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
   // 上部アラート：未対応タスクの集約（受付終了＝期日超過は対象外）
-  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !(e.dateStr && e.dateStr < todayStr)).length;
+  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !(e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr))).length;
   const pendingSurveys = mySurveys.filter((s) => !s.done && !(s.dueDate && s.dueDate < todayStr)).length;
   const alerts = [];
   if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
@@ -531,9 +531,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* イベント */}
           {tab === "event" && (() => {
-            const isPast = (e) => e.dateStr && e.dateStr < todayStr;
-            const ended = myEvents.filter(isPast);
-            const activeEv = myEvents.filter((e) => !isPast(e));
+            // 回答期限(deadlineDate)を過ぎたら受付終了。未設定なら開催日を基準にフォールバック
+            const isClosed = (e) => (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
+            const eventOver = (e) => e.dateStr && e.dateStr < todayStr; // 開催日が過ぎた
+            const ended = myEvents.filter(isClosed);
+            const activeEv = myEvents.filter((e) => !isClosed(e));
             const unanswered = activeEv.filter((e) => e.rsvp === null);
             const answered = activeEv.filter((e) => e.rsvp !== null);
 
@@ -557,7 +559,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   </div>
                   {isEnded ? (
                     <p className="mt-4 text-xs font-bold" style={{ color: MUTE }}>
-                      あなたの回答：{e.rsvp === "yes" ? "出席" : e.rsvp === "no" ? "欠席" : "未回答"}
+                      回答受付は終了しました。あなたの回答：{e.rsvp === "yes" ? "出席" : e.rsvp === "no" ? "欠席" : "未回答"}
                     </p>
                   ) : (
                     <>
@@ -574,28 +576,29 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       {e.changed && (
                         <p className="text-xs mt-2" style={{ color: MUTE }}>回答を変更しました。担当者に共有されます。</p>
                       )}
-                      {e.rsvp === "yes" && (
-                        <div className="mt-3">
-                          {e.arrived ? (
-                            <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
-                              style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
-                              <Check size={15} /> 到着を受け付けました
-                            </div>
-                          ) : (readOnly || e.dateStr === todayStr) ? (
-                            <button onClick={() => doArrive(e.id)}
-                              className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                              style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
-                              <MapPin size={15} /> 会場に到着したら押す
-                            </button>
-                          ) : (
-                            <div className="w-full py-2.5 text-xs font-bold text-center"
-                              style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
-                              当日にこちらから到着を受け付けます
-                            </div>
-                          )}
+                    </>
+                  )}
+                  {/* 到着：出席者は受付終了後でも当日は押せる（開催日が過ぎるまで表示） */}
+                  {e.rsvp === "yes" && (e.arrived || !eventOver(e) || readOnly) && (
+                    <div className="mt-3">
+                      {e.arrived ? (
+                        <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+                          style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
+                          <Check size={15} /> 到着を受け付けました
+                        </div>
+                      ) : (readOnly || e.dateStr === todayStr) ? (
+                        <button onClick={() => doArrive(e.id)}
+                          className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                          style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
+                          <MapPin size={15} /> 会場に到着したら押す
+                        </button>
+                      ) : (
+                        <div className="w-full py-2.5 text-xs font-bold text-center"
+                          style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
+                          当日にこちらから到着を受け付けます
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
               </article>

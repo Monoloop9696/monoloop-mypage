@@ -22,7 +22,8 @@ import {
   loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
-const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadline: "" };
+const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "" };
+const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
 const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [] };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
@@ -496,7 +497,9 @@ function AdminBody({
   const publishEventData = (data) =>
     addEvent({
       title: data.title, dateStr: data.date, time: data.time,
-      place: data.place || "未定", deadline: data.deadline || "追ってご案内",
+      place: data.place || "未定",
+      deadlineDate: data.deadlineDate || null,
+      deadline: deadlineLabel(data.deadlineDate),
       copy: data.copy || "", grad: selectedYear, published: true,
     });
 
@@ -506,21 +509,17 @@ function AdminBody({
     resetForm();
   };
   const saveDraft = async () => {
-    if (editingDraftId) {
-      await updateEvent(editingDraftId, {
-        title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
-        copy: ev.copy, deadline: ev.deadline, grad: selectedYear, published: false,
-      });
-    } else {
-      await addEvent({
-        title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
-        copy: ev.copy, deadline: ev.deadline, grad: selectedYear, published: false,
-      });
-    }
+    const base = {
+      title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
+      copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadline: deadlineLabel(ev.deadlineDate),
+      grad: selectedYear, published: false,
+    };
+    if (editingDraftId) await updateEvent(editingDraftId, base);
+    else await addEvent(base);
     resetForm();
   };
   const editDraft = (dft) => {
-    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadline: dft.deadline });
+    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "" });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
   };
@@ -874,8 +873,9 @@ function AdminBody({
                 </div>
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">出欠の回答期限</p>
-                  <input value={ev.deadline} onChange={(e) => setEv({ ...ev, deadline: e.target.value })}
-                    placeholder="例）11/20 まで" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  <input type="date" value={ev.deadlineDate} onChange={(e) => setEv({ ...ev, deadlineDate: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  <p className="text-[11px] text-gray-400 mt-1">この日を過ぎると学生は出欠を回答・変更できなくなります（未設定なら開催日まで回答可）。</p>
                 </div>
                 <div className="flex gap-2">
                   <button disabled={!ev.title} onClick={saveDraft}

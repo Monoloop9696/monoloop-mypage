@@ -58,7 +58,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 
 - `students/{uid}`: name, kana(フリガナ・あいうえお順の並び替えに使用), univ, birth, email, phone, zip, address, livesAtHome, homeZip, homeAddress, grad, joinDate, status(内定/承諾/辞退/承諾後辞退), deleted, lineUserId, linkCode, createdAt
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
-- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadline, copy, grad, published
+- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), copy, grad, published(false=下書き)。※期限超過で学生側は受付終了へ。到着ボタンは締切後でも開催日当日は押下可
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no)
 - `surveys/{id}`: title, dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
