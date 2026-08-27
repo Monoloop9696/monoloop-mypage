@@ -36,17 +36,19 @@ export default async function handler(req, res) {
       .filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
 
     if (typeof target === "string" && target.startsWith("event:")) {
-      // イベント参加状況で絞り込み： event:<eventId>:<group>（group = yes/no/none）
+      // イベント参加状況で絞り込み： event:<eventId>:<group>（group = yes/arrived/no/none）
       const [, eventId, group] = target.split(":");
       const rsnap = await dbAdmin.collection("rsvps").where("eventId", "==", eventId).get();
-      const yes = new Set(), no = new Set();
+      const yes = new Set(), no = new Set(), arrived = new Set();
       rsnap.docs.forEach((d) => {
         const r = d.data();
         if (r.answer === "yes") yes.add(r.uid);
         else if (r.answer === "no") no.add(r.uid);
+        if (r.arrived === true) arrived.add(r.uid); // 出席かつ当日到着ボタンを押した人
       });
       recipients = recipients.filter((s) => {
         if (group === "yes") return yes.has(s.id);
+        if (group === "arrived") return arrived.has(s.id);
         if (group === "no") return no.has(s.id);
         return !yes.has(s.id) && !no.has(s.id); // none = 未回答
       });

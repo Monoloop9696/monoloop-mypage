@@ -24,7 +24,7 @@ import {
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "" };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
-const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [] };
+const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -410,15 +410,32 @@ function AdminBody({
   const isEventTarget = target.startsWith("event:");
   const [, tEventId, tGroup] = isEventTarget ? target.split(":") : [];
   const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
-  const groupLabelOf = (g) => (g === "yes" ? "出席者" : g === "no" ? "欠席者" : "未回答者");
+  const groupLabelOf = (g) => (g === "yes" ? "出席者" : g === "arrived" ? "到着者（当日来場）" : g === "no" ? "欠席者" : "未回答者");
+  // イベント×グループ に該当するか（arrived=出席かつ到着ボタン押下）
+  const inEventGroup = (st, e, g) => {
+    const r = rsvpOf(st, e);
+    if (g === "yes") return r === "出席";
+    if (g === "arrived") return r === "出席" && arrivedOf(st, e);
+    if (g === "no") return r === "欠席";
+    return r === "未回答";
+  };
+  // アンケートの対象者（全員 or 特定イベントの参加者）
+  const surveyAudience = (s) => {
+    const a = s && s.audience;
+    if (!a || a.type !== "event" || !a.eventId) return activeStudents;
+    const e = events.find((x) => x.id === a.eventId);
+    if (!e) return activeStudents;
+    return activeStudents.filter((st) => inEventGroup(st, e, a.group || "arrived"));
+  };
+  const audienceLabel = (s) => {
+    const a = s && s.audience;
+    if (!a || a.type !== "event" || !a.eventId) return "全員";
+    const e = events.find((x) => x.id === a.eventId);
+    return `${e ? e.title : "イベント"}・${groupLabelOf(a.group || "arrived")}`;
+  };
 
   const targetCount = isEventTarget
-    ? (targetEvent
-        ? activeStudents.filter((s) => {
-            const r = rsvpOf(s, targetEvent);
-            return tGroup === "yes" ? r === "出席" : tGroup === "no" ? r === "欠席" : r === "未回答";
-          }).length
-        : 0)
+    ? (targetEvent ? activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup)).length : 0)
     : target === "全員" ? activeStudents.length
     : target === "内定者（承諾前）" ? preAccept
     : target === "内定承諾者" ? accepted
@@ -432,10 +449,7 @@ function AdminBody({
   const targetRecipientList = (() => {
     if (isEventTarget) {
       if (!targetEvent) return [];
-      return activeStudents.filter((s) => {
-        const r = rsvpOf(s, targetEvent);
-        return tGroup === "yes" ? r === "出席" : tGroup === "no" ? r === "欠席" : r === "未回答";
-      });
+      return activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup));
     }
     if (target === "内定者（承諾前）") return activeStudents.filter((s) => s.status === "内定");
     if (target === "内定承諾者") return activeStudents.filter((s) => s.status === "承諾");
@@ -538,6 +552,10 @@ function AdminBody({
       options: q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean),
       required: q.required !== false,
     })),
+    // 対象者：全員 or 特定イベントの参加者(出席/到着)
+    audience: (sv.audType === "event" && sv.audEventId)
+      ? { type: "event", eventId: sv.audEventId, group: sv.audGroup || "arrived" }
+      : { type: "all" },
     grad: selectedYear,
     published,
   });
@@ -555,9 +573,13 @@ function AdminBody({
   };
   const editSurvey = (s) => {
     setEditingSurveyId(s.id);
+    const a = s.audience;
     setSv({
       title: s.title || "", dueDate: s.dueDate || "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      audType: a && a.type === "event" ? "event" : "all",
+      audEventId: a && a.type === "event" ? (a.eventId || "") : "",
+      audGroup: a && a.type === "event" ? (a.group || "arrived") : "arrived",
     });
     setShowSurveyForm(true);
   };
@@ -576,6 +598,7 @@ function AdminBody({
     setSv({
       title: t.data.title || "", dueDate: "", time: t.data.time || "約3分",
       questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      audType: "all", audEventId: "", audGroup: "arrived",
     });
   };
   // 設問ビルダー操作
@@ -749,7 +772,7 @@ function AdminBody({
   const exportSurveyCsv = (s) => {
     const qs = surveyQuestions(s);
     const header = ["氏名", "大学", "回答状況", ...qs.map((q, i) => `Q${i + 1}:${q.label}`)];
-    const rows = activeStudents.map((st) => {
+    const rows = surveyAudience(s).map((st) => {
       const a = answerOf(st, s);
       const cells = qs.map((q) => {
         if (!a) return "";
@@ -1050,6 +1073,39 @@ function AdminBody({
                   </div>
                 </div>
 
+                {/* 対象者 */}
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">対象者</p>
+                  <div className="flex gap-2">
+                    {[["all", "全員"], ["event", "イベント参加者"]].map(([v, label]) => (
+                      <button key={v} onClick={() => setSv({ ...sv, audType: v })}
+                        className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                        style={sv.audType === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {sv.audType === "event" && (
+                    <div className="mt-2 space-y-2">
+                      <select value={sv.audEventId} onChange={(e) => setSv({ ...sv, audEventId: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg p-2 text-xs bg-white">
+                        <option value="">イベントを選択…</option>
+                        {yearEvents.map((e) => (<option key={e.id} value={e.id}>{e.title}</option>))}
+                      </select>
+                      <div className="flex gap-2">
+                        {[["yes", "出席者（回答）"], ["arrived", "到着者（当日来場）"]].map(([v, label]) => (
+                          <button key={v} onClick={() => setSv({ ...sv, audGroup: v })}
+                            className="flex-1 py-1.5 rounded-lg text-xs font-bold border"
+                            style={sv.audGroup === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-gray-400">選んだイベントの参加者だけに、このアンケートが表示・集計されます。</p>
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-gray-500">設問</p>
                   {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。</p>}
@@ -1137,25 +1193,31 @@ function AdminBody({
             )}
 
             {yearSurveys.map((s) => {
-              const list = activeStudents.map((st) => ({ st, r: answeredOf(st, s) }));
+              const aud = surveyAudience(s);
+              const audTotal = aud.length;
+              const list = aud.map((st) => ({ st, r: answeredOf(st, s) }));
               const done = list.filter((x) => x.r === "回答済").length;
               const open = expandedSurvey === s.id;
+              const targeted = s.audience && s.audience.type === "event";
               return (
                 <div key={s.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
                   <button onClick={() => setExpandedSurvey(open ? null : s.id)} className="w-full text-left p-4">
                     <div className="flex justify-between text-sm gap-2">
-                      <p className="font-bold min-w-0 truncate">{s.title}</p>
+                      <div className="min-w-0">
+                        <p className="font-bold truncate">{s.title}</p>
+                        {targeted && <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>対象：{audienceLabel(s)}</p>}
+                      </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-500">{done}/{totalActive} 回答</p>
+                        <p className="text-xs text-gray-500">{done}/{audTotal} 回答</p>
                         <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
                       </div>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${totalActive ? (done / totalActive) * 100 : 0}%`, background: "#5B8DEF" }} />
+                      <div className="h-full rounded-full" style={{ width: `${audTotal ? (done / audTotal) * 100 : 0}%`, background: "#5B8DEF" }} />
                     </div>
                   </button>
                   {open && (() => {
-                    const detail = activeStudents.map((st) => ({ st, a: answerOf(st, s) }));
+                    const detail = aud.map((st) => ({ st, a: answerOf(st, s) }));
                     const answered = detail.filter((x) => x.a);
                     const unanswered = detail.filter((x) => !x.a);
                     const qs = surveyQuestions(s);
@@ -1758,7 +1820,7 @@ function AdminBody({
               </select>
               {isEventTarget && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {["yes", "no", "none"].map((g) => (
+                  {["yes", "arrived", "no", "none"].map((g) => (
                     <button key={g} onClick={() => setTarget(`event:${tEventId}:${g}`)} className="text-xs font-bold px-3 py-2 rounded-full border"
                       style={tGroup === g ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
                       {groupLabelOf(g)}

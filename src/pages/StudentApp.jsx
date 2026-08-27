@@ -207,7 +207,19 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     arrived: readOnly ? !!previewArrived[e.id] : !!arrivedMap[e.id],
     changed: readOnly ? false : !!changedMap[e.id],
   }));
-  const mySurveys = surveys.map((s) => ({ ...s, done: responseSet.has(s.id) }));
+  // 対象者フィルタ：特定イベントの参加者(出席/到着)向けアンケートは、該当する学生にだけ表示
+  const inSurveyAudience = (s) => {
+    const a = s.audience;
+    if (!a || a.type !== "event" || !a.eventId) return true;
+    if (readOnly) return true; // プレビューでは全部表示
+    const r = myRsvps.find((x) => x.eventId === a.eventId);
+    if (!r) return false;
+    if (a.group === "arrived") return r.answer === "yes" && r.arrived === true;
+    if (a.group === "yes") return r.answer === "yes";
+    if (a.group === "no") return r.answer === "no";
+    return !r.answer;
+  };
+  const mySurveys = surveys.filter(inSurveyAudience).map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
 

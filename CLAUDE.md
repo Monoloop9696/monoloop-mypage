@@ -61,6 +61,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), copy, grad, published(false=下書き)。※期限超過で学生側は受付終了へ。到着ボタンは締切後でも開催日当日は押下可
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no)
 - `surveys/{id}`: title, dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
+  - surveys には **audience**（{type:"all"} または {type:"event", eventId, group:"yes"|"arrived"}）で対象者を限定可。学生側は自分のrsvpで判定して表示、管理集計/CSVも対象者を分母に。LINE配信のイベント対象は group=yes/arrived/no/none（arrived=出席かつ当日到着ボタン押下）
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
 - `journeys/{grad}`: steps[]（id,label,desc,type, 任意で link/cta）
