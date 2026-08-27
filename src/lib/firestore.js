@@ -265,6 +265,21 @@ export const markRsvpChangeSeen = (eventId, uid) =>
 // 管理者が学生の出欠を「未回答」に戻す（rsvpドキュメント削除）
 export const deleteRsvp = (eventId, uid) => deleteDoc(doc(db, "rsvps", `${eventId}_${uid}`));
 
+// 管理者が学生の出欠を設定（欠席時はキャンセル理由を保存。欠席にすると到着はリセット）
+export const adminSetRsvp = (eventId, uid, answer, reason = "") =>
+  setDoc(
+    doc(db, "rsvps", `${eventId}_${uid}`),
+    {
+      eventId,
+      uid,
+      answer,
+      updatedAt: serverTimestamp(),
+      cancelReason: answer === "no" ? (reason || "") : null,
+      ...(answer === "no" ? { arrived: false, arrivedAt: null } : {}),
+    },
+    { merge: true }
+  );
+
 // 管理者が学生の到着状態を切り替える（押し忘れ対応）
 export const setRsvpArrived = (eventId, uid, arrived) =>
   setDoc(

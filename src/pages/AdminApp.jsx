@@ -15,7 +15,7 @@ import {
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
   addSurveyTemplate, deleteSurveyTemplate,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, setRsvp, deleteRsvp, loadBroadcasts,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -306,6 +306,9 @@ function AdminBody({
   const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
   const [historyExpanded, setHistoryExpanded] = useState(null);
   const [showTargetModal, setShowTargetModal] = useState(false);
+  const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
+  const [attendAns, setAttendAns] = useState("出席");
+  const [cancelReason, setCancelReason] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -335,6 +338,11 @@ function AdminBody({
     rsvps.forEach((r) => { if (r.changedAt && !r.changeSeen) m[`${r.eventId}_${r.uid}`] = true; });
     return m;
   }, [rsvps]);
+  const cancelReasonMap = useMemo(() => {
+    const m = {};
+    rsvps.forEach((r) => { if (r.cancelReason) m[`${r.eventId}_${r.uid}`] = r.cancelReason; });
+    return m;
+  }, [rsvps]);
   const respMap = useMemo(() => {
     const m = {};
     responses.forEach((r) => { m[`${r.surveyId}_${r.uid}`] = responseAnswers(r); });
@@ -342,6 +350,7 @@ function AdminBody({
   }, [responses]);
 
   const arrivedOf = (st, e) => !!arrivedMap[`${e.id}_${st.id}`];
+  const reasonOf = (st, e) => cancelReasonMap[`${e.id}_${st.id}`] || "";
   const changedOf = (st, e) => !!changedMap[`${e.id}_${st.id}`];
   const ackEventChanges = async (e) => {
     const targets = activeStudents.filter((st) => changedOf(st, e));
@@ -357,11 +366,11 @@ function AdminBody({
       await refreshAnswers();
     } catch (ex) { setBanner(`到着状態の更新に失敗しました：${ex.message}`); }
   };
-  // 管理者が学生の出欠を変更（当日欠席の反映など）。ans: 出席/欠席/未回答
-  const setAdminRsvp = async (e, st, ans) => {
+  // 管理者が学生の出欠を変更（当日欠席の反映など）。ans: 出席/欠席/未回答。欠席時は理由も保存
+  const setAdminRsvp = async (e, st, ans, reason = "") => {
     try {
       if (ans === "未回答") await deleteRsvp(e.id, st.id);
-      else await setRsvp(e.id, st.id, ans === "出席" ? "yes" : "no");
+      else await adminSetRsvp(e.id, st.id, ans === "出席" ? "yes" : "no", reason);
       await refreshAnswers();
     } catch (ex) { setBanner(`出欠の更新に失敗しました：${ex.message}`); }
   };
@@ -831,11 +840,11 @@ function AdminBody({
   };
 
   const exportAttendanceCsv = (e) => {
-    const header = ["氏名", "大学", "ステータス", "出欠", "到着"];
+    const header = ["氏名", "大学", "ステータス", "出欠", "到着", "キャンセル理由"];
     const rows = eventAudience(e).map((st) => {
       const r = rsvpOf(st, e);
       const arr = r === "出席" ? (arrivedOf(st, e) ? "到着済" : "未到着") : "-";
-      return [st.name, st.univ, statusLabel(st), r, arr];
+      return [st.name, st.univ, statusLabel(st), r, arr, r === "欠席" ? reasonOf(st, e) : ""];
     });
     downloadCsv(`出欠_${e.title}_${selectedYear}卒.csv`, [header, ...rows]);
   };
@@ -1089,46 +1098,42 @@ function AdminBody({
                   </button>
                   {open && (
                     <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-2.5">
-                      <p className="text-xs font-bold text-gray-500">
-                        出席 {yes}名（<span style={{ color: "#1E874B" }}>到着 {arrivedCount}</span>）／欠席 {list.filter((x) => x.r === "欠席").length}名／未回答 {list.filter((x) => x.r === "未回答").length}名
-                      </p>
-                      <p className="text-[11px] text-gray-400">各学生の出欠を管理側で変更できます（当日欠席の反映など）。出席者は「到着」をタップで到着/未到着を切替。</p>
-                      <div className="border border-gray-100 rounded-lg divide-y divide-gray-100">
-                        {list.length === 0 && <p className="text-xs text-gray-300 px-2.5 py-2">対象の学生がいません</p>}
-                        {list.map((x) => {
-                          const arr = arrivedOf(x.st, e);
-                          const chg = changedOf(x.st, e);
-                          return (
-                            <div key={x.st.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
-                              <p className="text-sm font-bold truncate min-w-0">
-                                {x.st.name}
-                                {chg && <span className="ml-1 px-1 rounded align-middle" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
-                              </p>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {["出席", "欠席", "未回答"].map((ans) => {
-                                  const on = x.r === ans;
-                                  const c = ans === "出席" ? "#1E874B" : ans === "欠席" ? "#6B7280" : "#B45309";
-                                  return (
-                                    <button key={ans} onClick={() => setAdminRsvp(e, x.st, ans)}
-                                      className="text-[11px] font-bold px-1.5 py-1 rounded-lg border"
-                                      style={on ? { background: c, color: "#fff", borderColor: c } : { borderColor: "#E5E7EB", color: "#9CA3AF", background: "#fff" }}>
-                                      {ans}
-                                    </button>
-                                  );
-                                })}
-                                {x.r === "出席" && (
-                                  <button onClick={() => toggleArrival(e, x.st)}
-                                    className="text-[11px] font-bold px-1.5 py-1 rounded-lg border inline-flex items-center gap-0.5"
-                                    style={arr ? { background: "#EAF7EE", color: "#1E874B", borderColor: "#BFE6CC" } : { borderColor: "#E5E7EB", color: "#9CA3AF", background: "#fff" }}
-                                    title={arr ? "タップで未到着に戻す" : "タップで到着済みにする"}>
-                                    {arr && <CheckCircle2 size={10} />}到着
+                      {["出席", "欠席", "未回答"].map((k) => {
+                        const g = list.filter((x) => x.r === k);
+                        return (
+                          <div key={k}>
+                            <p className="text-xs font-bold text-gray-500 mb-1">
+                              {k}（{g.length}名）
+                              {k === "出席" && g.length > 0 && (
+                                <span className="ml-1.5" style={{ color: "#1E874B" }}>／到着 {arrivedCount}名・未到着 {g.length - arrivedCount}名</span>
+                              )}
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {g.length === 0 && <span className="text-xs text-gray-300">なし</span>}
+                              {g.map((x) => {
+                                const arr = k === "出席" && arrivedOf(x.st, e);
+                                const chg = (k === "出席" || k === "欠席") && changedOf(x.st, e);
+                                const reason = k === "欠席" && reasonOf(x.st, e);
+                                const style = k === "出席"
+                                  ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
+                                  : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" };
+                                return (
+                                  <button key={x.st.id} onClick={() => { setAttendAns(x.r); setCancelReason(reasonOf(x.st, e)); setAttendEdit({ e, st: x.st }); }}
+                                    className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}
+                                    title={reason ? `キャンセル理由：${reason}` : "タップで変更"}>
+                                    {arr && <CheckCircle2 size={11} />}{x.st.name}
+                                    {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
+                                    {reason && <span className="ml-0.5" style={{ fontSize: 10 }}>📝</span>}
                                   </button>
-                                )}
-                              </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
+                            {k === "出席" && g.length > 0 && (
+                              <p className="text-[11px] text-gray-400 mt-1">名前をタップで出欠・到着を変更できます（緑＝到着済み／ピンク＝未到着）。</p>
+                            )}
+                          </div>
+                        );
+                      })}
                       {changedCount > 0 && (
                         <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
                       )}
@@ -2165,6 +2170,66 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* 出欠編集モーダル */}
+      {attendEdit && (() => {
+        const { e, st } = attendEdit;
+        const savedAns = rsvpOf(st, e);
+        const arr = arrivedOf(st, e);
+        const save = () => { setAdminRsvp(e, st, attendAns, attendAns === "欠席" ? cancelReason : ""); setAttendEdit(null); };
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-40 px-6">
+            <div className="bg-white rounded-2xl w-full max-w-sm p-5">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs text-gray-400">出欠を変更</p>
+                  <p className="text-lg font-bold mt-0.5">{st.name}</p>
+                </div>
+                <button onClick={() => setAttendEdit(null)} aria-label="閉じる"><X size={20} className="text-gray-400" /></button>
+              </div>
+
+              <p className="text-xs font-bold text-gray-500 mt-4 mb-1.5">出欠</p>
+              <div className="flex gap-2">
+                {["出席", "欠席", "未回答"].map((ans) => {
+                  const on = attendAns === ans;
+                  const c = ans === "出席" ? "#1E874B" : ans === "欠席" ? "#DC2626" : "#B45309";
+                  return (
+                    <button key={ans} onClick={() => setAttendAns(ans)}
+                      className="flex-1 py-2 rounded-lg text-sm font-bold border"
+                      style={on ? { background: c, color: "#fff", borderColor: c } : { borderColor: "#E5E7EB", color: "#6B7280", background: "#fff" }}>
+                      {ans === "欠席" ? "欠席(キャンセル)" : ans}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {attendAns === "欠席" && (
+                <div className="mt-3">
+                  <p className="text-xs font-bold text-gray-500 mb-1">キャンセル理由（任意）</p>
+                  <textarea value={cancelReason} onChange={(ev2) => setCancelReason(ev2.target.value)} rows={2}
+                    placeholder="例）当日体調不良のため" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+              )}
+
+              {savedAns === "出席" && (
+                <div className="mt-4">
+                  <p className="text-xs font-bold text-gray-500 mb-1.5">到着</p>
+                  <button onClick={() => toggleArrival(e, st)}
+                    className="w-full py-2 rounded-lg text-sm font-bold border inline-flex items-center justify-center gap-1.5"
+                    style={arr ? { background: "#EAF7EE", color: "#1E874B", borderColor: "#BFE6CC" } : { borderColor: "#E5E7EB", color: "#6B7280", background: "#fff" }}>
+                    {arr ? <><CheckCircle2 size={15} /> 到着済み（タップで取消）</> : "未到着（タップで到着済みにする）"}
+                  </button>
+                </div>
+              )}
+
+              <div className="flex gap-2 mt-5">
+                <button onClick={() => setAttendEdit(null)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-gray-300 text-gray-600 bg-white">閉じる</button>
+                <button onClick={save} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>保存</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 対象者を選ぶモーダル */}
       {showTargetModal && (() => {
