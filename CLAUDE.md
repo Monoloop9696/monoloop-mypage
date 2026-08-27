@@ -58,7 +58,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 
 - `students/{uid}`: name, kana(フリガナ・あいうえお順の並び替えに使用), univ, birth, email, phone, zip, address, livesAtHome, homeZip, homeAddress, grad, joinDate, status(内定/承諾/辞退/承諾後辞退), deleted, lineUserId, linkCode, createdAt
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
-- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), **areas[]**(対象エリア地方区分キー・空=全員), **areaBasis**(current/home/either=現住所/実家/どちらか), copy, grad, published(false=下書き)。※期限超過で学生側は受付終了へ。到着は締切後でも開催日当日は押下可。エリア判定は住所文字列の先頭都道府県から（`src/lib/area.js`）
+- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), **areas[]**(対象エリア地方区分キー・空=全員), **areaBasis**(current/home/either=現住所/実家/どちらか), targetUids[](個別指定の対象者uid・あればエリアより優先), closed(管理者の最終受付終了。trueで到着も締切), copy, grad, published(false=下書き)。※回答期限超過で出欠回答は締切。到着は開催日当日以降いつでも押下可（管理者が closed にするまで）。エリア判定は住所文字列の先頭都道府県から（`src/lib/area.js`）
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no)
 - `surveys/{id}`: title, dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
   - surveys には **audience**（{type:"all"} または {type:"event", eventId, group:"yes"|"arrived"}）で対象者を限定可。学生側は自分のrsvpで判定して表示、管理集計/CSVも対象者を分母に。LINE配信のイベント対象は group=yes/arrived/no/none（arrived=出席かつ当日到着ボタン押下）

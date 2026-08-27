@@ -1054,7 +1054,10 @@ function AdminBody({
                   <button onClick={() => setExpandedEvent(open ? null : e.id)} className="w-full text-left p-4">
                     <div className="flex justify-between text-sm gap-2">
                       <div className="min-w-0">
-                        <p className="font-bold">{e.title}</p>
+                        <p className="font-bold">
+                          {e.title}
+                          {e.closed && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#F3F4F6", color: "#6B7280" }}>受付終了済み</span>}
+                        </p>
                         <p className="text-xs text-gray-400 mt-0.5">{e.date}・{e.place}</p>
                         {areaTxt && <p className="text-xs mt-0.5" style={{ color: BRAND }}>対象：{areaTxt}</p>}
                       </div>
@@ -1112,6 +1115,11 @@ function AdminBody({
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
                         </button>
+                        {e.closed ? (
+                          <button onClick={() => updateEvent(e.id, { closed: false })} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">受付を再開</button>
+                        ) : (
+                          <button onClick={() => updateEvent(e.id, { closed: true })} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FFF7E6" }}>最終受付終了（到着も締切）</button>
+                        )}
                         {changedCount > 0 && (
                           <button onClick={() => ackEventChanges(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FFF7E6" }}>
                             変更を確認（{changedCount}）

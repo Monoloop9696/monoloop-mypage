@@ -348,7 +348,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
   // 上部アラート：未対応タスクの集約（受付終了＝期日超過は対象外）
-  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !(e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr))).length;
+  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !e.closed && !(e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr))).length;
   const pendingSurveys = mySurveys.filter((s) => !s.done && !(s.dueDate && s.dueDate < todayStr)).length;
   const alerts = [];
   if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
@@ -547,9 +547,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* イベント */}
           {tab === "event" && (() => {
-            // 回答期限(deadlineDate)を過ぎたら受付終了。未設定なら開催日を基準にフォールバック
-            const isClosed = (e) => (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
-            const eventOver = (e) => e.dateStr && e.dateStr < todayStr; // 開催日が過ぎた
+            // 受付終了＝管理者が手動終了(closed) or 回答期限(deadlineDate)超過。未設定は開催日を基準にフォールバック
+            const isClosed = (e) => e.closed === true || (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
             const ended = myEvents.filter(isClosed);
             const activeEv = myEvents.filter((e) => !isClosed(e));
             const unanswered = activeEv.filter((e) => e.rsvp === null);
@@ -594,28 +593,34 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       )}
                     </>
                   )}
-                  {/* 到着：出席者は受付終了後でも当日は押せる（開催日が過ぎるまで表示） */}
-                  {e.rsvp === "yes" && (e.arrived || !eventOver(e) || readOnly) && (
-                    <div className="mt-3">
-                      {e.arrived ? (
-                        <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
-                          style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
-                          <Check size={15} /> 到着を受け付けました
-                        </div>
-                      ) : (readOnly || e.dateStr === todayStr) ? (
-                        <button onClick={() => doArrive(e.id)}
-                          className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                          style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
-                          <MapPin size={15} /> 会場に到着したら押す
-                        </button>
-                      ) : (
-                        <div className="w-full py-2.5 text-xs font-bold text-center"
-                          style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
-                          当日にこちらから到着を受け付けます
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* 到着：出席者は開催日以降いつでも押せる（管理者が最終終了するまで）。回答期限とは独立 */}
+                  {(() => {
+                    if (e.rsvp !== "yes") return null;
+                    const canArrive = !e.closed && (readOnly || (e.dateStr && e.dateStr <= todayStr)); // 開催日当日以降
+                    const upcoming = !e.closed && e.dateStr && e.dateStr > todayStr; // これから
+                    if (!(e.arrived || canArrive || upcoming)) return null;
+                    return (
+                      <div className="mt-3">
+                        {e.arrived ? (
+                          <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
+                            style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
+                            <Check size={15} /> 到着を受け付けました
+                          </div>
+                        ) : canArrive ? (
+                          <button onClick={() => doArrive(e.id)}
+                            className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                            style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
+                            <MapPin size={15} /> 会場に到着したら押す
+                          </button>
+                        ) : (
+                          <div className="w-full py-2.5 text-xs font-bold text-center"
+                            style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
+                            当日にこちらから到着を受け付けます
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </article>
             );
