@@ -15,7 +15,7 @@ import {
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
   addSurveyTemplate, deleteSurveyTemplate,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, loadBroadcasts,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, setRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -356,6 +356,14 @@ function AdminBody({
       await setRsvpArrived(e.id, st.id, !arrivedOf(st, e));
       await refreshAnswers();
     } catch (ex) { setBanner(`到着状態の更新に失敗しました：${ex.message}`); }
+  };
+  // 管理者が学生の出欠を変更（当日欠席の反映など）。ans: 出席/欠席/未回答
+  const setAdminRsvp = async (e, st, ans) => {
+    try {
+      if (ans === "未回答") await deleteRsvp(e.id, st.id);
+      else await setRsvp(e.id, st.id, ans === "出席" ? "yes" : "no");
+      await refreshAnswers();
+    } catch (ex) { setBanner(`出欠の更新に失敗しました：${ex.message}`); }
   };
   const rsvpOf = (st, e) => {
     const a = rsvpMap[`${e.id}_${st.id}`];
@@ -1081,45 +1089,46 @@ function AdminBody({
                   </button>
                   {open && (
                     <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-2.5">
-                      {["出席", "欠席", "未回答"].map((k) => {
-                        const g = list.filter((x) => x.r === k);
-                        return (
-                          <div key={k}>
-                            <p className="text-xs font-bold text-gray-500 mb-1">
-                              {k}（{g.length}名）
-                              {k === "出席" && g.length > 0 && (
-                                <span className="ml-1.5" style={{ color: "#1E874B" }}>／到着 {arrivedCount}名・未到着 {g.length - arrivedCount}名</span>
-                              )}
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {g.length === 0 && <span className="text-xs text-gray-300">なし</span>}
-                              {g.map((x) => {
-                                const arr = k === "出席" && arrivedOf(x.st, e);
-                                const chg = (k === "出席" || k === "欠席") && changedOf(x.st, e);
-                                const style = k === "出席"
-                                  ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
-                                  : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" };
-                                const inner = (<>{arr && <CheckCircle2 size={11} />}{x.st.name}{chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}</>);
-                                // 出席者はタップで到着/未到着を切替（管理者による到着記録・押し忘れ対応）
-                                return k === "出席" ? (
-                                  <button key={x.st.id} onClick={() => toggleArrival(e, x.st)}
-                                    className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}
+                      <p className="text-xs font-bold text-gray-500">
+                        出席 {yes}名（<span style={{ color: "#1E874B" }}>到着 {arrivedCount}</span>）／欠席 {list.filter((x) => x.r === "欠席").length}名／未回答 {list.filter((x) => x.r === "未回答").length}名
+                      </p>
+                      <p className="text-[11px] text-gray-400">各学生の出欠を管理側で変更できます（当日欠席の反映など）。出席者は「到着」をタップで到着/未到着を切替。</p>
+                      <div className="border border-gray-100 rounded-lg divide-y divide-gray-100">
+                        {list.length === 0 && <p className="text-xs text-gray-300 px-2.5 py-2">対象の学生がいません</p>}
+                        {list.map((x) => {
+                          const arr = arrivedOf(x.st, e);
+                          const chg = changedOf(x.st, e);
+                          return (
+                            <div key={x.st.id} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                              <p className="text-sm font-bold truncate min-w-0">
+                                {x.st.name}
+                                {chg && <span className="ml-1 px-1 rounded align-middle" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
+                              </p>
+                              <div className="flex items-center gap-1 shrink-0">
+                                {["出席", "欠席", "未回答"].map((ans) => {
+                                  const on = x.r === ans;
+                                  const c = ans === "出席" ? "#1E874B" : ans === "欠席" ? "#6B7280" : "#B45309";
+                                  return (
+                                    <button key={ans} onClick={() => setAdminRsvp(e, x.st, ans)}
+                                      className="text-[11px] font-bold px-1.5 py-1 rounded-lg border"
+                                      style={on ? { background: c, color: "#fff", borderColor: c } : { borderColor: "#E5E7EB", color: "#9CA3AF", background: "#fff" }}>
+                                      {ans}
+                                    </button>
+                                  );
+                                })}
+                                {x.r === "出席" && (
+                                  <button onClick={() => toggleArrival(e, x.st)}
+                                    className="text-[11px] font-bold px-1.5 py-1 rounded-lg border inline-flex items-center gap-0.5"
+                                    style={arr ? { background: "#EAF7EE", color: "#1E874B", borderColor: "#BFE6CC" } : { borderColor: "#E5E7EB", color: "#9CA3AF", background: "#fff" }}
                                     title={arr ? "タップで未到着に戻す" : "タップで到着済みにする"}>
-                                    {inner}
+                                    {arr && <CheckCircle2 size={10} />}到着
                                   </button>
-                                ) : (
-                                  <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}>
-                                    {inner}
-                                  </span>
-                                );
-                              })}
+                                )}
+                              </div>
                             </div>
-                            {k === "出席" && g.length > 0 && (
-                              <p className="text-[11px] text-gray-400 mt-1">緑＝到着済み／ピンク＝未到着。<span className="font-bold">出席者の名前をタップすると到着/未到着を切り替えられます</span>（押し忘れの記録用）。</p>
-                            )}
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                       {changedCount > 0 && (
                         <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
                       )}

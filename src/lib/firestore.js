@@ -262,6 +262,9 @@ export const setRsvp = (eventId, uid, answer, changed = false) =>
 export const markRsvpChangeSeen = (eventId, uid) =>
   updateDoc(doc(db, "rsvps", `${eventId}_${uid}`), { changeSeen: true });
 
+// 管理者が学生の出欠を「未回答」に戻す（rsvpドキュメント削除）
+export const deleteRsvp = (eventId, uid) => deleteDoc(doc(db, "rsvps", `${eventId}_${uid}`));
+
 // 管理者が学生の到着状態を切り替える（押し忘れ対応）
 export const setRsvpArrived = (eventId, uid, arrived) =>
   setDoc(
