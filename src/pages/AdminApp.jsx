@@ -440,7 +440,7 @@ function AdminBody({
   const eventAudience = (e) => ((e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents);
   const eventAreaText = (e) => {
     if (!e.areas || !e.areas.length) return null;
-    const b = e.areaBasis === "current" ? "現住所" : e.areaBasis === "home" ? "実家" : "現住所/実家";
+    const b = e.areaBasis === "current" ? "現住所" : e.areaBasis === "home" ? "実家" : "どちらも";
     return `${e.areas.map(areaLabel).join("・")}（${b}）`;
   };
 
@@ -944,7 +944,7 @@ function AdminBody({
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">対象エリア（住所で絞る）</p>
                   <div className="flex gap-1.5 mb-2">
-                    {[["either", "現住所/実家どちらか"], ["current", "現住所"], ["home", "実家"]].map(([v, label]) => (
+                    {[["current", "現住所"], ["home", "実家"], ["either", "どちらも"]].map(([v, label]) => (
                       <button key={v} onClick={() => setEv({ ...ev, areaBasis: v })}
                         className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
                         style={(ev.areaBasis || "either") === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
