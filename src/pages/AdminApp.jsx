@@ -7,6 +7,7 @@ import { SectionTitle } from "../components/common";
 import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
+import { AREAS, areaLabel, matchesAreas } from "../lib/area";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
@@ -22,7 +23,7 @@ import {
   loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
-const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "" };
+const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either" };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
 const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
 const newQuestion = (type = "single") => ({
@@ -435,6 +436,13 @@ function AdminBody({
     const e = events.find((x) => x.id === a.eventId);
     return `${e ? e.title : "イベント"}・${groupLabelOf(a.group || "arrived")}`;
   };
+  // イベントの対象者（エリア指定があればその住所エリアの学生のみ）
+  const eventAudience = (e) => ((e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents);
+  const eventAreaText = (e) => {
+    if (!e.areas || !e.areas.length) return null;
+    const b = e.areaBasis === "current" ? "現住所" : e.areaBasis === "home" ? "実家" : "現住所/実家";
+    return `${e.areas.map(areaLabel).join("・")}（${b}）`;
+  };
 
   const targetCount = isEventTarget
     ? (targetEvent ? activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup)).length : 0)
@@ -516,6 +524,7 @@ function AdminBody({
       place: data.place || "未定",
       deadlineDate: data.deadlineDate || null,
       deadline: deadlineLabel(data.deadlineDate),
+      areas: data.areas || [], areaBasis: data.areaBasis || "either",
       copy: data.copy || "", grad: selectedYear, published: true,
     });
 
@@ -528,6 +537,7 @@ function AdminBody({
     const base = {
       title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
       copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadline: deadlineLabel(ev.deadlineDate),
+      areas: ev.areas || [], areaBasis: ev.areaBasis || "either",
       grad: selectedYear, published: false,
     };
     if (editingDraftId) await updateEvent(editingDraftId, base);
@@ -535,7 +545,7 @@ function AdminBody({
     resetForm();
   };
   const editDraft = (dft) => {
-    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "" });
+    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either" });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
   };
@@ -591,7 +601,7 @@ function AdminBody({
   const openHistory = (kind) => { setHistoryExpanded(null); setHistoryPicker(kind); };
   const useEventFromHistory = (e) => {
     setEditingDraftId(null);
-    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "" });
+    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either" });
     setShowEventForm(true);
     setHistoryPicker(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -784,7 +794,7 @@ function AdminBody({
 
   const exportAttendanceCsv = (e) => {
     const header = ["氏名", "大学", "ステータス", "出欠", "到着"];
-    const rows = activeStudents.map((st) => {
+    const rows = eventAudience(e).map((st) => {
       const r = rsvpOf(st, e);
       const arr = r === "出席" ? (arrivedOf(st, e) ? "到着済" : "未到着") : "-";
       return [st.name, st.univ, statusLabel(st), r, arr];
@@ -929,6 +939,39 @@ function AdminBody({
                     className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   <p className="text-[11px] text-gray-400 mt-1">この日を過ぎると学生は出欠を回答・変更できなくなります（未設定なら開催日まで回答可）。</p>
                 </div>
+
+                {/* 対象エリア（住所で絞る） */}
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">対象エリア（住所で絞る）</p>
+                  <div className="flex gap-1.5 mb-2">
+                    {[["either", "現住所/実家どちらか"], ["current", "現住所"], ["home", "実家"]].map(([v, label]) => (
+                      <button key={v} onClick={() => setEv({ ...ev, areaBasis: v })}
+                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        style={(ev.areaBasis || "either") === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AREAS.map((a) => {
+                      const on = (ev.areas || []).includes(a.key);
+                      return (
+                        <button key={a.key}
+                          onClick={() => setEv({ ...ev, areas: on ? ev.areas.filter((k) => k !== a.key) : [...(ev.areas || []), a.key] })}
+                          className="text-xs font-bold px-2.5 py-1 rounded-full border"
+                          style={on ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK, background: "#fff" }}>
+                          {a.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {(ev.areas || []).length === 0
+                      ? "未選択＝全員に表示（エリアで絞りません）。"
+                      : `選択したエリアに住む学生だけに表示・集計されます（住所は登録の${(ev.areaBasis || "either") === "current" ? "現住所" : (ev.areaBasis || "either") === "home" ? "実家住所" : "現住所または実家住所"}で判定）。`}
+                  </p>
+                </div>
+
                 <div className="flex gap-2">
                   <button disabled={!ev.title} onClick={saveDraft}
                     className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 border bg-white" style={{ borderColor: BRAND, color: BRAND }}>
@@ -965,10 +1008,13 @@ function AdminBody({
             )}
 
             {yearEvents.map((e) => {
-              const list = activeStudents.map((st) => ({ st, r: rsvpOf(st, e) }));
+              const aud = eventAudience(e);
+              const audTotal = aud.length;
+              const list = aud.map((st) => ({ st, r: rsvpOf(st, e) }));
               const yes = list.filter((x) => x.r === "出席").length;
               const arrivedCount = list.filter((x) => x.r === "出席" && arrivedOf(x.st, e)).length;
               const changedCount = list.filter((x) => (x.r === "出席" || x.r === "欠席") && changedOf(x.st, e)).length;
+              const areaTxt = eventAreaText(e);
               const open = expandedEvent === e.id;
               return (
                 <div key={e.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
@@ -977,16 +1023,17 @@ function AdminBody({
                       <div className="min-w-0">
                         <p className="font-bold">{e.title}</p>
                         <p className="text-xs text-gray-400 mt-0.5">{e.date}・{e.place}</p>
+                        {areaTxt && <p className="text-xs mt-0.5" style={{ color: BRAND }}>対象：{areaTxt}</p>}
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-500">参加 {yes}/{totalActive}</p>
+                        <p className="text-xs text-gray-500">参加 {yes}/{audTotal}</p>
                         {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#1E874B" }}>到着 {arrivedCount}/{yes}</p>}
                         {changedCount > 0 && <p className="text-xs mt-0.5 font-bold" style={{ color: "#B45309" }}>回答変更 {changedCount}件</p>}
                         <p className="text-xs mt-0.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
                       </div>
                     </div>
                     <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${totalActive ? (yes / totalActive) * 100 : 0}%`, background: BRAND }} />
+                      <div className="h-full rounded-full" style={{ width: `${audTotal ? (yes / audTotal) * 100 : 0}%`, background: BRAND }} />
                     </div>
                   </button>
                   {open && (

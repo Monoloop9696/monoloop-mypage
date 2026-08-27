@@ -16,6 +16,7 @@ import {
   listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent, surveyQuestions,
 } from "../lib/firestore";
 import { askQuestion, listQuestions } from "../lib/api";
+import { matchesAreas } from "../lib/area";
 import { downloadDataUrl } from "../lib/image";
 
 const ADD_FRIEND_URL = import.meta.env.VITE_LINE_ADD_FRIEND_URL || "";
@@ -201,12 +202,14 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
   })();
 
-  const myEvents = events.map((e) => ({
-    ...e,
-    rsvp: readOnly ? (previewRsvp[e.id] ?? null) : (rsvpMap[e.id] ?? null),
-    arrived: readOnly ? !!previewArrived[e.id] : !!arrivedMap[e.id],
-    changed: readOnly ? false : !!changedMap[e.id],
-  }));
+  const myEvents = events
+    .filter((e) => readOnly || matchesAreas(student, e.areas, e.areaBasis)) // 対象エリア外の学生には表示しない
+    .map((e) => ({
+      ...e,
+      rsvp: readOnly ? (previewRsvp[e.id] ?? null) : (rsvpMap[e.id] ?? null),
+      arrived: readOnly ? !!previewArrived[e.id] : !!arrivedMap[e.id],
+      changed: readOnly ? false : !!changedMap[e.id],
+    }));
   // 対象者フィルタ：特定イベントの参加者(出席/到着)向けアンケートは、該当する学生にだけ表示
   const inSurveyAudience = (s) => {
     const a = s.audience;
