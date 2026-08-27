@@ -689,7 +689,6 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2" style={{ color: GOLD }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
                     {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MAUVE }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
                     {ended.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MUTE }}>受付終了（{ended.length}）</p>{SurveyList(ended, true)}</>)}
-                    <p className="text-xs mt-4" style={{ color: MUTE }}>いただいた声は、研修や配属の設計に活かします。</p>
                   </>
                 )}
               </div>
