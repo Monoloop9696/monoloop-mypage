@@ -262,6 +262,14 @@ export const setRsvp = (eventId, uid, answer, changed = false) =>
 export const markRsvpChangeSeen = (eventId, uid) =>
   updateDoc(doc(db, "rsvps", `${eventId}_${uid}`), { changeSeen: true });
 
+// 管理者が学生の到着状態を切り替える（押し忘れ対応）
+export const setRsvpArrived = (eventId, uid, arrived) =>
+  setDoc(
+    doc(db, "rsvps", `${eventId}_${uid}`),
+    { eventId, uid, arrived: !!arrived, arrivedAt: arrived ? serverTimestamp() : null },
+    { merge: true }
+  );
+
 // イベント当日の到着受付（学生が自分の rsvp に arrived を付与）
 export const markArrived = (eventId, uid) =>
   setDoc(

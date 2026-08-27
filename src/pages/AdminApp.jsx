@@ -15,7 +15,7 @@ import {
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
   addSurveyTemplate, deleteSurveyTemplate,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, loadBroadcasts,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
@@ -349,6 +349,13 @@ function AdminBody({
       await Promise.all(targets.map((st) => markRsvpChangeSeen(e.id, st.id)));
       await refreshAnswers();
     } catch (ex) { setBanner(`確認処理に失敗しました：${ex.message}`); }
+  };
+  // 管理者が学生の到着を切替（押し忘れ対応）
+  const toggleArrival = async (e, st) => {
+    try {
+      await setRsvpArrived(e.id, st.id, !arrivedOf(st, e));
+      await refreshAnswers();
+    } catch (ex) { setBanner(`到着状態の更新に失敗しました：${ex.message}`); }
   };
   const rsvpOf = (st, e) => {
     const a = rsvpMap[`${e.id}_${st.id}`];
@@ -1089,21 +1096,26 @@ function AdminBody({
                               {g.map((x) => {
                                 const arr = k === "出席" && arrivedOf(x.st, e);
                                 const chg = (k === "出席" || k === "欠席") && changedOf(x.st, e);
-                                return (
-                                  <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1"
-                                    style={
-                                      k === "出席"
-                                        ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
-                                        : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" }
-                                    }>
-                                    {arr && <CheckCircle2 size={11} />}{x.st.name}
-                                    {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
+                                const style = k === "出席"
+                                  ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
+                                  : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" };
+                                const inner = (<>{arr && <CheckCircle2 size={11} />}{x.st.name}{chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}</>);
+                                // 出席者はタップで到着/未到着を切替（管理者による到着記録・押し忘れ対応）
+                                return k === "出席" ? (
+                                  <button key={x.st.id} onClick={() => toggleArrival(e, x.st)}
+                                    className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}
+                                    title={arr ? "タップで未到着に戻す" : "タップで到着済みにする"}>
+                                    {inner}
+                                  </button>
+                                ) : (
+                                  <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}>
+                                    {inner}
                                   </span>
                                 );
                               })}
                             </div>
                             {k === "出席" && g.length > 0 && (
-                              <p className="text-[11px] text-gray-400 mt-1">緑＝到着済み／ピンク＝未到着</p>
+                              <p className="text-[11px] text-gray-400 mt-1">緑＝到着済み／ピンク＝未到着。<span className="font-bold">出席者の名前をタップすると到着/未到着を切り替えられます</span>（押し忘れの記録用）。</p>
                             )}
                           </div>
                         );
