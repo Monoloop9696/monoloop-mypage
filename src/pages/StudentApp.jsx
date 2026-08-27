@@ -203,7 +203,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   })();
 
   const myEvents = events
-    .filter((e) => readOnly || matchesAreas(student, e.areas, e.areaBasis)) // 対象エリア外の学生には表示しない
+    // 対象者：個別指定(targetUids)があれば優先、無ければ住所エリアで判定
+    .filter((e) => readOnly || (Array.isArray(e.targetUids) ? e.targetUids.includes(uid) : matchesAreas(student, e.areas, e.areaBasis)))
     .map((e) => ({
       ...e,
       rsvp: readOnly ? (previewRsvp[e.id] ?? null) : (rsvpMap[e.id] ?? null),

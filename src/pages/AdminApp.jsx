@@ -7,7 +7,7 @@ import { SectionTitle } from "../components/common";
 import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
-import { AREAS, areaLabel, matchesAreas } from "../lib/area";
+import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
@@ -23,7 +23,7 @@ import {
   loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
-const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either" };
+const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
 const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
 const newQuestion = (type = "single") => ({
@@ -305,6 +305,7 @@ function AdminBody({
   const [selectedSvTpl, setSelectedSvTpl] = useState("");
   const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
   const [historyExpanded, setHistoryExpanded] = useState(null);
+  const [showTargetModal, setShowTargetModal] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -436,9 +437,13 @@ function AdminBody({
     const e = events.find((x) => x.id === a.eventId);
     return `${e ? e.title : "イベント"}・${groupLabelOf(a.group || "arrived")}`;
   };
-  // イベントの対象者（エリア指定があればその住所エリアの学生のみ）
-  const eventAudience = (e) => ((e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents);
+  // イベントの対象者：明示リスト(targetUids)があれば最優先、無ければエリア指定、どちらも無ければ全員
+  const eventAudience = (e) => {
+    if (Array.isArray(e.targetUids)) return activeStudents.filter((st) => e.targetUids.includes(st.id));
+    return (e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents;
+  };
   const eventAreaText = (e) => {
+    if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
     if (!e.areas || !e.areas.length) return null;
     const b = e.areaBasis === "current" ? "現住所" : e.areaBasis === "home" ? "実家" : "どちらも";
     return `${e.areas.map(areaLabel).join("・")}（${b}）`;
@@ -525,6 +530,7 @@ function AdminBody({
       deadlineDate: data.deadlineDate || null,
       deadline: deadlineLabel(data.deadlineDate),
       areas: data.areas || [], areaBasis: data.areaBasis || "either",
+      targetUids: Array.isArray(data.targetUids) ? data.targetUids : null,
       copy: data.copy || "", grad: selectedYear, published: true,
     });
 
@@ -538,6 +544,7 @@ function AdminBody({
       title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
       copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadline: deadlineLabel(ev.deadlineDate),
       areas: ev.areas || [], areaBasis: ev.areaBasis || "either",
+      targetUids: Array.isArray(ev.targetUids) ? ev.targetUids : null,
       grad: selectedYear, published: false,
     };
     if (editingDraftId) await updateEvent(editingDraftId, base);
@@ -545,13 +552,29 @@ function AdminBody({
     resetForm();
   };
   const editDraft = (dft) => {
-    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either" });
+    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
   };
   const publishDraft = async (dft) => {
     await updateEvent(dft.id, { published: true });
   };
+  // 対象者モーダル用（作成中イベントの対象者を個別に表示/非表示）
+  const formAreaIds = () => activeStudents.filter((st) => matchesAreas(st, ev.areas, ev.areaBasis)).map((st) => st.id);
+  const formTargetCount = Array.isArray(ev.targetUids)
+    ? ev.targetUids.length
+    : ((ev.areas && ev.areas.length) ? formAreaIds().length : activeStudents.length);
+  const openTargetModal = () => {
+    if (!Array.isArray(ev.targetUids)) {
+      const base = (ev.areas && ev.areas.length) ? formAreaIds() : activeStudents.map((st) => st.id);
+      setEv((p) => ({ ...p, targetUids: base }));
+    }
+    setShowTargetModal(true);
+  };
+  const toggleTargetUid = (id) => setEv((p) => {
+    const cur = Array.isArray(p.targetUids) ? p.targetUids : [];
+    return { ...p, targetUids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
+  });
 
   // ---- アンケート ----
   const surveyPayload = (published) => ({
@@ -601,7 +624,7 @@ function AdminBody({
   const openHistory = (kind) => { setHistoryExpanded(null); setHistoryPicker(kind); };
   const useEventFromHistory = (e) => {
     setEditingDraftId(null);
-    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either" });
+    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null });
     setShowEventForm(true);
     setHistoryPicker(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -970,6 +993,16 @@ function AdminBody({
                       ? "未選択＝全員に表示（エリアで絞りません）。"
                       : `選択したエリアに住む学生だけに表示・集計されます（住所は登録の${(ev.areaBasis || "either") === "current" ? "現住所" : (ev.areaBasis || "either") === "home" ? "実家住所" : "現住所または実家住所"}で判定）。`}
                   </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <button onClick={openTargetModal}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                      対象者を確認・個別調整
+                    </button>
+                    <span className="text-xs text-gray-500">対象 {formTargetCount}名{Array.isArray(ev.targetUids) ? "（個別調整あり）" : ""}</span>
+                    {Array.isArray(ev.targetUids) && (
+                      <button onClick={() => setEv({ ...ev, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex gap-2">
@@ -2103,6 +2136,56 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* 対象者を選ぶモーダル */}
+      {showTargetModal && (() => {
+        const sel = new Set(Array.isArray(ev.targetUids) ? ev.targetUids : []);
+        const areaOf = (st) => {
+          const cur = addressArea(st.address);
+          const home = st.livesAtHome ? cur : addressArea(st.homeAddress);
+          const labels = [];
+          if (cur) labels.push(`現:${areaLabel(cur)}`);
+          if (!st.livesAtHome && home) labels.push(`実:${areaLabel(home)}`);
+          return labels.length ? labels.join(" / ") : "エリア不明";
+        };
+        return (
+          <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+            <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div>
+                  <p className="text-xs text-gray-400">対象者を選ぶ（表示する学生）</p>
+                  <p className="text-lg font-bold mt-0.5">表示 {sel.size} / {activeStudents.length}名</p>
+                </div>
+                <button onClick={() => setShowTargetModal(false)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 shrink-0">
+                <button onClick={() => setEv((p) => ({ ...p, targetUids: formAreaIds() }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
+                <button onClick={() => setEv((p) => ({ ...p, targetUids: activeStudents.map((s) => s.id) }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
+                <button onClick={() => setEv((p) => ({ ...p, targetUids: [] }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
+              </div>
+              <div className="overflow-y-auto divide-y divide-gray-100">
+                {activeStudents.map((st) => {
+                  const on = sel.has(st.id);
+                  return (
+                    <button key={st.id} onClick={() => toggleTargetUid(st.id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
+                      {on
+                        ? <CheckCircle2 size={18} style={{ color: BRAND }} className="shrink-0" />
+                        : <span className="inline-block shrink-0" style={{ width: 18, height: 18, borderRadius: 999, border: "1.5px solid #C9BFC3" }} />}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold truncate" style={{ color: on ? INK : "#9CA3AF" }}>{st.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{st.univ}・{areaOf(st)}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="p-3 border-t border-gray-100 shrink-0">
+                <button onClick={() => setShowTargetModal(false)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>完了</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 履歴から作成モーダル */}
       {historyPicker && (() => {
