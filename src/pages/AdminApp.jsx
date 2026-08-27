@@ -302,6 +302,8 @@ function AdminBody({
   const [svTplName, setSvTplName] = useState("");
   const [svShowTplSave, setSvShowTplSave] = useState(false);
   const [selectedSvTpl, setSelectedSvTpl] = useState("");
+  const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
+  const [historyExpanded, setHistoryExpanded] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
@@ -584,6 +586,27 @@ function AdminBody({
     setShowSurveyForm(true);
   };
   const publishSurveyDraft = (s) => updateSurvey(s.id, { published: true });
+
+  // ---- 過去の履歴から複製 ----
+  const openHistory = (kind) => { setHistoryExpanded(null); setHistoryPicker(kind); };
+  const useEventFromHistory = (e) => {
+    setEditingDraftId(null);
+    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "" });
+    setShowEventForm(true);
+    setHistoryPicker(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const useSurveyFromHistory = (s) => {
+    setEditingSurveyId(null);
+    setSv({
+      title: s.title || "", dueDate: "", time: s.time || "約3分",
+      questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      audType: "all", audEventId: "", audGroup: "arrived",
+    });
+    setShowSurveyForm(true);
+    setHistoryPicker(null);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   // アンケートのテンプレート（回答期限は保存しない）
   const saveSurveyTemplate = async () => {
     if (!surveyValid()) { setBanner("先にアンケート内容を入力してください。"); return; }
@@ -852,11 +875,17 @@ function AdminBody({
           <div>
             <div className="flex items-center justify-between">
               <SectionTitle>イベント出欠状況</SectionTitle>
-              <button onClick={() => (showEventForm ? resetForm() : setShowEventForm(true))}
-                className="text-xs font-bold px-3 py-1.5 rounded-lg mb-3 border"
-                style={showEventForm ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
-                {showEventForm ? "閉じる" : "+ イベントを追加"}
-              </button>
+              <div className="flex items-center gap-1.5 mb-3">
+                <button onClick={() => openHistory("event")}
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  履歴から作成
+                </button>
+                <button onClick={() => (showEventForm ? resetForm() : setShowEventForm(true))}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg border"
+                  style={showEventForm ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
+                  {showEventForm ? "閉じる" : "+ イベントを追加"}
+                </button>
+              </div>
             </div>
             <div className="flex justify-end -mt-1 mb-2">
               <button onClick={refreshAnswers} className="flex items-center gap-1 text-xs font-bold text-gray-400">
@@ -1030,30 +1059,22 @@ function AdminBody({
           <div>
             <div className="flex items-center justify-between">
               <SectionTitle>アンケート回答率</SectionTitle>
-              <button onClick={() => { if (showSurveyForm) resetSurveyForm(); setShowSurveyForm(!showSurveyForm); }}
-                className="text-xs font-bold px-3 py-1.5 rounded-lg mb-3 border"
-                style={showSurveyForm ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
-                {showSurveyForm ? "閉じる" : "+ アンケートを追加"}
-              </button>
+              <div className="flex items-center gap-1.5 mb-3">
+                <button onClick={() => openHistory("survey")}
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  履歴から作成
+                </button>
+                <button onClick={() => { if (showSurveyForm) resetSurveyForm(); setShowSurveyForm(!showSurveyForm); }}
+                  className="text-xs font-bold px-3 py-1.5 rounded-lg border"
+                  style={showSurveyForm ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
+                  {showSurveyForm ? "閉じる" : "+ アンケートを追加"}
+                </button>
+              </div>
             </div>
 
             {showSurveyForm && (
               <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
                 {editingSurveyId && <p className="text-xs font-bold" style={{ color: BRAND }}>✎ 編集中</p>}
-
-                {!editingSurveyId && surveyTemplates.length > 0 && (
-                  <div className="flex gap-2 items-center">
-                    <select value={selectedSvTpl} onChange={(e) => { setSelectedSvTpl(e.target.value); if (e.target.value) loadSurveyTemplate(e.target.value); }}
-                      className="flex-1 border border-gray-300 rounded-lg p-2 text-xs bg-white">
-                      <option value="">テンプレから作成…</option>
-                      {surveyTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                    </select>
-                    {selectedSvTpl && (
-                      <button onClick={async () => { await deleteSurveyTemplate(selectedSvTpl); setSelectedSvTpl(""); }}
-                        className="text-xs font-bold px-2 py-2 rounded-lg border border-gray-300 text-gray-500 bg-white">テンプレ削除</button>
-                    )}
-                  </div>
-                )}
 
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">アンケート名<span className="text-red-500 ml-0.5">*</span></p>
@@ -1147,18 +1168,6 @@ function AdminBody({
                       <button key={t} onClick={() => addSvQuestion(t)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
                     ))}
                   </div>
-                </div>
-
-                <div>
-                  {!svShowTplSave ? (
-                    <button onClick={() => setSvShowTplSave(true)} className="text-xs font-bold" style={{ color: BRAND }}>＋ この内容をテンプレとして保存（期限以外）</button>
-                  ) : (
-                    <div className="flex gap-2 items-center">
-                      <input value={svTplName} onChange={(e) => setSvTplName(e.target.value)} placeholder="テンプレ名" className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
-                      <button onClick={saveSurveyTemplate} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
-                      <button onClick={() => { setSvShowTplSave(false); setSvTplName(""); }} className="text-xs text-gray-400 px-1">取消</button>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex gap-2">
@@ -2047,6 +2056,76 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* 履歴から作成モーダル */}
+      {historyPicker && (() => {
+        const isEvent = historyPicker === "event";
+        const items = isEvent
+          ? [...events].sort((a, b) => (b.dateStr || "").localeCompare(a.dateStr || ""))
+          : [...surveys].sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+        return (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+            <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "82vh" }}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div>
+                  <p className="text-xs text-gray-400">履歴から作成</p>
+                  <p className="text-lg font-bold mt-0.5">{isEvent ? "過去のイベント" : "過去のアンケート"}</p>
+                </div>
+                <button onClick={() => setHistoryPicker(null)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="p-4 overflow-y-auto">
+                <p className="text-xs text-gray-500 mb-2">項目を選ぶと内容を確認でき、「この内容で新規作成」で入力欄に読み込みます（日付・回答期限は引き継ぎません）。</p>
+                {items.length === 0 ? (
+                  <p className="text-xs text-gray-400">{isEvent ? "過去のイベントがありません。" : "過去のアンケートがありません。"}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {items.map((it) => {
+                      const open = historyExpanded === it.id;
+                      return (
+                        <div key={it.id} className="border border-gray-200 rounded-xl overflow-hidden">
+                          <button onClick={() => setHistoryExpanded(open ? null : it.id)} className="w-full text-left p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-bold truncate">{it.title || "（無題）"}</p>
+                              <p className="text-xs text-gray-400 shrink-0">{it.grad ? `${it.grad}卒` : ""}{it.published === false ? "・下書き" : ""}</p>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {isEvent ? `${it.dateStr || "日付未定"}・${it.place || ""}` : `設問 ${surveyQuestions(it).length}問${it.dueDate ? `・期限 ${it.due || it.dueDate}` : ""}`}
+                            </p>
+                          </button>
+                          {open && (
+                            <div className="px-3 pb-3 border-t border-gray-100 pt-2.5 space-y-2">
+                              {isEvent ? (
+                                <div className="text-xs text-gray-600 space-y-1">
+                                  {it.copy && <p className="whitespace-pre-wrap">{it.copy}</p>}
+                                  <p>会場：{it.place || "-"}</p>
+                                  <p>回答期限：{it.deadline || "-"}</p>
+                                </div>
+                              ) : (
+                                <ol className="text-xs text-gray-600 space-y-1.5 list-decimal ml-4">
+                                  {surveyQuestions(it).map((q) => (
+                                    <li key={q.id}>
+                                      {q.label} <span className="text-gray-400">（{q.type === "text" ? "自由記述" : q.type === "multi" ? "複数選択" : "単一選択"}）</span>
+                                      {q.type !== "text" && q.options?.length > 0 && <span className="text-gray-400">：{q.options.join("／")}</span>}
+                                    </li>
+                                  ))}
+                                </ol>
+                              )}
+                              <button onClick={() => (isEvent ? useEventFromHistory(it) : useSurveyFromHistory(it))}
+                                className="w-full py-2 rounded-lg text-xs font-bold text-white" style={{ background: BRAND }}>
+                                この内容で新規作成
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 詳細モーダル */}
       {detailStudent && (() => {
