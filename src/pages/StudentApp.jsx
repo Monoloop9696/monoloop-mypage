@@ -223,7 +223,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     if (a.group === "no") return r.answer === "no";
     return !r.answer;
   };
-  const mySurveys = surveys.filter(inSurveyAudience).map((s) => ({ ...s, done: responseSet.has(s.id) }));
+  const mySurveys = surveys
+    .filter(inSurveyAudience)
+    // 対象者：個別指定(targetUids)があれば優先、無ければ住所エリアで判定（イベントと同じ）
+    .filter((s) => readOnly || (Array.isArray(s.targetUids) ? s.targetUids.includes(uid) : matchesAreas(student, s.areas, s.areaBasis)))
+    .map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
 

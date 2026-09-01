@@ -25,7 +25,7 @@ import {
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
-const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
+const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -305,7 +305,7 @@ function AdminBody({
   const [selectedSvTpl, setSelectedSvTpl] = useState("");
   const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
   const [historyExpanded, setHistoryExpanded] = useState(null);
-  const [showTargetModal, setShowTargetModal] = useState(false);
+  const [targetModal, setTargetModal] = useState(null); // null | "event" | "survey"（対象者モーダル）
   const [optionVoters, setOptionVoters] = useState(null); // {qLabel, option, list:[student]} 選択肢の回答者モーダル
   const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
   const [attendAns, setAttendAns] = useState("出席");
@@ -448,13 +448,26 @@ function AdminBody({
     if (g === "no") return r === "欠席";
     return r === "未回答";
   };
-  // アンケートの対象者（全員 or 特定イベントの参加者）
-  const surveyAudience = (s) => {
+  // アンケートの母集団（全員 or 特定イベントの参加者）
+  const surveyPool = (s) => {
     const a = s && s.audience;
     if (!a || a.type !== "event" || !a.eventId) return activeStudents;
     const e = events.find((x) => x.id === a.eventId);
     if (!e) return activeStudents;
     return activeStudents.filter((st) => inEventGroup(st, e, a.group || "arrived"));
+  };
+  // アンケートの対象者：母集団に対し、個別指定(targetUids)があれば最優先、無ければ住所エリアで絞る
+  const surveyAudience = (s) => {
+    const pool = surveyPool(s);
+    if (Array.isArray(s && s.targetUids)) return pool.filter((st) => s.targetUids.includes(st.id));
+    return (s && s.areas && s.areas.length) ? pool.filter((st) => matchesAreas(st, s.areas, s.areaBasis)) : pool;
+  };
+  // 「関東・東海（現住所）」「個別選択 n名」などの表示テキスト（指定なしは null）
+  const surveyAreaText = (s) => {
+    if (Array.isArray(s && s.targetUids)) return `個別選択 ${s.targetUids.length}名`;
+    if (!s || !s.areas || !s.areas.length) return null;
+    const b = s.areaBasis === "current" ? "現住所" : s.areaBasis === "home" ? "実家" : "どちらも";
+    return `${s.areas.map(areaLabel).join("・")}（${b}）`;
   };
   const audienceLabel = (s) => {
     const a = s && s.audience;
@@ -594,9 +607,33 @@ function AdminBody({
       const base = (ev.areas && ev.areas.length) ? formAreaIds() : activeStudents.map((st) => st.id);
       setEv((p) => ({ ...p, targetUids: base }));
     }
-    setShowTargetModal(true);
+    setTargetModal("event");
   };
   const toggleTargetUid = (id) => setEv((p) => {
+    const cur = Array.isArray(p.targetUids) ? p.targetUids : [];
+    return { ...p, targetUids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
+  });
+
+  // アンケートフォーム用（母集団＝「対象者」で選んだ全員 or イベント参加者）
+  const svFormPool = () => {
+    if (sv.audType === "event" && sv.audEventId) {
+      const e = events.find((x) => x.id === sv.audEventId);
+      if (e) return activeStudents.filter((st) => inEventGroup(st, e, sv.audGroup || "arrived"));
+    }
+    return activeStudents;
+  };
+  const svFormAreaIds = () => svFormPool().filter((st) => matchesAreas(st, sv.areas, sv.areaBasis)).map((st) => st.id);
+  const svFormTargetCount = Array.isArray(sv.targetUids)
+    ? sv.targetUids.length
+    : ((sv.areas && sv.areas.length) ? svFormAreaIds().length : svFormPool().length);
+  const openSvTargetModal = () => {
+    if (!Array.isArray(sv.targetUids)) {
+      const base = (sv.areas && sv.areas.length) ? svFormAreaIds() : svFormPool().map((st) => st.id);
+      setSv((p) => ({ ...p, targetUids: base }));
+    }
+    setTargetModal("survey");
+  };
+  const toggleSvTargetUid = (id) => setSv((p) => {
     const cur = Array.isArray(p.targetUids) ? p.targetUids : [];
     return { ...p, targetUids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
   });
@@ -617,6 +654,10 @@ function AdminBody({
     audience: (sv.audType === "event" && sv.audEventId)
       ? { type: "event", eventId: sv.audEventId, group: sv.audGroup || "arrived" }
       : { type: "all" },
+    // 住所エリアでの絞り込み／個別指定（イベントと同じ仕組み）
+    areas: sv.areas || [],
+    areaBasis: sv.areaBasis || "either",
+    targetUids: Array.isArray(sv.targetUids) ? sv.targetUids : null,
     grad: selectedYear,
     published,
   });
@@ -641,6 +682,8 @@ function AdminBody({
       audType: a && a.type === "event" ? "event" : "all",
       audEventId: a && a.type === "event" ? (a.eventId || "") : "",
       audGroup: a && a.type === "event" ? (a.group || "arrived") : "arrived",
+      areas: s.areas || [], areaBasis: s.areaBasis || "either",
+      targetUids: Array.isArray(s.targetUids) ? s.targetUids : null,
     });
     setShowSurveyForm(true);
   };
@@ -661,6 +704,7 @@ function AdminBody({
       title: s.title || "", desc: s.desc || "", dueDate: "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
       audType: "all", audEventId: "", audGroup: "arrived",
+      areas: s.areas || [], areaBasis: s.areaBasis || "either", targetUids: null,
     });
     setShowSurveyForm(true);
     setHistoryPicker(null);
@@ -681,6 +725,7 @@ function AdminBody({
       title: t.data.title || "", desc: t.data.desc || "", dueDate: "", time: t.data.time || "約3分",
       questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
       audType: "all", audEventId: "", audGroup: "arrived",
+      areas: [], areaBasis: "either", targetUids: null,
     });
   };
   // 設問ビルダー操作
@@ -1249,6 +1294,48 @@ function AdminBody({
                   )}
                 </div>
 
+                {/* 対象エリア（住所で絞る） */}
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">対象エリア（住所で絞る）</p>
+                  <div className="flex gap-1.5 mb-2">
+                    {[["current", "現住所"], ["home", "実家"], ["either", "どちらも"]].map(([v, label]) => (
+                      <button key={v} onClick={() => setSv({ ...sv, areaBasis: v })}
+                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        style={(sv.areaBasis || "either") === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {AREAS.map((a) => {
+                      const on = (sv.areas || []).includes(a.key);
+                      return (
+                        <button key={a.key}
+                          onClick={() => setSv({ ...sv, areas: on ? sv.areas.filter((k) => k !== a.key) : [...(sv.areas || []), a.key] })}
+                          className="text-xs font-bold px-2.5 py-1 rounded-full border"
+                          style={on ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK, background: "#fff" }}>
+                          {a.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {(sv.areas || []).length === 0
+                      ? "未選択＝対象者全員に表示（エリアで絞りません）。"
+                      : `選択したエリアに住む学生だけに表示・集計されます（住所は登録の${(sv.areaBasis || "either") === "current" ? "現住所" : (sv.areaBasis || "either") === "home" ? "実家住所" : "現住所または実家住所"}で判定）。`}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <button onClick={openSvTargetModal}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                      対象者を確認・個別調整
+                    </button>
+                    <span className="text-xs text-gray-500">対象 {svFormTargetCount}名{Array.isArray(sv.targetUids) ? "（個別調整あり）" : ""}</span>
+                    {Array.isArray(sv.targetUids) && (
+                      <button onClick={() => setSv({ ...sv, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
+                    )}
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-gray-500">設問</p>
                   {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。</p>}
@@ -1330,13 +1417,15 @@ function AdminBody({
               const done = list.filter((x) => x.r === "回答済").length;
               const open = expandedSurvey === s.id;
               const targeted = s.audience && s.audience.type === "event";
+              const areaTxt = surveyAreaText(s);
+              const targetText = [targeted ? audienceLabel(s) : null, areaTxt].filter(Boolean).join(" ／ ");
               return (
                 <div key={s.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
                   <button onClick={() => setExpandedSurvey(open ? null : s.id)} className="w-full text-left p-4">
                     <div className="flex justify-between text-sm gap-2">
                       <div className="min-w-0">
                         <p className="font-bold truncate">{s.title}</p>
-                        {targeted && <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>対象：{audienceLabel(s)}</p>}
+                        {targetText && <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>対象：{targetText}</p>}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-xs text-gray-500">{done}/{audTotal} 回答</p>
@@ -2246,8 +2335,15 @@ function AdminBody({
       })()}
 
       {/* 対象者を選ぶモーダル */}
-      {showTargetModal && (() => {
-        const sel = new Set(Array.isArray(ev.targetUids) ? ev.targetUids : []);
+      {targetModal && (() => {
+        const isSv = targetModal === "survey";
+        const form = isSv ? sv : ev;
+        const setForm = isSv ? setSv : setEv;
+        const candidates = isSv ? svFormPool() : activeStudents;
+        const areaIdsFn = isSv ? svFormAreaIds : formAreaIds;
+        const toggleUid = isSv ? toggleSvTargetUid : toggleTargetUid;
+        const closeTargetModal = () => setTargetModal(null);
+        const sel = new Set(Array.isArray(form.targetUids) ? form.targetUids : []);
         const areaOf = (st) => {
           const cur = addressArea(st.address);
           const home = st.livesAtHome ? cur : addressArea(st.homeAddress);
@@ -2261,21 +2357,22 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
-                  <p className="text-xs text-gray-400">対象者を選ぶ（表示する学生）</p>
-                  <p className="text-lg font-bold mt-0.5">表示 {sel.size} / {activeStudents.length}名</p>
+                  <p className="text-xs text-gray-400">{isSv ? "アンケートの対象者を選ぶ（表示する学生）" : "対象者を選ぶ（表示する学生）"}</p>
+                  <p className="text-lg font-bold mt-0.5">表示 {sel.size} / {candidates.length}名</p>
                 </div>
-                <button onClick={() => setShowTargetModal(false)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                <button onClick={closeTargetModal} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
               <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 shrink-0">
-                <button onClick={() => setEv((p) => ({ ...p, targetUids: formAreaIds() }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
-                <button onClick={() => setEv((p) => ({ ...p, targetUids: activeStudents.map((s) => s.id) }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
-                <button onClick={() => setEv((p) => ({ ...p, targetUids: [] }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
+                <button onClick={() => setForm((p) => ({ ...p, targetUids: areaIdsFn() }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
+                <button onClick={() => setForm((p) => ({ ...p, targetUids: candidates.map((s) => s.id) }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
+                <button onClick={() => setForm((p) => ({ ...p, targetUids: [] }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
               </div>
               <div className="overflow-y-auto divide-y divide-gray-100">
-                {activeStudents.map((st) => {
+                {candidates.length === 0 && <p className="text-xs text-gray-300 px-5 py-6 text-center">対象になる学生がいません（「対象者」の条件を見直してください）</p>}
+                {candidates.map((st) => {
                   const on = sel.has(st.id);
                   return (
-                    <button key={st.id} onClick={() => toggleTargetUid(st.id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
+                    <button key={st.id} onClick={() => toggleUid(st.id)} className="w-full flex items-center gap-3 px-4 py-2.5 text-left">
                       {on
                         ? <CheckCircle2 size={18} style={{ color: BRAND }} className="shrink-0" />
                         : <span className="inline-block shrink-0" style={{ width: 18, height: 18, borderRadius: 999, border: "1.5px solid #C9BFC3" }} />}
@@ -2288,7 +2385,7 @@ function AdminBody({
                 })}
               </div>
               <div className="p-3 border-t border-gray-100 shrink-0">
-                <button onClick={() => setShowTargetModal(false)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>完了</button>
+                <button onClick={closeTargetModal} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>完了</button>
               </div>
             </div>
           </div>
