@@ -1435,33 +1435,37 @@ function AdminBody({
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-bold text-gray-500">設問</p>
-                    <button onClick={addSvSection} className="text-xs font-bold" style={{ color: BRAND }}>
+                    <p className="text-xs font-bold text-gray-500">設問{svSections().length > 0 ? `（${svSections().length}セクション）` : ""}</p>
+                    <button onClick={addSvSection} className="text-xs font-bold px-2.5 py-1 rounded-lg border"
+                      style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
                       {svSections().length === 0 ? "＋ セクションに分ける" : "＋ セクションを追加"}
                     </button>
                   </div>
                   {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。セクションに分けると、回答によって次に進む先を変えられます。</p>}
+                  <div className={svSections().length ? "space-y-3" : "space-y-2"}>
                   {svGroups.map((g, gi) => (
                     <div key={g.section ? g.section.id : "_flat"}
-                      className={g.section ? "border border-gray-200 rounded-xl p-2.5 space-y-2 bg-white" : "space-y-2"}>
+                      className={g.section ? "rounded-xl overflow-hidden" : "space-y-2"}
+                      style={g.section ? { border: `1.5px solid ${BRAND_LIGHT}` } : undefined}>
                       {g.section && (
-                        <>
+                        <div className="px-2.5 py-2 space-y-1.5" style={{ background: BRAND_LIGHT }}>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EEF2FF", color: "#4F46E5" }}>セクション{gi + 1}</span>
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 text-white" style={{ background: BRAND }}>セクション{gi + 1}</span>
                             <input value={g.section.title} onChange={(e) => updateSvSection(g.section.id, { title: e.target.value })}
-                              placeholder="セクション名（学生にも表示・任意）" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-xs" />
-                            <button onClick={() => moveSvSection(gi, -1)} disabled={gi === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
-                            <button onClick={() => moveSvSection(gi, 1)} disabled={gi === svGroups.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
-                            <button onClick={() => removeSvSection(g.section.id)} aria-label="セクションを削除" className="text-gray-300"><Trash2 size={14} /></button>
+                              placeholder="セクション名（学生にも表示・任意）" className="flex-1 min-w-0 border-0 rounded-lg px-2 py-1 text-xs font-bold bg-white" />
+                            <button onClick={() => moveSvSection(gi, -1)} disabled={gi === 0} className="disabled:opacity-25 text-xs" style={{ color: BRAND }}>▲</button>
+                            <button onClick={() => moveSvSection(gi, 1)} disabled={gi === svGroups.length - 1} className="disabled:opacity-25 text-xs" style={{ color: BRAND }}>▼</button>
+                            <button onClick={() => removeSvSection(g.section.id)} aria-label="セクションを削除" style={{ color: BRAND }}><Trash2 size={14} /></button>
                           </div>
                           <input value={g.section.desc || ""} onChange={(e) => updateSvSection(g.section.id, { desc: e.target.value })}
-                            placeholder="セクションの説明（学生にも表示・任意）" className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs" />
-                        </>
+                            placeholder="セクションの説明（学生にも表示・任意）" className="w-full border-0 rounded-lg px-2 py-1 text-xs bg-white" />
+                        </div>
                       )}
+                      <div className={g.section ? "p-2.5 space-y-2" : "space-y-2"} style={g.section ? { background: "#F6F7F9" } : undefined}>
                       {g.items.map(({ q, no }, gp) => (
-                        <div key={q.id} className="border border-gray-200 rounded-lg p-3 space-y-2" style={{ background: "#FAFBFC" }}>
+                        <div key={q.id} className="border rounded-lg p-3 space-y-2" style={{ background: g.section ? "#fff" : "#FAFBFC", borderColor: "#E5E7EB" }}>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-400">Q{no}</span>
+                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "#EEF1F4", color: "#6B7280" }}>Q{no}</span>
                             <select value={q.type} onChange={(e) => updateSvQuestion(q.id, { type: e.target.value, options: e.target.value === "text" ? [] : (q.options.length ? q.options : ["", ""]) })}
                               className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
                               <option value="single">単一選択</option>
@@ -1490,8 +1494,8 @@ function AdminBody({
                             </div>
                           )}
                           {q.type === "single" && svSections().length > 0 && (
-                            <div className="rounded-lg p-2 space-y-1" style={{ background: "#F5F7FF" }}>
-                              <p className="text-[11px] font-bold" style={{ color: "#4F46E5" }}>回答による分岐（このセクションの次に進む先）</p>
+                            <div className="rounded-lg p-2 space-y-1" style={{ background: "#FFFBEB", border: "1px solid #FDE68A" }}>
+                              <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>回答による分岐（このセクションの次に進む先）</p>
                               {(q.options || []).filter((o) => o.trim()).length === 0 ? (
                                 <p className="text-[11px] text-gray-400">選択肢を入力すると分岐を設定できます。</p>
                               ) : (q.options || []).filter((o) => o.trim()).map((o) => (
@@ -1512,13 +1516,15 @@ function AdminBody({
                           )}
                         </div>
                       ))}
-                      <div className="flex flex-wrap gap-2">
-                        {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
-                          <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
-                        ))}
+                        <div className="flex flex-wrap gap-2">
+                          {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
+                            <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-white" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   ))}
+                  </div>
                 </div>
 
                 <div className="flex gap-2">
@@ -1592,7 +1598,7 @@ function AdminBody({
                       if (qi > 0 && secIdOf(qs[qi - 1]) === secIdOf(qs[qi])) return null;
                       const si = secs.findIndex((x) => x.id === secIdOf(qs[qi]));
                       const sec = secs[si];
-                      return <p className="text-[11px] font-bold mb-1" style={{ color: "#4F46E5" }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
+                      return <p className="text-[11px] font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
                     };
                     return (
                       <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-4">
