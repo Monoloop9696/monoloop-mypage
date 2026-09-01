@@ -306,6 +306,7 @@ function AdminBody({
   const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
   const [historyExpanded, setHistoryExpanded] = useState(null);
   const [showTargetModal, setShowTargetModal] = useState(false);
+  const [optionVoters, setOptionVoters] = useState(null); // {qLabel, option, list:[student]} 選択肢の回答者モーダル
   const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
   const [attendAns, setAttendAns] = useState("出席");
   const [cancelReason, setCancelReason] = useState("");
@@ -1370,9 +1371,15 @@ function AdminBody({
                                 Q{qi + 1}. {q.label}<span className="font-normal text-gray-400 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
                               </p>
                               {(q.options || []).map((o) => {
-                                const cnt = answered.filter((x) => toArr(x.a[q.id]).includes(o)).length;
+                                const picked = answered.filter((x) => toArr(x.a[q.id]).includes(o));
+                                const cnt = picked.length;
                                 return (
-                                  <div key={o} className="mb-2">
+                                  <button
+                                    key={o}
+                                    type="button"
+                                    onClick={() => setOptionVoters({ qLabel: `Q${qi + 1}. ${q.label}`, option: o, list: picked.map((x) => x.st) })}
+                                    aria-label={`「${o}」を選んだ回答者を見る`}
+                                    className="block w-full text-left mb-2">
                                     <div className="flex justify-between text-xs mb-0.5">
                                       <span className="text-gray-700">{o}</span>
                                       <span className="text-gray-400">{cnt}名</span>
@@ -1380,7 +1387,7 @@ function AdminBody({
                                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                                       <div className="h-full rounded-full" style={{ width: `${answered.length ? (cnt / answered.length) * 100 : 0}%`, background: "#5B8DEF" }} />
                                     </div>
-                                  </div>
+                                  </button>
                                 );
                               })}
                             </div>
@@ -2280,6 +2287,34 @@ function AdminBody({
           </div>
         );
       })()}
+
+      {/* 選択肢の回答者モーダル */}
+      {optionVoters && (
+        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setOptionVoters(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+              <div className="min-w-0">
+                <p className="text-xs text-gray-400 truncate">{optionVoters.qLabel}</p>
+                <p className="text-lg font-bold mt-0.5 break-words">「{optionVoters.option}」を選んだ人</p>
+                <p className="text-xs text-gray-400 mt-0.5">{optionVoters.list.length}名</p>
+              </div>
+              <button onClick={() => setOptionVoters(null)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="overflow-y-auto divide-y divide-gray-100">
+              {optionVoters.list.length === 0 && <p className="text-xs text-gray-300 px-5 py-6 text-center">この選択肢を選んだ人はまだいません</p>}
+              {optionVoters.list.map((st) => (
+                <div key={st.id} className="px-5 py-2.5">
+                  <p className="text-sm font-bold truncate">{st.name}</p>
+                  <p className="text-xs text-gray-400 truncate">{st.univ}</p>
+                </div>
+              ))}
+            </div>
+            <div className="p-3 border-t border-gray-100 shrink-0">
+              <button onClick={() => setOptionVoters(null)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>閉じる</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 履歴から作成モーダル */}
       {historyPicker && (() => {
