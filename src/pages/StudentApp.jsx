@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Calendar, ClipboardList, MessageCircle, Newspaper,
   ChevronRight, MapPin, Clock, X, Check, LogOut, Bell, Download,
@@ -143,6 +143,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [qBusy, setQBusy] = useState(false);
   const [qErr, setQErr] = useState("");
   const [svAnswers, setSvAnswers] = useState({});
+  const [svPath, setSvPath] = useState([]); // 現在までに進んだセクションid（先頭セクションを除く）
+  const svScrollRef = useRef(null);
   const [profileForm, setProfileForm] = useState({
     zip: student.zip || "", address: student.address || "",
     phone: student.phone || "", emergency: student.emergency || "",
@@ -281,9 +283,23 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
   const submitSurvey = async () => {
     if (readOnly) return;
-    await submitResponse(activeSurvey.id, uid, svAnswers);
+    const secs = Array.isArray(activeSurvey.sections) ? activeSurvey.sections : [];
+    let payload = svAnswers;
+    if (secs.length) {
+      // 分岐で通らなかったセクションの回答は保存しない
+      const firstId = secs[0].id;
+      const visited = new Set([firstId, ...svPath]);
+      const keep = new Set(
+        surveyQuestions(activeSurvey)
+          .filter((q) => visited.has(q.sectionId && secs.some((x) => x.id === q.sectionId) ? q.sectionId : firstId))
+          .map((q) => q.id)
+      );
+      payload = Object.fromEntries(Object.entries(svAnswers).filter(([k]) => keep.has(k)));
+    }
+    await submitResponse(activeSurvey.id, uid, payload);
     setActiveSurvey(null);
     setSvAnswers({});
+    setSvPath([]);
   };
 
   const saveProfile = async () => {
@@ -311,7 +327,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const nowIdx = flags.findIndex((x) => !x);
   const milestones = journey.map((m) => {
     let cta = null, onTap = null, isLink = false;
-    if (m.link) {
+    if (m.link && !/^https?:\/\/$/i.test(m.link)) {
       // 手入力ステップのリンク（内部タブ or 外部URL）
       isLink = true;
       const L = m.link;
@@ -667,7 +683,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
                 {items.map((s, i) => (
                   <button key={s.id} disabled={s.done || isEnded}
-                    onClick={() => { setActiveSurvey(s); setSvAnswers({}); }}
+                    onClick={() => { setActiveSurvey(s); setSvAnswers({}); setSvPath([]); }}
                     className="w-full text-left px-5 py-5 flex items-center gap-4"
                     style={{ borderBottom: i < items.length - 1 ? `1px solid ${HAIR}` : "none", opacity: (s.done || isEnded) ? 0.65 : 1 }}>
                     <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE : GOLD, width: 30 }}>0{i + 1}</span>
@@ -930,6 +946,29 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           {activeSurvey && (() => {
             const qs = surveyQuestions(activeSurvey);
             const toArr = (v) => (Array.isArray(v) ? v : (v ? [v] : []));
+            // セクション（無ければ従来どおり1ページ表示）
+            const secs = Array.isArray(activeSurvey.sections) ? activeSurvey.sections : [];
+            const hasSec = secs.length > 0;
+            const firstSecId = hasSec ? secs[0].id : null;
+            const secIdOf = (q) => (q.sectionId && secs.some((x) => x.id === q.sectionId) ? q.sectionId : firstSecId);
+            const curSecId = hasSec ? (svPath[svPath.length - 1] || firstSecId) : null;
+            const curSec = hasSec ? secs.find((x) => x.id === curSecId) : null;
+            const pageQs = hasSec ? qs.filter((q) => secIdOf(q) === curSecId) : qs;
+            // 次に進む先：このページの単一選択の分岐設定を上から見て最初に一致したもの
+            const nextTarget = () => {
+              for (const q of pageQs) {
+                if (q.type !== "single" || !q.branch) continue;
+                const chosen = toArr(svAnswers[q.id])[0];
+                const t = chosen ? q.branch[chosen] : null;
+                if (t && (t === "end" || secs.some((x) => x.id === t))) return t;
+              }
+              const i = secs.findIndex((x) => x.id === curSecId);
+              return i >= 0 && i + 1 < secs.length ? secs[i + 1].id : "end";
+            };
+            const isLastPage = !hasSec || nextTarget() === "end";
+            const scrollTop = () => { if (svScrollRef.current) svScrollRef.current.scrollTop = 0; };
+            const goNext = () => { const t = nextTarget(); if (t !== "end") { setSvPath((p) => [...p, t]); scrollTop(); } };
+            const goBack = () => { setSvPath((p) => p.slice(0, -1)); scrollTop(); };
             const setChoice = (q, o) => setSvAnswers((a) => {
               if (q.type === "multi") {
                 const cur = toArr(a[q.id]);
@@ -938,24 +977,32 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               return { ...a, [q.id]: [o] };
             });
             const setText = (q, val) => setSvAnswers((a) => ({ ...a, [q.id]: val }));
-            const valid = qs.every((q) => {
+            const valid = pageQs.every((q) => {
               if (q.required === false) return true;
               const v = svAnswers[q.id];
               return q.type === "text" ? !!(v && v.toString().trim()) : toArr(v).length > 0;
             });
             return (
               <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
-                <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
+                <div ref={svScrollRef} className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                   <div className="flex items-start justify-between mb-5">
                     <div>
                       <p style={caps(9, GOLD)}>Survey</p>
                       <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{activeSurvey.title}</p>
                       {activeSurvey.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{activeSurvey.desc}</p>}
                     </div>
-                    <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                    <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); setSvPath([]); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
                   </div>
+                  {hasSec && curSec && (curSec.title || curSec.desc) && (
+                    <div className="mb-5 pb-4" style={{ borderBottom: `1px solid ${HAIR}` }}>
+                      {curSec.title && <p className="jp-mincho font-bold text-sm">{curSec.title}</p>}
+                      {curSec.desc && <p className="text-xs mt-1.5 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{curSec.desc}</p>}
+                    </div>
+                  )}
                   <div className="space-y-6">
-                    {qs.map((q, qi) => (
+                    {pageQs.map((q) => {
+                      const qi = qs.indexOf(q);
+                      return (
                       <div key={q.id}>
                         <p className="text-sm font-bold mb-2">
                           Q{qi + 1}. {q.label}
@@ -984,12 +1031,26 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                  <button disabled={readOnly || !valid} onClick={submitSurvey}
-                    className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
-                    {readOnly ? "プレビュー（送信不可）" : "回答を送信する"}
-                  </button>
+                  <div className="flex gap-2 mt-6">
+                    {hasSec && svPath.length > 0 && (
+                      <button onClick={goBack} className="px-5 py-3.5 text-sm font-bold bg-white"
+                        style={{ border: `1px solid ${HAIR}`, color: MAUVE }}>戻る</button>
+                    )}
+                    {isLastPage ? (
+                      <button disabled={readOnly || !valid} onClick={submitSurvey}
+                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                        {readOnly ? "プレビュー（送信不可）" : "回答を送信する"}
+                      </button>
+                    ) : (
+                      <button disabled={!valid} onClick={goNext}
+                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                        次へ
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );

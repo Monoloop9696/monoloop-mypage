@@ -25,7 +25,7 @@ import {
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
-const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null };
+const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -638,6 +638,63 @@ function AdminBody({
     return { ...p, targetUids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
   });
 
+  // ---- アンケートのセクション（回答による分岐） ----
+  const svSections = () => (Array.isArray(sv.sections) ? sv.sections : []);
+  const svSecOf = (q) => {
+    const secs = svSections();
+    if (!secs.length) return null;
+    return q.sectionId && secs.some((s) => s.id === q.sectionId) ? q.sectionId : secs[0].id;
+  };
+  // セクションごとに設問をまとめる（表示順＝保存順。Q番号は通し番号）
+  const svGroups = (() => {
+    const secs = svSections();
+    const groups = secs.length
+      ? secs.map((sec) => ({ section: sec, items: sv.questions.filter((q) => svSecOf(q) === sec.id) }))
+      : [{ section: null, items: sv.questions }];
+    let n = 0;
+    return groups.map((g) => ({ ...g, items: g.items.map((q) => ({ q, no: ++n })) }));
+  })();
+  const svOrderedQuestions = () => svGroups.flatMap((g) => g.items.map((x) => x.q));
+  const newSectionId = () => `sec_${Math.random().toString(36).slice(2, 9)}`;
+  const addSvSection = () => setSv((p) => {
+    const list = Array.isArray(p.sections) ? p.sections : [];
+    const id = newSectionId();
+    // 初回は既存の設問をまとめて1つ目のセクションに入れる
+    if (!list.length) return { ...p, sections: [{ id, title: "", desc: "" }], questions: p.questions.map((q) => ({ ...q, sectionId: id })) };
+    return { ...p, sections: [...list, { id, title: "", desc: "" }] };
+  });
+  const updateSvSection = (id, patch) => setSv((p) => ({ ...p, sections: (p.sections || []).map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+  const moveSvSection = (idx, dir) => setSv((p) => {
+    const arr = [...(p.sections || [])]; const j = idx + dir;
+    if (j < 0 || j >= arr.length) return p;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    return { ...p, sections: arr };
+  });
+  // セクション削除：所属設問は先頭セクションへ寄せ、無効になった分岐先は既定に戻す
+  const removeSvSection = (id) => setSv((p) => {
+    const list = (p.sections || []).filter((s) => s.id !== id);
+    const fallback = list[0] ? list[0].id : null;
+    return {
+      ...p,
+      sections: list,
+      questions: p.questions.map((q) => {
+        const branch = q.branch
+          ? Object.fromEntries(Object.entries(q.branch).filter(([, t]) => t === "end" || list.some((s) => s.id === t)))
+          : q.branch;
+        return { ...q, sectionId: q.sectionId === id ? fallback : q.sectionId, branch };
+      }),
+    };
+  });
+  const setSvBranch = (qid, option, target) => setSv((p) => ({
+    ...p,
+    questions: p.questions.map((q) => {
+      if (q.id !== qid) return q;
+      const b = { ...(q.branch || {}) };
+      if (target) b[option] = target; else delete b[option];
+      return { ...q, branch: b };
+    }),
+  }));
+
   // ---- アンケート ----
   const surveyPayload = (published) => ({
     title: sv.title.trim(),
@@ -645,11 +702,21 @@ function AdminBody({
     dueDate: sv.dueDate || null,
     due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
     time: sv.time || "約3分",
-    questions: (sv.questions || []).map((q) => ({
-      id: q.id, type: q.type, label: (q.label || "").trim(),
-      options: q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean),
-      required: q.required !== false,
-    })),
+    questions: svOrderedQuestions().map((q) => {
+      const options = q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean);
+      // 分岐は「今ある選択肢」かつ「今あるセクション or end」だけ残す
+      const branch = (q.type === "single" && q.branch)
+        ? Object.fromEntries(Object.entries(q.branch).filter(([o, t]) => options.includes(o) && (t === "end" || svSections().some((s) => s.id === t))))
+        : {};
+      return {
+        id: q.id, type: q.type, label: (q.label || "").trim(), options,
+        required: q.required !== false,
+        sectionId: svSecOf(q) || null,
+        branch: Object.keys(branch).length ? branch : null,
+      };
+    }),
+    // セクション（空＝1ページのまま）
+    sections: svSections().map((s) => ({ id: s.id, title: (s.title || "").trim(), desc: (s.desc || "").trim() })),
     // 対象者：全員 or 特定イベントの参加者(出席/到着)
     audience: (sv.audType === "event" && sv.audEventId)
       ? { type: "event", eventId: sv.audEventId, group: sv.audGroup || "arrived" }
@@ -678,7 +745,8 @@ function AdminBody({
     const a = s.audience;
     setSv({
       title: s.title || "", desc: s.desc || "", dueDate: s.dueDate || "", time: s.time || "約3分",
-      questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: a && a.type === "event" ? "event" : "all",
       audEventId: a && a.type === "event" ? (a.eventId || "") : "",
       audGroup: a && a.type === "event" ? (a.group || "arrived") : "arrived",
@@ -702,7 +770,8 @@ function AdminBody({
     setEditingSurveyId(null);
     setSv({
       title: s.title || "", desc: s.desc || "", dueDate: "", time: s.time || "約3分",
-      questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
       areas: s.areas || [], areaBasis: s.areaBasis || "either", targetUids: null,
     });
@@ -714,7 +783,8 @@ function AdminBody({
   const saveSurveyTemplate = async () => {
     if (!surveyValid()) { setBanner("先にアンケート内容を入力してください。"); return; }
     const name = svTplName.trim() || sv.title.trim() || "無題テンプレ";
-    const data = { title: sv.title.trim(), desc: (sv.desc || "").trim(), time: sv.time || "約3分", questions: surveyPayload(true).questions };
+    const p = surveyPayload(true);
+    const data = { title: sv.title.trim(), desc: (sv.desc || "").trim(), time: sv.time || "約3分", questions: p.questions, sections: p.sections };
     try { await addSurveyTemplate({ name, data }); setSvTplName(""); setSvShowTplSave(false); }
     catch (ex) { setBanner(`テンプレ保存に失敗：${ex.message}`); }
   };
@@ -723,17 +793,26 @@ function AdminBody({
     if (!t || !t.data) return;
     setSv({
       title: t.data.title || "", desc: t.data.desc || "", dueDate: "", time: t.data.time || "約3分",
-      questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
+      questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      sections: Array.isArray(t.data.sections) ? t.data.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
       areas: [], areaBasis: "either", targetUids: null,
     });
   };
   // 設問ビルダー操作
-  const addSvQuestion = (type) => setSv((p) => ({ ...p, questions: [...p.questions, newQuestion(type)] }));
+  const addSvQuestion = (type, sectionId = null) => setSv((p) => ({ ...p, questions: [...p.questions, { ...newQuestion(type), sectionId }] }));
   const updateSvQuestion = (id, patch) => setSv((p) => ({ ...p, questions: p.questions.map((q) => (q.id === id ? { ...q, ...patch } : q)) }));
   const removeSvQuestion = (id) => setSv((p) => ({ ...p, questions: p.questions.filter((q) => q.id !== id) }));
-  const moveSvQuestion = (idx, dir) => setSv((p) => {
-    const arr = [...p.questions]; const j = idx + dir;
+  // 同じセクション内の前後の設問と入れ替える（セクション未使用時は従来どおり全体で入れ替え）
+  const moveSvQuestion = (id, dir) => setSv((p) => {
+    const arr = [...p.questions];
+    const idx = arr.findIndex((q) => q.id === id);
+    if (idx < 0) return p;
+    const secs = Array.isArray(p.sections) ? p.sections : [];
+    const sOf = (q) => (secs.length ? (q.sectionId && secs.some((s) => s.id === q.sectionId) ? q.sectionId : secs[0].id) : null);
+    const sid = sOf(arr[idx]);
+    let j = idx + dir;
+    while (j >= 0 && j < arr.length && sOf(arr[j]) !== sid) j += dir;
     if (j < 0 || j >= arr.length) return p;
     [arr[idx], arr[j]] = [arr[j], arr[idx]];
     return { ...p, questions: arr };
@@ -791,7 +870,25 @@ function AdminBody({
     setJourneys((prev) => ({ ...prev, [selectedYear]: list }));
     saveJourney(selectedYear, list);
   };
-  const linkKindOf = (m) => (!m.link ? "" : /^https?:\/\//.test(m.link) ? "url" : m.link);
+  // リンク種別。旧データ（linkType 無し）は link の値から推定する
+  const JOURNEY_LINK_KINDS = ["event", "survey", "line", "profile"];
+  const linkKindOf = (m) => {
+    if (m && typeof m.linkType === "string") return m.linkType; // 明示指定が最優先（URL入力中に消えないように）
+    if (!m || !m.link) return "";
+    return JOURNEY_LINK_KINDS.includes(m.link) ? m.link : "url";
+  };
+  // 外部URLの入力確定：前後の空白を落とし、スキームが無ければ https:// を補う
+  const persistJourneyUrl = (id) => {
+    const list = (journeys[selectedYear] || []).map((x) => {
+      if (x.id !== id) return x;
+      let v = (x.link || "").trim();
+      if (/^https?:\/\/$/i.test(v)) v = "";
+      else if (v && !/^https?:\/\//i.test(v)) v = `https://${v}`;
+      return { ...x, link: v };
+    });
+    setJourneys((prev) => ({ ...prev, [selectedYear]: list }));
+    saveJourney(selectedYear, list);
+  };
 
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
@@ -1337,46 +1434,91 @@ function AdminBody({
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-gray-500">設問</p>
-                  {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。</p>}
-                  {sv.questions.map((q, i) => (
-                    <div key={q.id} className="border border-gray-200 rounded-lg p-3 space-y-2" style={{ background: "#FAFBFC" }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-gray-400">Q{i + 1}</span>
-                        <select value={q.type} onChange={(e) => updateSvQuestion(q.id, { type: e.target.value, options: e.target.value === "text" ? [] : (q.options.length ? q.options : ["", ""]) })}
-                          className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
-                          <option value="single">単一選択</option>
-                          <option value="multi">複数選択</option>
-                          <option value="text">自由記述</option>
-                        </select>
-                        <label className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
-                          <input type="checkbox" checked={q.required !== false} onChange={(e) => updateSvQuestion(q.id, { required: e.target.checked })} />必須
-                        </label>
-                        <button onClick={() => moveSvQuestion(i, -1)} disabled={i === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
-                        <button onClick={() => moveSvQuestion(i, 1)} disabled={i === sv.questions.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
-                        <button onClick={() => removeSvQuestion(q.id)} aria-label="設問を削除" className="text-gray-300"><Trash2 size={14} /></button>
-                      </div>
-                      <input value={q.label} onChange={(e) => updateSvQuestion(q.id, { label: e.target.value })}
-                        placeholder="設問文（例：参加しやすい時間帯は？）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
-                      {q.type !== "text" && (
-                        <div className="space-y-1.5">
-                          {q.options.map((o, oi) => (
-                            <div key={oi} className="flex items-center gap-1.5">
-                              <input value={o} onChange={(e) => setSvOption(q.id, oi, e.target.value)}
-                                placeholder={`選択肢${oi + 1}`} className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
-                              <button onClick={() => removeSvOption(q.id, oi)} disabled={q.options.length <= 1} aria-label="選択肢を削除" className="text-gray-300 disabled:opacity-25"><X size={14} /></button>
-                            </div>
-                          ))}
-                          <button onClick={() => addSvOption(q.id)} className="text-xs font-bold" style={{ color: BRAND }}>＋ 選択肢を追加</button>
-                        </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-gray-500">設問</p>
+                    <button onClick={addSvSection} className="text-xs font-bold" style={{ color: BRAND }}>
+                      {svSections().length === 0 ? "＋ セクションに分ける" : "＋ セクションを追加"}
+                    </button>
+                  </div>
+                  {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。セクションに分けると、回答によって次に進む先を変えられます。</p>}
+                  {svGroups.map((g, gi) => (
+                    <div key={g.section ? g.section.id : "_flat"}
+                      className={g.section ? "border border-gray-200 rounded-xl p-2.5 space-y-2 bg-white" : "space-y-2"}>
+                      {g.section && (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EEF2FF", color: "#4F46E5" }}>セクション{gi + 1}</span>
+                            <input value={g.section.title} onChange={(e) => updateSvSection(g.section.id, { title: e.target.value })}
+                              placeholder="セクション名（学生にも表示・任意）" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-xs" />
+                            <button onClick={() => moveSvSection(gi, -1)} disabled={gi === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
+                            <button onClick={() => moveSvSection(gi, 1)} disabled={gi === svGroups.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
+                            <button onClick={() => removeSvSection(g.section.id)} aria-label="セクションを削除" className="text-gray-300"><Trash2 size={14} /></button>
+                          </div>
+                          <input value={g.section.desc || ""} onChange={(e) => updateSvSection(g.section.id, { desc: e.target.value })}
+                            placeholder="セクションの説明（学生にも表示・任意）" className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs" />
+                        </>
                       )}
+                      {g.items.map(({ q, no }, gp) => (
+                        <div key={q.id} className="border border-gray-200 rounded-lg p-3 space-y-2" style={{ background: "#FAFBFC" }}>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-400">Q{no}</span>
+                            <select value={q.type} onChange={(e) => updateSvQuestion(q.id, { type: e.target.value, options: e.target.value === "text" ? [] : (q.options.length ? q.options : ["", ""]) })}
+                              className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
+                              <option value="single">単一選択</option>
+                              <option value="multi">複数選択</option>
+                              <option value="text">自由記述</option>
+                            </select>
+                            <label className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
+                              <input type="checkbox" checked={q.required !== false} onChange={(e) => updateSvQuestion(q.id, { required: e.target.checked })} />必須
+                            </label>
+                            <button onClick={() => moveSvQuestion(q.id, -1)} disabled={gp === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
+                            <button onClick={() => moveSvQuestion(q.id, 1)} disabled={gp === g.items.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
+                            <button onClick={() => removeSvQuestion(q.id)} aria-label="設問を削除" className="text-gray-300"><Trash2 size={14} /></button>
+                          </div>
+                          <input value={q.label} onChange={(e) => updateSvQuestion(q.id, { label: e.target.value })}
+                            placeholder="設問文（例：参加しやすい時間帯は？）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+                          {q.type !== "text" && (
+                            <div className="space-y-1.5">
+                              {q.options.map((o, oi) => (
+                                <div key={oi} className="flex items-center gap-1.5">
+                                  <input value={o} onChange={(e) => setSvOption(q.id, oi, e.target.value)}
+                                    placeholder={`選択肢${oi + 1}`} className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                                  <button onClick={() => removeSvOption(q.id, oi)} disabled={q.options.length <= 1} aria-label="選択肢を削除" className="text-gray-300 disabled:opacity-25"><X size={14} /></button>
+                                </div>
+                              ))}
+                              <button onClick={() => addSvOption(q.id)} className="text-xs font-bold" style={{ color: BRAND }}>＋ 選択肢を追加</button>
+                            </div>
+                          )}
+                          {q.type === "single" && svSections().length > 0 && (
+                            <div className="rounded-lg p-2 space-y-1" style={{ background: "#F5F7FF" }}>
+                              <p className="text-[11px] font-bold" style={{ color: "#4F46E5" }}>回答による分岐（このセクションの次に進む先）</p>
+                              {(q.options || []).filter((o) => o.trim()).length === 0 ? (
+                                <p className="text-[11px] text-gray-400">選択肢を入力すると分岐を設定できます。</p>
+                              ) : (q.options || []).filter((o) => o.trim()).map((o) => (
+                                <div key={o} className="flex items-center gap-1.5">
+                                  <span className="text-[11px] text-gray-600 truncate shrink-0" style={{ width: 88 }}>{o}</span>
+                                  <select value={(q.branch || {})[o] || ""} onChange={(e) => setSvBranch(q.id, o, e.target.value)}
+                                    className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-[11px] bg-white">
+                                    <option value="">次のセクションへ（既定）</option>
+                                    {svSections().map((sec, si) => (
+                                      <option key={sec.id} value={sec.id}>→ セクション{si + 1}{sec.title ? `：${sec.title}` : ""}</option>
+                                    ))}
+                                    <option value="end">→ ここで回答を終了</option>
+                                  </select>
+                                </div>
+                              ))}
+                              <p className="text-[11px] text-gray-400">同じセクションに分岐設定が複数あるときは、上の設問の設定が優先されます。</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex flex-wrap gap-2">
+                        {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
+                          <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
+                        ))}
+                      </div>
                     </div>
                   ))}
-                  <div className="flex flex-wrap gap-2">
-                    {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
-                      <button key={t} onClick={() => addSvQuestion(t)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="flex gap-2">
@@ -1442,6 +1584,16 @@ function AdminBody({
                     const unanswered = detail.filter((x) => !x.a);
                     const qs = surveyQuestions(s);
                     const toArr = (v) => (Array.isArray(v) ? v : (v ? [v] : []));
+                    // セクションの切り替わりに見出しを出す
+                    const secs = Array.isArray(s.sections) ? s.sections : [];
+                    const secIdOf = (q) => (secs.length ? (q.sectionId && secs.some((x) => x.id === q.sectionId) ? q.sectionId : secs[0].id) : null);
+                    const secHead = (qi) => {
+                      if (!secs.length) return null;
+                      if (qi > 0 && secIdOf(qs[qi - 1]) === secIdOf(qs[qi])) return null;
+                      const si = secs.findIndex((x) => x.id === secIdOf(qs[qi]));
+                      const sec = secs[si];
+                      return <p className="text-[11px] font-bold mb-1" style={{ color: "#4F46E5" }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
+                    };
                     return (
                       <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-4">
                         {qs.map((q, qi) => {
@@ -1449,6 +1601,7 @@ function AdminBody({
                             const texts = answered.filter((x) => (x.a[q.id] || "").toString().trim());
                             return (
                               <div key={q.id}>
+                                {secHead(qi)}
                                 <p className="text-xs font-bold text-gray-500 mb-2">Q{qi + 1}. {q.label}（自由記述）</p>
                                 {texts.length === 0 ? (
                                   <p className="text-xs text-gray-300">記述回答はまだありません</p>
@@ -1463,6 +1616,7 @@ function AdminBody({
                           }
                           return (
                             <div key={q.id}>
+                              {secHead(qi)}
                               <p className="text-xs font-bold text-gray-500 mb-2">
                                 Q{qi + 1}. {q.label}<span className="font-normal text-gray-400 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
                               </p>
@@ -1555,10 +1709,13 @@ function AdminBody({
                       <select value={linkKindOf(m)}
                         onChange={(e) => {
                           const v = e.target.value;
-                          let link = "";
-                          if (v === "url") link = /^https?:\/\//.test(m.link || "") ? m.link : "https://";
-                          else if (v) link = v;
-                          updateJourneyAndSave(m.id, v === "" ? { link: "", cta: "" } : { link });
+                          if (v === "") updateJourneyAndSave(m.id, { linkType: "", link: "", cta: "" });
+                          else if (v === "url") {
+                            const cur = m.link || "";
+                            updateJourneyAndSave(m.id, { linkType: "url", link: JOURNEY_LINK_KINDS.includes(cur) ? "https://" : (cur || "https://") });
+                          } else {
+                            updateJourneyAndSave(m.id, { linkType: v, link: v });
+                          }
                         }}
                         className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white shrink-0">
                         <option value="">リンクなし</option>
@@ -1569,7 +1726,9 @@ function AdminBody({
                         <option value="url">外部URL</option>
                       </select>
                       {linkKindOf(m) === "url" && (
-                        <input value={m.link} onChange={(e) => updateJourneyLocal(m.id, { link: e.target.value })} onBlur={persistJourney}
+                        <input value={m.link || ""} onChange={(e) => updateJourneyLocal(m.id, { link: e.target.value })}
+                          onBlur={() => persistJourneyUrl(m.id)}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                           placeholder="https://..." className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
                       )}
                     </div>
