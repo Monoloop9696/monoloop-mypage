@@ -946,6 +946,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     <div>
                       <p style={caps(9, GOLD)}>Survey</p>
                       <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{activeSurvey.title}</p>
+                      {activeSurvey.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{activeSurvey.desc}</p>}
                     </div>
                     <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
                   </div>

@@ -25,7 +25,7 @@ import {
 
 const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null };
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
-const EMPTY_SV = { title: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
+const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived" };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -604,6 +604,7 @@ function AdminBody({
   // ---- アンケート ----
   const surveyPayload = (published) => ({
     title: sv.title.trim(),
+    desc: (sv.desc || "").trim(),
     dueDate: sv.dueDate || null,
     due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
     time: sv.time || "約3分",
@@ -635,7 +636,7 @@ function AdminBody({
     setEditingSurveyId(s.id);
     const a = s.audience;
     setSv({
-      title: s.title || "", dueDate: s.dueDate || "", time: s.time || "約3分",
+      title: s.title || "", desc: s.desc || "", dueDate: s.dueDate || "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
       audType: a && a.type === "event" ? "event" : "all",
       audEventId: a && a.type === "event" ? (a.eventId || "") : "",
@@ -657,7 +658,7 @@ function AdminBody({
   const useSurveyFromHistory = (s) => {
     setEditingSurveyId(null);
     setSv({
-      title: s.title || "", dueDate: "", time: s.time || "約3分",
+      title: s.title || "", desc: s.desc || "", dueDate: "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
       audType: "all", audEventId: "", audGroup: "arrived",
     });
@@ -669,7 +670,7 @@ function AdminBody({
   const saveSurveyTemplate = async () => {
     if (!surveyValid()) { setBanner("先にアンケート内容を入力してください。"); return; }
     const name = svTplName.trim() || sv.title.trim() || "無題テンプレ";
-    const data = { title: sv.title.trim(), time: sv.time || "約3分", questions: surveyPayload(true).questions };
+    const data = { title: sv.title.trim(), desc: (sv.desc || "").trim(), time: sv.time || "約3分", questions: surveyPayload(true).questions };
     try { await addSurveyTemplate({ name, data }); setSvTplName(""); setSvShowTplSave(false); }
     catch (ex) { setBanner(`テンプレ保存に失敗：${ex.message}`); }
   };
@@ -677,7 +678,7 @@ function AdminBody({
     const t = surveyTemplates.find((x) => x.id === tplId);
     if (!t || !t.data) return;
     setSv({
-      title: t.data.title || "", dueDate: "", time: t.data.time || "約3分",
+      title: t.data.title || "", desc: t.data.desc || "", dueDate: "", time: t.data.time || "約3分",
       questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false })),
       audType: "all", audEventId: "", audGroup: "arrived",
     });
@@ -1195,6 +1196,12 @@ function AdminBody({
                   <p className="text-xs font-bold text-gray-500 mb-1">アンケート名<span className="text-red-500 ml-0.5">*</span></p>
                   <input value={sv.title} onChange={(e) => setSv({ ...sv, title: e.target.value })}
                     placeholder="例）研修内容についての希望調査" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">説明<span className="font-normal text-gray-400 ml-1">（任意・学生のアンケート画面でタイトルの下に表示）</span></p>
+                  <textarea value={sv.desc} onChange={(e) => setSv({ ...sv, desc: e.target.value })} rows={3}
+                    placeholder="例）研修の内容を決めるためのアンケートです。所要3分ほどで終わります。回答は選考には影響しません。"
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm leading-relaxed" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>

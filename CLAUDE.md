@@ -61,7 +61,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
 - `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), **areas[]**(対象エリア地方区分キー・空=全員), **areaBasis**(current/home/either=現住所/実家/どちらか), targetUids[](個別指定の対象者uid・あればエリアより優先), closed(管理者の最終受付終了。trueで到着も締切), copy, grad, published(false=下書き)。※回答期限超過で出欠回答は締切。到着は開催日当日以降いつでも押下可（管理者が closed にするまで）。エリア判定は住所文字列の先頭都道府県から（`src/lib/area.js`）
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no), arrived, arrivedAt(当日到着ボタン), changedAt/changeSeen(既回答からの変更を管理者に通知), cancelReason(管理者が欠席にした際のキャンセル理由)。※`setRsvp`はmerge。管理者用に `adminSetRsvp`(理由つき)/`deleteRsvp`(未回答に戻す)/`setRsvpArrived`/`markRsvpChangeSeen`
-- `surveys/{id}`: title, dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
+- `surveys/{id}`: title, **desc**(説明文・任意。学生の回答画面でタイトル下に表示), dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required}）, grad, published(false=下書き)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
   - surveys には **audience**（{type:"all"} または {type:"event", eventId, group:"yes"|"arrived"}）で対象者を限定可。学生側は自分のrsvpで判定して表示、管理集計/CSVも対象者を分母に。LINE配信のイベント対象は group=yes/arrived/no/none（arrived=出席かつ当日到着ボタン押下）
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
@@ -138,13 +138,13 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - ヘッダー(正式ロゴ)＋上部アラート(未対応タスク)。右上メニュー(≡)に **質問箱／LINE連携／プロフィール／ログアウト** を集約（下部ナビは HOME/EVENTS/SURVEY/NEWS の4つ）。
 - ホーム: ループちゃん(時間帯・誕生日・イベントで出し分け＋吹き出し)、**日付・時刻のライブ時計**、進捗バー、Journey(リンク可)、直近イベント、お知らせ。
 - イベント: 出欠(出席/欠席)。**未回答/回答済み/受付終了に枠分け**(回答期限=deadlineDate 超過 or 管理者の手動終了で受付終了)。**到着受付**(出席者は開催日当日以降いつでも押下可、回答締切とは独立、管理者が最終終了するまで)。回答変更時「担当者に共有」表示。**対象エリア/個別対象**に該当する学生にだけ表示。
-- アンケート: **動的設問(単一選択/複数選択/自由記述)**、未回答/回答済み/受付終了(dueDate)。**対象者限定**(全員 or 特定イベントの出席者/到着者)に該当する学生だけ表示。
+- アンケート: **説明文(タイトル下)**・**動的設問(単一選択/複数選択/自由記述)**、未回答/回答済み/受付終了(dueDate)。**対象者限定**(全員 or 特定イベントの出席者/到着者)に該当する学生だけ表示。
 - NEWS(記事＋写真, インスタ風=写真上/文章下, 写真保存ボタン)。**質問箱**(投稿・自分のQ&A履歴・公開FAQ)。LINE連携。
 - ログイン／登録(`/signup/:year` 動的・卒年度停止対応・**フリガナ/電話郵便ハイフン必須**)／パスワード再設定(Resend＋日本語 `/reset-confirm`)。
 
 **管理（AdminApp）**:
 - 年度スイッチャー(3件横並び＋pastプルダウン)。
-- 概況: 集計／**イベントCRUD**(下書き・回答期限(日付)・**対象エリア(現住所/実家/どちらも)＋個別対象者モーダル**・最終受付終了(手動)・**出欠/到着の管理側編集＋キャンセル理由**・履歴から作成)／**アンケートCRUD**(動的設問・テンプレ/履歴から作成・下書き・対象者(イベント参加者)・回答集計/CSV・**選択式は選択肢タップで回答者一覧モーダル**)／Journey(**ドラッグ並び替え**・リンク設定)／お知らせ。
+- 概況: 集計／**イベントCRUD**(下書き・回答期限(日付)・**対象エリア(現住所/実家/どちらも)＋個別対象者モーダル**・最終受付終了(手動)・**出欠/到着の管理側編集＋キャンセル理由**・履歴から作成)／**アンケートCRUD**(動的設問・テンプレ/履歴から作成・下書き・対象者(イベント参加者)・**説明欄(desc)**・回答集計/CSV・**選択式は選択肢タップで回答者一覧モーダル**)／Journey(**ドラッグ並び替え**・リンク設定)／お知らせ。
 - 内定者: 配布カード・初期PW変更・卒年度追加/受付停止・**検索(名前/大学/住所/メール等)**・一覧/フィルタ・**詳細(閲覧/「編集」で連絡先編集=現住所/実家分離・電話郵便ハイフン必須・氏名/生年月日/メールは編集不可・フリガナ)**・ステータス変更(内定/承諾/辞退/承諾後辞退/**テスト**)・辞退→無効化/復元・CSV。名前は**フリガナであいうえお順**。テストアカウントは集計/配信対象外。
 - 記事: 写真アップロード(自動圧縮・**画質重視 最大1600px/品質0.85/1MB枠**)・公開対象・公開/非公開・**編集**・削除・**投稿時に対象者の公式LINEへ自動通知**(任意ON)。
 - 質問箱: 一覧・回答(質問者へLINE通知)・公開切替・削除・未回答バッジ。
