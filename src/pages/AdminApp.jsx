@@ -1715,12 +1715,12 @@ function AdminBody({
                       <select value={linkKindOf(m)}
                         onChange={(e) => {
                           const v = e.target.value;
-                          if (v === "") updateJourneyAndSave(m.id, { linkType: "", link: "", cta: "" });
+                          if (v === "") updateJourneyAndSave(m.id, { linkType: "", link: "", cta: "", refId: null });
                           else if (v === "url") {
                             const cur = m.link || "";
-                            updateJourneyAndSave(m.id, { linkType: "url", link: JOURNEY_LINK_KINDS.includes(cur) ? "https://" : (cur || "https://") });
+                            updateJourneyAndSave(m.id, { linkType: "url", link: JOURNEY_LINK_KINDS.includes(cur) ? "https://" : (cur || "https://"), refId: null });
                           } else {
-                            updateJourneyAndSave(m.id, { linkType: v, link: v });
+                            updateJourneyAndSave(m.id, { linkType: v, link: v, refId: null });
                           }
                         }}
                         className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white shrink-0">
@@ -1737,7 +1737,21 @@ function AdminBody({
                           onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                           placeholder="https://..." className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
                       )}
+                      {(linkKindOf(m) === "event" || linkKindOf(m) === "survey") && (
+                        <select value={m.refId || ""} onChange={(e) => updateJourneyAndSave(m.id, { refId: e.target.value || null })}
+                          className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+                          <option value="">指定なし（一覧を開く）</option>
+                          {(linkKindOf(m) === "event" ? yearEvents : yearSurveys).map((x) => (
+                            <option key={x.id} value={x.id}>{x.title || "（無題）"}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
+                    {(linkKindOf(m) === "event" || linkKindOf(m) === "survey") && m.refId && (
+                      <p className="text-[11px] text-gray-400">
+                        指定した{linkKindOf(m) === "event" ? "イベント" : "アンケート"}の対象者にだけ、このステップが表示されます。回答するとこのステップが完了になります。
+                      </p>
+                    )}
                     {m.link && (
                       <input value={m.cta || ""} onChange={(e) => updateJourneyLocal(m.id, { cta: e.target.value })} onBlur={persistJourney}
                         placeholder="リンク文言（例：詳しく見る）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />

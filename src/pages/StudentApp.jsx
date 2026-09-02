@@ -144,6 +144,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [qErr, setQErr] = useState("");
   const [svAnswers, setSvAnswers] = useState({});
   const [svPath, setSvPath] = useState([]); // 現在までに進んだセクションid（先頭セクションを除く）
+  const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
   const svScrollRef = useRef(null);
   const [profileForm, setProfileForm] = useState({
     zip: student.zip || "", address: student.address || "",
@@ -233,6 +234,17 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
   const profileDone = !!(student.address && student.phone);
 
+  // Journey から特定イベントを開いたとき、そのカードまでスクロール
+  useEffect(() => {
+    if (tab !== "event" || !focusEventId) return;
+    const t = setTimeout(() => {
+      const el = typeof document !== "undefined" ? document.getElementById(`ev-${focusEventId}`) : null;
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFocusEventId(null);
+    }, 80);
+    return () => clearTimeout(t);
+  }, [tab, focusEventId]);
+
   // 質問箱：開いたら読み込み
   const loadQuestions = async () => {
     if (readOnly) return;
@@ -317,15 +329,36 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   };
 
   // ジャーニー
-  const eventStepDone = myEvents.length > 0 && myEvents[0].rsvp != null;
-  const stepDone = (m) =>
-    m.type === "accept" ? true
-    : m.type === "profile" ? profileDone
-    : m.type === "event" ? eventStepDone
-    : false;
-  const flags = journey.map(stepDone);
+  // 特定のイベント/アンケートに紐づくステップは、その対象者にだけ表示する
+  const stepRef = (m) => {
+    if (!m.refId) return null;
+    if (m.link === "event") return { kind: "event", item: myEvents.find((e) => e.id === m.refId) || null };
+    if (m.link === "survey") return { kind: "survey", item: mySurveys.find((s) => s.id === m.refId) || null };
+    return null;
+  };
+  const visibleJourney = journey.filter((m) => {
+    if (readOnly || !m.refId) return true;
+    const r = stepRef(m);
+    return !r || !!r.item; // 対象外・未公開・削除済みなら出さない
+  });
+  // 「イベント/アンケート」の汎用ステップは、1件でも回答済みなら完了扱い
+  // （新しいイベントが追加されても Now が前に戻らないようにするため）
+  const anyEventDone = myEvents.some((e) => e.rsvp != null);
+  const anySurveyDone = mySurveys.some((s) => s.done);
+  const stepDone = (m) => {
+    const r = stepRef(m);
+    if (r && r.item) return r.kind === "event" ? r.item.rsvp != null : !!r.item.done;
+    if (m.link === "event") return anyEventDone;
+    if (m.link === "survey") return anySurveyDone;
+    if (m.link === "profile") return profileDone;
+    return m.type === "accept" ? true
+      : m.type === "profile" ? profileDone
+      : m.type === "event" ? anyEventDone
+      : false;
+  };
+  const flags = visibleJourney.map(stepDone);
   const nowIdx = flags.findIndex((x) => !x);
-  const milestones = journey.map((m) => {
+  const milestones = visibleJourney.map((m) => {
     let cta = null, onTap = null, isLink = false;
     if (m.link && !/^https?:\/\/$/i.test(m.link)) {
       // 手入力ステップのリンク（内部タブ or 外部URL）
@@ -335,7 +368,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
       cta = m.cta || (ext ? "リンクを開く"
         : L === "event" ? "イベントを見る" : L === "survey" ? "アンケートへ"
         : L === "line" ? "LINE連携へ" : L === "profile" ? "基本情報を登録" : "詳しく見る");
+      const ref = stepRef(m);
       onTap = ext ? () => window.open(L, "_blank", "noopener,noreferrer")
+        : (ref && ref.item && ref.kind === "event") ? () => { setTab("event"); setFocusEventId(ref.item.id); }
+        : (ref && ref.item && ref.kind === "survey") ? () => {
+            if (ref.item.done) { setTab("survey"); return; }
+            setActiveSurvey(ref.item); setSvAnswers({}); setSvPath([]);
+          }
         : L === "event" ? () => setTab("event")
         : L === "survey" ? () => setTab("survey")
         : L === "line" ? () => setTab("line")
@@ -575,7 +614,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             const answered = activeEv.filter((e) => e.rsvp !== null);
 
             const EventCard = (e, isEnded) => (
-              <article key={e.id} className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, opacity: isEnded ? 0.75 : 1 }}>
+              <article key={e.id} id={`ev-${e.id}`} className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, opacity: isEnded ? 0.75 : 1 }}>
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-3">
                     <p className="en-serif" style={{ fontStyle: "italic", fontSize: 32, lineHeight: 1, color: ROSE }}>
