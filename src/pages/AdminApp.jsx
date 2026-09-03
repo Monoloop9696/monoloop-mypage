@@ -524,6 +524,8 @@ function AdminBody({
 
   // ---- アカウント配布 / 卒年度管理 ----
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  // LINE/メール配信の本文に差し込むマイページURL（ローカル開発時は本番URLを使う）
+  const mypageUrl = origin && !/localhost|127\.0\.0\.1/.test(origin) ? origin : "https://monoloop-mypage.vercel.app";
   const copyInvite = (g) => {
     const text = `${g.url}\n初期パスワード：${g.pw}`;
     try { navigator.clipboard.writeText(text); } catch { /* noop */ }
@@ -2358,16 +2360,22 @@ function AdminBody({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-bold text-gray-500">メッセージ</p>
-                <button onClick={() => setMsg((m) => m + "{name}")}
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
-                  ＋ 名前を差し込む
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => setMsg((m) => m + "{name}")}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                    ＋ 名前を差し込む
+                  </button>
+                  <button onClick={() => setMsg((m) => (m && !/\s$/.test(m) ? `${m}\n` : m) + mypageUrl)}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                    ＋URL差し込む
+                  </button>
+                </div>
               </div>
               <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={4}
                 placeholder={"例）{name}さん、こんにちは。内定者懇親会の出欠登録をお願いします。"}
                 className="w-full border border-gray-300 rounded-lg p-3 text-sm" />
               <p className="text-xs text-gray-500 mt-1.5">
-                文中に <span className="font-bold" style={{ color: BRAND }}>{"{name}"}</span> と入れると、送信時に各内定者のマイページ登録名に自動で置き換わります。
+                文中に <span className="font-bold" style={{ color: BRAND }}>{"{name}"}</span> と入れると、送信時に各内定者のマイページ登録名に自動で置き換わります。「＋URL差し込む」でマイページのURL（{mypageUrl}）を本文に追加できます。
               </p>
               {/\{name\}|\{名前\}/i.test(msg) && (
                 <div className="mt-2 rounded-lg p-2.5 text-xs whitespace-pre-wrap" style={{ background: "#F4F7F6", color: INK }}>
