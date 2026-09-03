@@ -1,13 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
 import { PAPER, ROSE, IVORY, MAUVE, GOLD, HAIR, MUTE, studentFontStyle, caps } from "../theme";
+import { takeIdleLogoutFlag } from "../auth/AuthContext";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
+  const [idleOut, setIdleOut] = useState(false);
+  // 24時間の無操作で自動ログアウトした直後だけ案内を出す
+  useEffect(() => { setIdleOut(takeIdleLogoutFlag()); }, []);
   const [busy, setBusy] = useState(false);
   const inp = { border: `1px solid ${HAIR}` };
 
@@ -71,6 +75,11 @@ export default function Login() {
             />
           </div>
 
+          {idleOut && !err && (
+            <p className="text-xs font-bold" style={{ color: "#B45309" }}>
+              24時間操作がなかったため、自動的にログアウトしました。お手数ですが再度ログインしてください。
+            </p>
+          )}
           {err && <p className="text-xs font-bold" style={{ color: "#C0264B" }}>{err}</p>}
 
           <button
