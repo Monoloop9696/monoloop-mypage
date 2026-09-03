@@ -48,6 +48,10 @@ export const syncRole = () => post("/api/set-role", {}, { authed: true });
 export const setStudentAccount = (payload) =>
   post("/api/student-account", payload, { authed: true });
 
+// 管理者：学生の最終ログイン日時（Firebase Auth のメタデータ）
+export const studentLastLogin = (uids) =>
+  post("/api/student-account", { action: "lastLogin", uids }, { authed: true });
+
 // 管理者：LINE一括配信（未連携者はメール送信）
 export const lineBroadcast = (payload) =>
   post("/api/line-broadcast", payload, { authed: true });

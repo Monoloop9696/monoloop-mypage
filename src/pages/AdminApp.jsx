@@ -9,7 +9,7 @@ import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
-import { setStudentAccount, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
+import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
@@ -316,9 +316,17 @@ function AdminBody({
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
+  const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
+  const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
   // 学生を開き直すたびに編集モードは解除（開いた直後は必ず閲覧表示）
   useEffect(() => { setEditDetail(false); }, [detailStudent]);
+  // 内定者タブを最初に開いたときに、最終ログインを一度だけ取得
+  useEffect(() => {
+    if (tab !== "students" || loginsState !== "idle" || !students.length) return;
+    loadLogins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, students.length]);
   const [listFilter, setListFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
@@ -977,6 +985,36 @@ function AdminBody({
     }
   };
 
+  // ---- 最終ログイン（Firebase Auth のメタデータを管理APIで取得）----
+  const loadLogins = async () => {
+    if (!students.length) return;
+    setLoginsState("loading");
+    try {
+      const r = await studentLastLogin(students.map((s) => s.id));
+      setLogins(r.users || {});
+      setLoginsState("done");
+    } catch (ex) {
+      setLoginsState("error");
+      setBanner(`ログイン状況の取得に失敗しました：${ex.message}`);
+    }
+  };
+  const fmtDateTime = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  };
+  const lastLoginOf = (uid) => {
+    const u = logins[uid];
+    if (!u) return null;
+    return fmtDateTime(u.lastSignInTime);
+  };
+  const lastLoginText = (uid) => {
+    if (loginsState === "loading") return "読込中…";
+    if (loginsState !== "done") return "—";
+    return lastLoginOf(uid) || "未ログイン";
+  };
+
   // ---- CSV ----
   const statusLabel = (s) =>
     s.deleted && s.status !== "辞退" && s.status !== "承諾後辞退" ? "アカウント削除済"
@@ -986,10 +1024,12 @@ function AdminBody({
     : s.status === "辞退" ? "内定辞退" : "承諾後辞退";
 
   const exportStudentsCsv = () => {
-    const header = ["氏名", "フリガナ", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗"];
+    const header = ["氏名", "フリガナ", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗", "最終ログイン", "アカウント作成"];
     const rows = yearStudents.map((s) => {
       const p = progressOf(s);
-      return [s.name, s.kana || "", s.univ, `${s.grad || selectedYear}`, statusLabel(s), s.email, s.phone, s.zip, s.address, s.birth, s.lineUserId ? "連携済" : "未連携", `${p.done}/${p.total}`];
+      const lg = logins[s.id];
+      return [s.name, s.kana || "", s.univ, `${s.grad || selectedYear}`, statusLabel(s), s.email, s.phone, s.zip, s.address, s.birth, s.lineUserId ? "連携済" : "未連携", `${p.done}/${p.total}`,
+        lg ? (fmtDateTime(lg.lastSignInTime) || "未ログイン") : "", lg ? (fmtDateTime(lg.creationTime) || "") : ""];
     });
     downloadCsv(`内定者一覧_${selectedYear}卒.csv`, [header, ...rows]);
   };
@@ -1946,9 +1986,16 @@ function AdminBody({
 
           <div className="flex items-center justify-between mb-1">
             <SectionTitle>内定者一覧（{selectedYear - 2000}卒）</SectionTitle>
-            <button onClick={exportStudentsCsv} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white mb-3" style={{ background: BRAND }}>
-              <Download size={12} /> CSVで一括発行
-            </button>
+            <div className="flex items-center gap-1.5 mb-3">
+              <button onClick={loadLogins} disabled={loginsState === "loading"}
+                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border disabled:opacity-50"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                <RefreshCw size={12} /> ログイン状況を更新
+              </button>
+              <button onClick={exportStudentsCsv} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
+                <Download size={12} /> CSVで一括発行
+              </button>
+            </div>
           </div>
 
           {showActiveSection && (
@@ -1961,6 +2008,7 @@ function AdminBody({
                     <button onClick={() => setDetailStudent(s.id)} className="min-w-0 text-left">
                       <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} style={{ color: BRAND }} /></p>
                       <p className="text-xs text-gray-500">{s.univ}・タスク {p.done}/{p.total}</p>
+                      <p className="text-xs text-gray-400">最終ログイン {lastLoginText(s.id)}</p>
                       <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full"
                         style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
                         {s.lineUserId ? "LINE連携済" : "未連携"}
@@ -2752,6 +2800,8 @@ function AdminBody({
               ]),
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
+          ["最終ログイン", lastLoginText(d.id)],
+          ["アカウント作成", (logins[d.id] && fmtDateTime(logins[d.id].creationTime)) || "—"],
         ];
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-6">
