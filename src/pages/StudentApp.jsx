@@ -369,11 +369,26 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     if (m.link === "survey") return { kind: "survey", item: mySurveys.find((s) => s.id === m.refId) || null };
     return null;
   };
-  const visibleJourney = journey.filter((m) => {
-    if (readOnly || !m.refId) return true;
-    const r = stepRef(m);
-    return !r || !!r.item; // 対象外・未公開・削除済みなら出さない
-  });
+  // 1番目は「内定 / 内定承諾」の固定ステップ。ステータスに応じて文言が切り替わる
+  const acceptStep = {
+    id: "__accept",
+    type: "accept",
+    label: accepted ? "内定承諾" : "内定",
+    desc: accepted
+      ? "ありがとうございます！これから一緒に頑張りましょう。"
+      : "ご承諾のお返事をお待ちしております。",
+  };
+  const visibleJourney = [
+    acceptStep,
+    ...journey.filter((m) => {
+      // 管理画面側の「内定」「内定承諾」ステップは固定ステップと重複するので表示しない
+      const lb = (m.label || "").trim();
+      if (m.type === "accept" || lb === "内定" || lb === "内定承諾" || lb === "内定承諾済") return false;
+      if (readOnly || !m.refId) return true;
+      const r = stepRef(m);
+      return !r || !!r.item; // 対象外・未公開・削除済みなら出さない
+    }),
+  ];
   // 「イベント/アンケート」の汎用ステップは、1件でも回答済みなら完了扱い
   // （新しいイベントが追加されても Now が前に戻らないようにするため）
   const anyEventDone = myEvents.some((e) => e.rsvp != null);
@@ -495,12 +510,6 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
         </header>
 
         {/* 上部アラート（未対応タスク） */}
-        {accepted && (
-          <div className="px-5 py-2 flex items-center gap-2" style={{ background: "#FFF7FA", borderBottom: `1px solid ${HAIR}` }}>
-            <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
-            <span className="text-xs truncate" style={{ color: MUTE }}>ご承諾ありがとうございます。入社まで一緒に準備していきましょう。</span>
-          </div>
-        )}
         {alerts.length > 0 && (
           <div className="px-4 py-2.5 flex items-center gap-2 overflow-x-auto"
             style={{ background: "#FFF3E0", borderBottom: `1px solid ${HAIR}` }}>
@@ -525,7 +534,12 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 style={{ background: `linear-gradient(165deg, #FCE1EA 0%, ${PINK} 100%)` }}>
                 <div className="px-6 pt-8 pb-9 relative">
                   <p style={caps(10, ROSE)}>Monoloop Onboarding — Class of {grad}</p>
-                  <h1 className="font-bold mt-3" style={{ fontSize: 20, color: INK }}>こんにちは、{studentName}さん。</h1>
+                  <h1 className="font-bold mt-3 flex items-baseline flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 20, color: INK }}>
+                    <span>こんにちは、{studentName}さん。</span>
+                    {accepted && (
+                      <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
+                    )}
+                  </h1>
                   <HomeClock />
 
                   {/* ループちゃん＋吹き出し */}
