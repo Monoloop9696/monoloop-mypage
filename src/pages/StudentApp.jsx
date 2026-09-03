@@ -145,6 +145,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [svAnswers, setSvAnswers] = useState({});
   const [svPath, setSvPath] = useState([]); // 現在までに進んだセクションid（先頭セクションを除く）
   const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
+  const [celebrate, setCelebrate] = useState(false); // 内定承諾のお祝い演出
   const svScrollRef = useRef(null);
   const [profileForm, setProfileForm] = useState({
     zip: student.zip || "", address: student.address || "",
@@ -233,6 +234,38 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     .map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
   const profileDone = !!(student.address && student.phone);
+  // 管理者がステータスを「承諾」にすると、学生側の表示が切り替わる
+  const accepted = student.status === "承諾";
+  const celebrateKey = uid ? `ml_accept_celebrated_${uid}` : "";
+
+  // 承諾後の初回ログインで1度だけお祝いを表示（プレビューでは出さない）
+  useEffect(() => {
+    if (readOnly || !accepted || !celebrateKey) return;
+    try {
+      if (localStorage.getItem(celebrateKey)) return;
+    } catch { return; }
+    setCelebrate(true);
+  }, [readOnly, accepted, celebrateKey]);
+  const closeCelebrate = () => {
+    try { localStorage.setItem(celebrateKey, String(Date.now())); } catch { /* noop */ }
+    setCelebrate(false);
+  };
+  // 紙吹雪の粒（再描画で位置が変わらないように固定）
+  const confetti = useMemo(() => {
+    const colors = [ROSE, PINK, GOLD, MAUVE, "#FFD9E4"];
+    return Array.from({ length: 44 }, (_, i) => ({
+      id: i,
+      left: Math.random() * 100,
+      dx: `${Math.round((Math.random() - 0.5) * 120)}px`,
+      dur: `${(2.6 + Math.random() * 2.2).toFixed(2)}s`,
+      delay: `${(Math.random() * 2.4).toFixed(2)}s`,
+      rot: `${Math.round(360 + Math.random() * 720)}deg`,
+      w: 6 + Math.round(Math.random() * 6),
+      h: 9 + Math.round(Math.random() * 8),
+      color: colors[i % colors.length],
+      round: i % 3 === 0,
+    }));
+  }, []);
 
   // Journey から特定イベントを開いたとき、そのカードまでスクロール
   useEffect(() => {
@@ -346,13 +379,14 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const anyEventDone = myEvents.some((e) => e.rsvp != null);
   const anySurveyDone = mySurveys.some((s) => s.done);
   const stepDone = (m) => {
+    // 内定承諾ステップは、管理者が「承諾」にした時点で完了になる
+    if (m.type === "accept") return accepted;
     const r = stepRef(m);
     if (r && r.item) return r.kind === "event" ? r.item.rsvp != null : !!r.item.done;
     if (m.link === "event") return anyEventDone;
     if (m.link === "survey") return anySurveyDone;
     if (m.link === "profile") return profileDone;
-    return m.type === "accept" ? true
-      : m.type === "profile" ? profileDone
+    return m.type === "profile" ? profileDone
       : m.type === "event" ? anyEventDone
       : false;
   };
@@ -385,7 +419,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     } else if (m.type === "event") {
       cta = "出欠を回答する"; onTap = () => setTab("event");
     }
-    return { ...m, cta, onTap, isLink };
+    // 内定承諾ステップの表示名は status に合わせて自動で切り替える
+    const label = m.type === "accept" ? (accepted ? "内定承諾" : "内定") : m.label;
+    return { ...m, label, cta, onTap, isLink };
   });
 
   const statusTag = (e) =>
@@ -459,6 +495,12 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
         </header>
 
         {/* 上部アラート（未対応タスク） */}
+        {accepted && (
+          <div className="px-5 py-2 flex items-center gap-2" style={{ background: "#FFF7FA", borderBottom: `1px solid ${HAIR}` }}>
+            <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
+            <span className="text-xs truncate" style={{ color: MUTE }}>ご承諾ありがとうございます。入社まで一緒に準備していきましょう。</span>
+          </div>
+        )}
         {alerts.length > 0 && (
           <div className="px-4 py-2.5 flex items-center gap-2 overflow-x-auto"
             style={{ background: "#FFF3E0", borderBottom: `1px solid ${HAIR}` }}>
@@ -976,6 +1018,40 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <button disabled={readOnly || !profileForm.address || !profileForm.phone || savingProfile} onClick={saveProfile}
                   className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
                   {readOnly ? "プレビュー（保存不可）" : savingProfile ? "保存中…" : "登録する"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 内定承諾のお祝い（承諾後の初回ログインで1度だけ） */}
+          {celebrate && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center px-6"
+              style={{ background: "rgba(58,42,48,0.55)" }}>
+              {/* 紙吹雪 */}
+              <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+                {confetti.map((c) => (
+                  <span key={c.id} className="ml-confetti absolute top-0 block"
+                    style={{
+                      left: `${c.left}%`, width: c.w, height: c.round ? c.w : c.h,
+                      background: c.color, borderRadius: c.round ? 999 : 2,
+                      "--ml-dx": c.dx, "--ml-dur": c.dur, "--ml-delay": c.delay, "--ml-rot": c.rot,
+                    }} />
+                ))}
+              </div>
+              <div className="ml-pop relative w-full max-w-sm text-center px-6 py-8"
+                style={{ background: PAPER, border: `1px solid ${HAIR}`, boxShadow: "0 18px 48px rgba(58,42,48,0.28)" }}>
+                <p style={caps(9, GOLD)}>Congratulations</p>
+                <img src="/loopchan/loopchan-8.png" alt="" className="ml-float mx-auto mt-3"
+                  style={{ width: 132, height: "auto" }} />
+                <p className="jp-mincho font-bold mt-4" style={{ fontSize: 21, color: ROSE_DEEP }}>内定承諾<br />ありがとうございます！</p>
+                <p className="text-sm font-bold mt-3">{student.name} さん</p>
+                <p className="text-xs mt-2 leading-relaxed" style={{ color: MUTE }}>
+                  モノ・ループへようこそ。<br />
+                  これから入社までの道のりを、このマイページで一緒に進めていきましょう。
+                </p>
+                <button onClick={closeCelebrate} className="w-full mt-6 py-3.5 text-sm font-bold"
+                  style={{ background: ROSE, color: IVORY }}>
+                  はじめる
                 </button>
               </div>
             </div>

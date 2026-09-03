@@ -91,3 +91,49 @@ textarea,
 button {
   color-scheme: light;
 }
+
+/* 内定承諾のお祝い：紙吹雪 */
+@keyframes ml-confetti-kf {
+  0% {
+    transform: translate3d(0, -14vh, 0) rotate(0deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(var(--ml-dx, 0px), 108vh, 0) rotate(var(--ml-rot, 720deg));
+    opacity: 1;
+  }
+}
+.ml-confetti {
+  animation: ml-confetti-kf var(--ml-dur, 3.4s) linear var(--ml-delay, 0s) infinite;
+}
+
+/* お祝いカードのポップイン */
+@keyframes ml-pop-kf {
+  0% {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.ml-pop {
+  animation: ml-pop-kf 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-confetti {
+    display: none;
+  }
+  .ml-pop {
+    animation: none;
+  }
+}
