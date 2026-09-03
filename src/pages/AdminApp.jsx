@@ -305,7 +305,9 @@ function AdminBody({
   const [selectedSvTpl, setSelectedSvTpl] = useState("");
   const [historyPicker, setHistoryPicker] = useState(null); // null | "event" | "survey"
   const [historyExpanded, setHistoryExpanded] = useState(null);
-  const [targetModal, setTargetModal] = useState(null); // null | "event" | "survey"（対象者モーダル）
+  // 対象者モーダル： "event"/"survey"＝作成フォーム用、{kind,id}＝公開済みの1件を後から調整
+  const [targetModal, setTargetModal] = useState(null);
+  const [docTargetUids, setDocTargetUids] = useState([]);
   const [optionVoters, setOptionVoters] = useState(null); // {qLabel, option, list:[student]} 選択肢の回答者モーダル
   const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
   const [attendAns, setAttendAns] = useState("出席");
@@ -637,6 +639,15 @@ function AdminBody({
     const cur = Array.isArray(p.targetUids) ? p.targetUids : [];
     return { ...p, targetUids: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] };
   });
+
+  // 公開済みのイベント／アンケートの対象者を後から調整する（作成後に登録した学生の表示/非表示もここで）
+  const openDocTargetModal = (kind, item) => {
+    const base = Array.isArray(item.targetUids)
+      ? item.targetUids
+      : (kind === "survey" ? surveyAudience(item) : eventAudience(item)).map((st) => st.id);
+    setDocTargetUids(base);
+    setTargetModal({ kind, id: item.id });
+  };
 
   // ---- アンケートのセクション（回答による分岐） ----
   const svSections = () => (Array.isArray(sv.sections) ? sv.sections : []);
@@ -1285,6 +1296,9 @@ function AdminBody({
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
                         </button>
+                        <button onClick={() => openDocTargetModal("event", e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                          対象者を調整{Array.isArray(e.targetUids) ? `（個別 ${e.targetUids.length}名）` : ""}
+                        </button>
                         {e.closed ? (
                           <button onClick={() => updateEvent(e.id, { closed: false })} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">受付を再開</button>
                         ) : (
@@ -1661,6 +1675,9 @@ function AdminBody({
                         <div className="flex items-center gap-2 flex-wrap">
                           <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
                             <Download size={12} /> 回答をCSV出力
+                          </button>
+                          <button onClick={() => openDocTargetModal("survey", s)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                            対象者を調整{Array.isArray(s.targetUids) ? `（個別 ${s.targetUids.length}名）` : ""}
                           </button>
                           <button onClick={() => editSurvey(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
                           {confirmDel === `survey:${s.id}` ? (
@@ -2515,14 +2532,38 @@ function AdminBody({
 
       {/* 対象者を選ぶモーダル */}
       {targetModal && (() => {
-        const isSv = targetModal === "survey";
+        const isDoc = typeof targetModal === "object"; // 公開済みの1件を調整
+        const isSv = isDoc ? targetModal.kind === "survey" : targetModal === "survey";
+        const docItem = isDoc ? (isSv ? surveys : events).find((x) => x.id === targetModal.id) : null;
         const form = isSv ? sv : ev;
         const setForm = isSv ? setSv : setEv;
-        const candidates = isSv ? svFormPool() : activeStudents;
-        const areaIdsFn = isSv ? svFormAreaIds : formAreaIds;
-        const toggleUid = isSv ? toggleSvTargetUid : toggleTargetUid;
-        const closeTargetModal = () => setTargetModal(null);
-        const sel = new Set(Array.isArray(form.targetUids) ? form.targetUids : []);
+        const candidates = isDoc
+          ? (isSv ? (docItem ? surveyPool(docItem) : []) : activeStudents)
+          : (isSv ? svFormPool() : activeStudents);
+        const areaIdsFn = isDoc
+          ? () => candidates.filter((st) => matchesAreas(st, docItem && docItem.areas, docItem && docItem.areaBasis)).map((st) => st.id)
+          : (isSv ? svFormAreaIds : formAreaIds);
+        const selectedUids = isDoc ? docTargetUids : (Array.isArray(form.targetUids) ? form.targetUids : []);
+        const setSelectedUids = isDoc ? setDocTargetUids : (next) => setForm((p) => ({ ...p, targetUids: next }));
+        const closeTargetModal = () => { setTargetModal(null); setDocTargetUids([]); };
+        const sel = new Set(selectedUids);
+        const toggleUid = (id) => setSelectedUids(sel.has(id) ? selectedUids.filter((x) => x !== id) : [...selectedUids, id]);
+        const saveDocTarget = async () => {
+          if (!docItem) return closeTargetModal();
+          try {
+            if (isSv) await updateSurvey(docItem.id, { targetUids: docTargetUids });
+            else await updateEvent(docItem.id, { targetUids: docTargetUids });
+          } catch (ex) { setBanner(`対象者の保存に失敗しました：${ex.message}`); }
+          closeTargetModal();
+        };
+        const clearDocTarget = async () => {
+          if (!docItem) return closeTargetModal();
+          try {
+            if (isSv) await updateSurvey(docItem.id, { targetUids: null });
+            else await updateEvent(docItem.id, { targetUids: null });
+          } catch (ex) { setBanner(`対象者の解除に失敗しました：${ex.message}`); }
+          closeTargetModal();
+        };
         const areaOf = (st) => {
           const cur = addressArea(st.address);
           const home = st.livesAtHome ? cur : addressArea(st.homeAddress);
@@ -2536,15 +2577,23 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
-                  <p className="text-xs text-gray-400">{isSv ? "アンケートの対象者を選ぶ（表示する学生）" : "対象者を選ぶ（表示する学生）"}</p>
-                  <p className="text-lg font-bold mt-0.5">表示 {sel.size} / {candidates.length}名</p>
+                  <p className="text-xs text-gray-400">
+                    {isDoc ? `${isSv ? "アンケート" : "イベント"}の対象者を調整` : (isSv ? "アンケートの対象者を選ぶ（表示する学生）" : "対象者を選ぶ（表示する学生）")}
+                  </p>
+                  {isDoc && docItem && <p className="text-sm font-bold mt-0.5 truncate">{docItem.title}</p>}
+                  <p className={isDoc ? "text-xs text-gray-500 mt-0.5" : "text-lg font-bold mt-0.5"}>表示 {sel.size} / {candidates.length}名</p>
                 </div>
                 <button onClick={closeTargetModal} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
+              {isDoc && (
+                <p className="px-4 pt-2 text-[11px] text-gray-400 shrink-0">
+                  あとから登録した学生もこの一覧に出ます。チェックを入れた学生にだけ表示されます（保存すると個別指定になり、エリア条件より優先されます）。
+                </p>
+              )}
               <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 shrink-0">
-                <button onClick={() => setForm((p) => ({ ...p, targetUids: areaIdsFn() }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
-                <button onClick={() => setForm((p) => ({ ...p, targetUids: candidates.map((s) => s.id) }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
-                <button onClick={() => setForm((p) => ({ ...p, targetUids: [] }))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
+                <button onClick={() => setSelectedUids(areaIdsFn())} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
+                <button onClick={() => setSelectedUids(candidates.map((s) => s.id))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
+                <button onClick={() => setSelectedUids([])} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
               </div>
               <div className="overflow-y-auto divide-y divide-gray-100">
                 {candidates.length === 0 && <p className="text-xs text-gray-300 px-5 py-6 text-center">対象になる学生がいません（「対象者」の条件を見直してください）</p>}
@@ -2564,7 +2613,17 @@ function AdminBody({
                 })}
               </div>
               <div className="p-3 border-t border-gray-100 shrink-0">
-                <button onClick={closeTargetModal} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>完了</button>
+                {isDoc ? (
+                  <div className="space-y-1.5">
+                    <button onClick={saveDocTarget} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>この内容で保存</button>
+                    <div className="flex gap-2">
+                      <button onClick={clearDocTarget} className="flex-1 text-xs font-bold py-2 rounded-lg border border-gray-300 text-gray-500 bg-white">個別指定を解除（条件どおりに戻す）</button>
+                      <button onClick={closeTargetModal} className="px-4 text-xs font-bold py-2 rounded-lg border border-gray-300 text-gray-500 bg-white">キャンセル</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={closeTargetModal} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>完了</button>
+                )}
               </div>
             </div>
           </div>
