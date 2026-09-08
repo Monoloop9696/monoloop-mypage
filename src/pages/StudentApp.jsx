@@ -711,6 +711,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   {/* 到着：出席者は開催日以降いつでも押せる（管理者が最終終了するまで）。回答期限とは独立 */}
                   {(() => {
                     if (e.rsvp !== "yes") return null;
+                    if (e.arrivalOn === false) return null; // 管理側で到着ボタンを非表示にしたイベント
                     const canArrive = !e.closed && (readOnly || (e.dateStr && e.dateStr <= todayStr)); // 開催日当日以降
                     const upcoming = !e.closed && e.dateStr && e.dateStr > todayStr; // これから
                     if (!(e.arrived || canArrive || upcoming)) return null;
@@ -725,7 +726,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                           <button onClick={() => doArrive(e.id)}
                             className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
                             style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
-                            <MapPin size={15} /> 会場に到着したら押す
+                            <MapPin size={15} /> {e.arrivalLabel || "会場に到着したら押す"}
                           </button>
                         ) : (
                           <div className="w-full py-2.5 text-xs font-bold text-center"

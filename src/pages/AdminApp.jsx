@@ -23,7 +23,9 @@ import {
   loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
-const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null };
+const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null, arrivalOn: true, arrivalLabel: "" };
+// 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
+const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
 const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 const newQuestion = (type = "single") => ({
@@ -308,6 +310,7 @@ function AdminBody({
   // 対象者モーダル： "event"/"survey"＝作成フォーム用、{kind,id}＝公開済みの1件を後から調整
   const [targetModal, setTargetModal] = useState(null);
   const [docTargetUids, setDocTargetUids] = useState([]);
+  const [arrivalDraft, setArrivalDraft] = useState({}); // eventId -> 到着ボタン文言の編集中の値
   const [optionVoters, setOptionVoters] = useState(null); // {qLabel, option, list:[student]} 選択肢の回答者モーダル
   const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
   const [attendAns, setAttendAns] = useState("出席");
@@ -490,6 +493,12 @@ function AdminBody({
     if (Array.isArray(e.targetUids)) return activeStudents.filter((st) => e.targetUids.includes(st.id));
     return (e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents;
   };
+  // 公開済みイベントの「会場到着ボタン」文言（未入力なら既定文言）
+  const arrivalValue = (e) => (arrivalDraft[e.id] !== undefined ? arrivalDraft[e.id] : (e.arrivalLabel || ""));
+  const saveArrivalLabel = (e) => {
+    updateEvent(e.id, { arrivalLabel: (arrivalValue(e) || "").trim() });
+    setArrivalDraft((p) => { const n = { ...p }; delete n[e.id]; return n; });
+  };
   const eventAreaText = (e) => {
     if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
     if (!e.areas || !e.areas.length) return null;
@@ -582,6 +591,8 @@ function AdminBody({
       areas: data.areas || [], areaBasis: data.areaBasis || "either",
       targetUids: Array.isArray(data.targetUids) ? data.targetUids : null,
       copy: data.copy || "", grad: selectedYear, published: true,
+      arrivalOn: data.arrivalOn !== false,
+      arrivalLabel: (data.arrivalLabel || "").trim(),
     });
 
   const doAddEvent = async () => {
@@ -595,6 +606,8 @@ function AdminBody({
       copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadline: deadlineLabel(ev.deadlineDate),
       areas: ev.areas || [], areaBasis: ev.areaBasis || "either",
       targetUids: Array.isArray(ev.targetUids) ? ev.targetUids : null,
+      arrivalOn: ev.arrivalOn !== false,
+      arrivalLabel: (ev.arrivalLabel || "").trim(),
       grad: selectedYear, published: false,
     };
     if (editingDraftId) await updateEvent(editingDraftId, base);
@@ -602,7 +615,7 @@ function AdminBody({
     resetForm();
   };
   const editDraft = (dft) => {
-    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null });
+    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null, arrivalOn: dft.arrivalOn !== false, arrivalLabel: dft.arrivalLabel || "" });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
   };
@@ -782,7 +795,7 @@ function AdminBody({
   const openHistory = (kind) => { setHistoryExpanded(null); setHistoryPicker(kind); };
   const useEventFromHistory = (e) => {
     setEditingDraftId(null);
-    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null });
+    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null, arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "" });
     setShowEventForm(true);
     setHistoryPicker(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1184,6 +1197,29 @@ function AdminBody({
                   <p className="text-[11px] text-gray-400 mt-1">この日を過ぎると学生は出欠を回答・変更できなくなります（未設定なら開催日まで回答可）。</p>
                 </div>
 
+                {/* 会場到着ボタン */}
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">会場到着ボタン</p>
+                  <div className="flex gap-1.5 mb-2">
+                    {[[true, "表示する"], [false, "表示しない"]].map(([v, label]) => (
+                      <button key={String(v)} onClick={() => setEv({ ...ev, arrivalOn: v })}
+                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        style={(ev.arrivalOn !== false) === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {ev.arrivalOn !== false && (
+                    <input value={ev.arrivalLabel} onChange={(e) => setEv({ ...ev, arrivalLabel: e.target.value })}
+                      placeholder={ARRIVAL_LABEL_DEFAULT} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {ev.arrivalOn === false
+                      ? "出席者の画面に到着ボタンを出しません（受付が不要なイベント向け）。"
+                      : `出席者が開催日以降に押せるボタンの文言です。未入力なら「${ARRIVAL_LABEL_DEFAULT}」になります。`}
+                  </p>
+                </div>
+
                 {/* 対象エリア（住所で絞る） */}
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">対象エリア（住所で絞る）</p>
@@ -1334,6 +1370,23 @@ function AdminBody({
                       {changedCount > 0 && (
                         <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
                       )}
+                      <div className="flex items-center gap-2 flex-wrap mt-1 rounded-lg p-2" style={{ background: "#F6F7F9" }}>
+                        <span className="text-[11px] font-bold text-gray-500 shrink-0">会場到着ボタン</span>
+                        <button onClick={() => updateEvent(e.id, { arrivalOn: e.arrivalOn === false })}
+                          className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0"
+                          style={e.arrivalOn === false
+                            ? { borderColor: "#D1D5DB", color: "#6B7280", background: "#fff" }
+                            : { borderColor: "#1E874B", color: "#fff", background: "#1E874B" }}>
+                          {e.arrivalOn === false ? "表示しない" : "表示する"}
+                        </button>
+                        {e.arrivalOn !== false && (
+                          <input value={arrivalValue(e)} onChange={(ev2) => setArrivalDraft((p) => ({ ...p, [e.id]: ev2.target.value }))}
+                            onBlur={() => saveArrivalLabel(e)}
+                            onKeyDown={(ev2) => { if (ev2.key === "Enter") ev2.currentTarget.blur(); }}
+                            placeholder={ARRIVAL_LABEL_DEFAULT}
+                            className="flex-1 border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white" style={{ minWidth: 140 }} />
+                        )}
+                      </div>
                       <div className="flex items-center gap-2 flex-wrap mt-1">
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
