@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -53,6 +53,21 @@ export default function AdminApp() {
   const journeysRef = useRef(journeys);
   useEffect(() => { journeysRef.current = journeys; }, [journeys]);
 
+  // 表示モード：PC（ワイド・16:9向け）/ スマホ。既定は画面幅で判定し、選択は localStorage に保存
+  const [pcMode, setPcMode] = useState(() => {
+    try {
+      const v = localStorage.getItem("ml_admin_pc");
+      if (v === "1") return true;
+      if (v === "0") return false;
+    } catch { /* noop */ }
+    return typeof window !== "undefined" && window.innerWidth >= 1024;
+  });
+  const togglePcMode = () => setPcMode((v) => {
+    const next = !v;
+    try { localStorage.setItem("ml_admin_pc", next ? "1" : "0"); } catch { /* noop */ }
+    return next;
+  });
+
   // 購読（管理者が編集する小規模コレクションは即時反映）
   useEffect(() => {
     const u1 = listenAllStudents(setStudents);
@@ -87,7 +102,7 @@ export default function AdminApp() {
 
   return (
     <div className="min-h-screen" style={{ background: "#F4F7F6" }}>
-      <div className="max-w-md mx-auto min-h-screen relative">
+      <div className={`${pcMode ? "max-w-[1600px]" : "max-w-md"} mx-auto min-h-screen relative`}>
         <header className="sticky top-0 z-40 px-5 py-3.5 flex items-center justify-between"
           style={{ background: "#fff", borderBottom: "1px solid #E5E7EB" }}>
           <div className="flex items-center gap-2.5">
@@ -97,9 +112,17 @@ export default function AdminApp() {
               <p className="text-xs text-gray-400 leading-none mt-0.5">採用管理コンソール</p>
             </div>
           </div>
-          <button onClick={signOut} className="flex items-center gap-1 text-xs font-bold text-gray-500" aria-label="ログアウト">
-            <LogOut size={14} /> ログアウト
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={togglePcMode}
+              className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg border"
+              style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}
+              aria-label={pcMode ? "スマホ表示に切り替える" : "PC表示に切り替える"}>
+              {pcMode ? <Smartphone size={13} /> : <Monitor size={13} />} {pcMode ? "スマホ表示" : "PC表示"}
+            </button>
+            <button onClick={signOut} className="flex items-center gap-1 text-xs font-bold text-gray-500" aria-label="ログアウト">
+              <LogOut size={14} /> ログアウト
+            </button>
+          </div>
         </header>
 
         {banner && (
@@ -113,7 +136,7 @@ export default function AdminApp() {
           savedTemplates={savedTemplates} journeys={journeys} setJourneys={setJourneys}
           journeysRef={journeysRef} rsvps={rsvps} responses={responses}
           refreshAnswers={refreshAnswers} cohorts={cohorts} notices={notices}
-          setBanner={setBanner}
+          setBanner={setBanner} pc={pcMode}
         />
       </div>
     </div>
@@ -122,7 +145,7 @@ export default function AdminApp() {
 
 function AdminBody({
   students, events, surveys, savedTemplates, journeys, setJourneys, journeysRef,
-  rsvps, responses, refreshAnswers, cohorts, notices, setBanner,
+  rsvps, responses, refreshAnswers, cohorts, notices, setBanner, pc,
 }) {
   const [tab, setTab] = useState("dash");
   const [selectedYear, setSelectedYear] = useState(null);
@@ -1083,7 +1106,31 @@ function AdminBody({
   ];
 
   return (
-    <div className="pb-20">
+    <div className={pc ? "flex gap-5 px-5 py-4 items-start" : "pb-20"}>
+      {pc && (
+        <aside className="shrink-0 sticky" style={{ width: 208, top: 64 }}>
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            {tabs.map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.key;
+              const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
+              return (
+                <button key={t.key} onClick={() => setTab(t.key)}
+                  className="w-full px-3.5 py-3 flex items-center gap-2.5 text-sm font-bold border-b border-gray-100 last:border-b-0"
+                  style={active ? { background: BRAND_LIGHT, color: BRAND } : { color: "#6B7280", background: "#fff" }}>
+                  <Icon size={17} />
+                  <span className="flex-1 text-left">{t.label}</span>
+                  {badge > 0 && (
+                    <span className="text-white rounded-full font-bold flex items-center justify-center"
+                      style={{ background: "#DC2626", fontSize: 10, minWidth: 17, height: 17, padding: "0 4px" }}>{badge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      )}
+      <div className={pc ? "flex-1 min-w-0" : ""}>
       <div className="px-4 pt-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-1.5 min-w-0">
@@ -1126,8 +1173,8 @@ function AdminBody({
       </div>
 
       {tab === "dash" && (
-        <div className="px-4 pt-4 space-y-5">
-          <div className="grid grid-cols-3 gap-1.5">
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-5"}>
+          <div className={pc ? "grid grid-cols-5 gap-2 col-span-2" : "grid grid-cols-3 gap-1.5"}>
             {[["内定者", totalActive], ["承諾済", accepted], ["LINE連携", linked], ["内定辞退", declinedPre], ["承諾後辞退", declinedPost]].map(([k, v]) => (
               <div key={k} className="bg-white border border-gray-200 rounded-xl p-2.5 text-center">
                 <p className="text-xs text-gray-500">{k}</p>
@@ -1920,7 +1967,7 @@ function AdminBody({
       )}
 
       {tab === "students" && (
-        <div className="px-4 pt-4">
+        <div className={pc ? "" : "px-4 pt-4"}>
           <div className="flex items-center justify-between">
             <SectionTitle>アカウント配布 / 卒年度</SectionTitle>
             <button onClick={() => { setShowAddCohort(!showAddCohort); setCohortErr(""); }}
@@ -2165,7 +2212,7 @@ function AdminBody({
       )}
 
       {tab === "news" && (
-        <div className="px-4 pt-4 space-y-4">
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-4"}>
           <SectionTitle>{editingArticleId ? "記事を編集" : "NEWS記事を投稿"}</SectionTitle>
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
             <div>
@@ -2271,7 +2318,7 @@ function AdminBody({
       )}
 
       {tab === "qbox" && (
-        <div className="px-4 pt-4 space-y-3">
+        <div className={pc ? "space-y-3" : "px-4 pt-4 space-y-3"}>
           <div className="flex items-center justify-between">
             <SectionTitle>質問箱</SectionTitle>
             <button onClick={loadQuestions} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
@@ -2292,7 +2339,7 @@ function AdminBody({
       )}
 
       {tab === "line" && (
-        <div className="px-4 pt-4 space-y-4">
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-4"}>
           <SectionTitle>LINE一括配信</SectionTitle>
 
           {/* 今月のLINE送信数（無料枠） */}
@@ -2951,25 +2998,29 @@ function AdminBody({
         </div>
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex max-w-md mx-auto">
-        {tabs.map((t) => {
-          const Icon = t.icon;
-          const active = tab === t.key;
-          const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
-          return (
-            <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
-              <div className="relative">
-                <Icon size={20} />
-                {badge > 0 && (
-                  <span className="absolute -top-1.5 -right-2.5 text-white rounded-full font-bold flex items-center justify-center"
-                    style={{ background: "#DC2626", fontSize: 9, minWidth: 15, height: 15, padding: "0 3px" }}>{badge}</span>
-                )}
-              </div>
-              <span className="text-xs font-bold">{t.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+      </div>
+
+      {!pc && (
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex max-w-md mx-auto">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.key;
+            const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
+                <div className="relative">
+                  <Icon size={20} />
+                  {badge > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 text-white rounded-full font-bold flex items-center justify-center"
+                      style={{ background: "#DC2626", fontSize: 9, minWidth: 15, height: 15, padding: "0 3px" }}>{badge}</span>
+                  )}
+                </div>
+                <span className="text-xs font-bold">{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
     </div>
   );
 }
