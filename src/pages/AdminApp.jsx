@@ -2102,19 +2102,55 @@ function AdminBody({
 
           {showActiveSection && (
             <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+              {pc && filteredActive.length > 0 && (
+                <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ background: "#F6F7F9" }}>
+                  <div className="min-w-0 flex-1 grid gap-3 items-center text-[11px] font-bold text-gray-400"
+                    style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
+                    <span>氏名 / LINE</span>
+                    <span>大学</span>
+                    <span>郵便番号・住所</span>
+                    <span>電話番号</span>
+                    <span>タスク / 最終ログイン</span>
+                  </div>
+                  <span className="shrink-0 text-[11px] font-bold text-gray-400" style={{ width: 196 }}>ステータス</span>
+                </div>
+              )}
               {filteredActive.length === 0 && <p className="p-4 text-xs text-gray-400">該当する学生がいません</p>}
               {filteredActive.map((s) => {
                 const p = progressOf(s);
                 return (
                   <div key={s.id} className="p-3 flex items-center justify-between gap-2">
-                    <button onClick={() => setDetailStudent(s.id)} className="min-w-0 text-left">
-                      <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} style={{ color: BRAND }} /></p>
-                      <p className="text-xs text-gray-500">{s.univ}・タスク {p.done}/{p.total}</p>
-                      <p className="text-xs text-gray-400">最終ログイン {lastLoginText(s.id)}</p>
-                      <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full"
-                        style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
-                        {s.lineUserId ? "LINE連携済" : "未連携"}
-                      </span>
+                    <button onClick={() => setDetailStudent(s.id)} className={pc ? "min-w-0 flex-1 text-left" : "min-w-0 text-left"}>
+                      {pc ? (
+                        <div className="grid gap-3 items-center" style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold flex items-center gap-1 truncate">{s.name}<ChevronRight size={13} style={{ color: BRAND }} className="shrink-0" /></p>
+                            <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full"
+                              style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                              {s.lineUserId ? "LINE連携済" : "未連携"}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 truncate" title={s.univ || ""}>{s.univ || "-"}</p>
+                          <p className="text-xs text-gray-600 truncate" title={`${s.zip ? `〒${s.zip} ` : ""}${s.address || ""}`}>
+                            {s.zip ? `〒${s.zip} ` : ""}{s.address || "-"}
+                          </p>
+                          <p className="text-xs text-gray-600 truncate">{s.phone || "-"}</p>
+                          <div className="min-w-0">
+                            <p className="text-xs text-gray-500">タスク {p.done}/{p.total}</p>
+                            <p className="text-xs text-gray-400 truncate">{lastLoginText(s.id)}</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} style={{ color: BRAND }} /></p>
+                          <p className="text-xs text-gray-500">{s.univ}・タスク {p.done}/{p.total}</p>
+                          <p className="text-xs text-gray-400">最終ログイン {lastLoginText(s.id)}</p>
+                          <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full"
+                            style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                            {s.lineUserId ? "LINE連携済" : "未連携"}
+                          </span>
+                        </>
+                      )}
                     </button>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {confirmDeleteId === s.id ? (
