@@ -17,6 +17,7 @@ import {
   addSurveyTemplate, deleteSurveyTemplate,
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
+  addSourceOption, deleteSourceOption,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
@@ -342,6 +343,9 @@ function AdminBody({
   const [copiedYear, setCopiedYear] = useState(null);
   const [pendingStatus, setPendingStatus] = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
+  const [sortKey, setSortKey] = useState("kana"); // 一覧の並び替え
+  const [sortAsc, setSortAsc] = useState(true);
+  const [newSource, setNewSource] = useState(""); // 流入経路の新規追加
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -439,42 +443,6 @@ function AdminBody({
   const yearSurveyDrafts = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published === false);
 
   // ---- 学生ごとの進捗 ----
-  const progressOf = (st) => {
-    const total = yearEvents.length + yearSurveys.length + 1;
-    let done = 0;
-    yearEvents.forEach((e) => { if (rsvpMap[`${e.id}_${st.id}`]) done += 1; });
-    yearSurveys.forEach((s) => { if (respMap[`${s.id}_${st.id}`]) done += 1; });
-    if (st.address && st.phone) done += 1;
-    return { done, total };
-  };
-
-  // 検索（名前・大学・住所・メール・電話・郵便番号・生年月日を横断）
-  const q = searchQuery.trim().toLowerCase();
-  const matchesSearch = (s) =>
-    !q || [s.name, s.univ, s.address, s.email, s.phone, s.zip, s.birth]
-      .some((v) => (v || "").toString().toLowerCase().includes(q));
-
-  const activeList = activeStudents;
-  const retiredList = yearStudents.filter((s) => s.deleted || s.status === "辞退" || s.status === "承諾後辞退");
-  const testList = yearStudents.filter((s) => !s.deleted && s.status === "テスト");
-  const filteredActive = activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s));
-  const filteredRetired = retiredList.filter((s) =>
-    matchesSearch(s) && (
-      listFilter === "all" ? true
-      : listFilter === "削除済" ? s.deleted
-      : s.status === listFilter
-    )
-  );
-  const filteredTest = testList.filter(matchesSearch);
-  const showActiveSection = ["all", "内定", "承諾"].includes(listFilter);
-  const showTestSection = listFilter === "all" ? testList.length > 0 : listFilter === "テスト";
-  const showRetiredSection =
-    listFilter === "all" ? retiredList.length > 0 : ["辞退", "承諾後辞退", "削除済"].includes(listFilter);
-
-  // 配信対象。イベント別は "event:<eventId>:<group>"（group = yes/no/none）で表現
-  const isEventTarget = target.startsWith("event:");
-  const [, tEventId, tGroup] = isEventTarget ? target.split(":") : [];
-  const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
   const groupLabelOf = (g) => (g === "yes" ? "出席者" : g === "arrived" ? "到着者（当日来場）" : g === "no" ? "欠席者" : "未回答者");
   // イベント×グループ に該当するか（arrived=出席かつ到着ボタン押下）
   const inEventGroup = (st, e, g) => {
@@ -522,6 +490,92 @@ function AdminBody({
     updateEvent(e.id, { arrivalLabel: (arrivalValue(e) || "").trim() });
     setArrivalDraft((p) => { const n = { ...p }; delete n[e.id]; return n; });
   };
+  // 各イベント／アンケートの対象者（uidの集合）。タスク進捗と未対応タスクの判定に使う
+  const taskTargets = {
+    events: yearEvents.map((e) => ({ item: e, set: new Set(eventAudience(e).map((x) => x.id)) })),
+    surveys: yearSurveys.map((sv) => ({ item: sv, set: new Set(surveyAudience(sv).map((x) => x.id)) })),
+  };
+  // 未対応タスクの内訳（詳細画面で表示）
+  const pendingTasksOf = (st) => {
+    const list = [];
+    if (!(st.address && st.phone)) list.push("基本情報の登録");
+    taskTargets.events.forEach(({ item, set }) => {
+      if (set.has(st.id) && !rsvpMap[`${item.id}_${st.id}`]) list.push(`イベント出欠：${item.title}`);
+    });
+    taskTargets.surveys.forEach(({ item, set }) => {
+      if (set.has(st.id) && !respMap[`${item.id}_${st.id}`]) list.push(`アンケート：${item.title}`);
+    });
+    return list;
+  };
+  // タスク進捗：その学生が対象になっているイベント／アンケートだけを数える
+  const progressOf = (st) => {
+    let total = 1; // 基本情報の登録
+    let done = st.address && st.phone ? 1 : 0;
+    taskTargets.events.forEach(({ item, set }) => {
+      if (!set.has(st.id)) return;
+      total += 1;
+      if (rsvpMap[`${item.id}_${st.id}`]) done += 1;
+    });
+    taskTargets.surveys.forEach(({ item, set }) => {
+      if (!set.has(st.id)) return;
+      total += 1;
+      if (respMap[`${item.id}_${st.id}`]) done += 1;
+    });
+    return { done, total };
+  };
+
+  // 検索（名前・大学・住所・メール・電話・郵便番号・生年月日を横断）
+  const q = searchQuery.trim().toLowerCase();
+  const matchesSearch = (s) =>
+    !q || [s.name, s.univ, s.address, s.email, s.phone, s.zip, s.birth]
+      .some((v) => (v || "").toString().toLowerCase().includes(q));
+
+  const activeList = activeStudents;
+  const retiredList = yearStudents.filter((s) => s.deleted || s.status === "辞退" || s.status === "承諾後辞退");
+  const testList = yearStudents.filter((s) => !s.deleted && s.status === "テスト");
+  // 並び替え（昇順/降順）。未入力は常に後ろへ
+  const sortStudents = (list) => {
+    const dir = sortAsc ? 1 : -1;
+    const val = (s) => {
+      if (sortKey === "univ") return (s.univ || "").toLowerCase();
+      if (sortKey === "offerDate") return s.offerDate || "";
+      if (sortKey === "acceptDate") return s.acceptDate || "";
+      if (sortKey === "source") return s.source || "";
+      if (sortKey === "status") return s.status || "";
+      if (sortKey === "lastLogin") {
+        const u = logins[s.id];
+        const t = u && u.lastSignInTime ? new Date(u.lastSignInTime).getTime() : 0;
+        return Number.isFinite(t) ? t : 0;
+      }
+      if (sortKey === "progress") { const p = progressOf(s); return p.total ? p.done / p.total : 0; }
+      return (s.kana || s.name || "").toLowerCase(); // 既定＝フリガナ
+    };
+    return [...list].sort((a, b) => {
+      const va = val(a); const vb = val(b);
+      const ea = va === "" || va === 0; const eb = vb === "" || vb === 0;
+      if (ea !== eb) return ea ? 1 : -1; // 未入力は末尾
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      return String(va).localeCompare(String(vb), "ja") * dir;
+    });
+  };
+  const filteredActive = sortStudents(activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s)));
+  const filteredRetired = retiredList.filter((s) =>
+    matchesSearch(s) && (
+      listFilter === "all" ? true
+      : listFilter === "削除済" ? s.deleted
+      : s.status === listFilter
+    )
+  );
+  const filteredTest = testList.filter(matchesSearch);
+  const showActiveSection = ["all", "内定", "承諾"].includes(listFilter);
+  const showTestSection = listFilter === "all" ? testList.length > 0 : listFilter === "テスト";
+  const showRetiredSection =
+    listFilter === "all" ? retiredList.length > 0 : ["辞退", "承諾後辞退", "削除済"].includes(listFilter);
+
+  // 配信対象。イベント別は "event:<eventId>:<group>"（group = yes/no/none）で表現
+  const isEventTarget = target.startsWith("event:");
+  const [, tEventId, tGroup] = isEventTarget ? target.split(":") : [];
+  const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
   const eventAreaText = (e) => {
     if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
     if (!e.areas || !e.areas.length) return null;
@@ -950,7 +1004,17 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source");
+  // 流入経路（媒体・紹介会社）の選択肢
+  const sourceOptions = savedTemplates
+    .filter((t) => t._type === "source")
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ja"));
+  const addSource = async (name) => {
+    const n = (name || "").trim();
+    if (!n || sourceOptions.some((x) => x.name === n)) return;
+    try { await addSourceOption({ name: n, order: sourceOptions.length }); }
+    catch (ex) { setBanner(`流入経路の追加に失敗しました：${ex.message}`); }
+  };
   const surveyTemplates = savedTemplates.filter((t) => t._type === "surveyTemplate");
   const sortedCategories = [...templateCategories].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const templatesInCat = (catId) =>
@@ -975,7 +1039,13 @@ function AdminBody({
       setPendingStatus({ id, name: st ? st.name : "", value: v });
       return;
     }
-    updateStudent(id, { status: v });
+    const st = students.find((x) => x.id === id);
+    const patch = { status: v };
+    if (v === "承諾" && st && !st.acceptDate) {
+      const now = new Date();
+      patch.acceptDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+    updateStudent(id, patch);
   };
   const confirmDecline = async () => {
     const { id, value } = pendingStatus;
@@ -1062,11 +1132,12 @@ function AdminBody({
     : s.status === "辞退" ? "内定辞退" : "承諾後辞退";
 
   const exportStudentsCsv = () => {
-    const header = ["氏名", "フリガナ", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗", "最終ログイン", "アカウント作成"];
+    const header = ["氏名", "フリガナ", "大学", "卒年度", "ステータス", "メール", "電話番号", "郵便番号", "住所", "生年月日", "LINE連携", "タスク進捗", "内定出し日", "内定承諾日", "流入経路", "最終ログイン", "アカウント作成"];
     const rows = yearStudents.map((s) => {
       const p = progressOf(s);
       const lg = logins[s.id];
       return [s.name, s.kana || "", s.univ, `${s.grad || selectedYear}`, statusLabel(s), s.email, s.phone, s.zip, s.address, s.birth, s.lineUserId ? "連携済" : "未連携", `${p.done}/${p.total}`,
+        s.offerDate || "", s.acceptDate || "", s.source || "",
         lg ? (fmtDateTime(lg.lastSignInTime) || "未ログイン") : "", lg ? (fmtDateTime(lg.creationTime) || "") : ""];
     });
     downloadCsv(`内定者一覧_${selectedYear}卒.csv`, [header, ...rows]);
@@ -1845,6 +1916,9 @@ function AdminBody({
           {/* Journey */}
           <div>
             <SectionTitle>Journey（入社までの道のり）</SectionTitle>
+            <p className="text-xs mb-2 rounded-lg px-3 py-2" style={{ background: BRAND_LIGHT, color: BRAND }}>
+              「内定」「内定承諾」は学生画面の先頭に自動で表示されます（ステータスに応じて文言が切り替わります）。ここに追加する必要はありません。
+            </p>
             <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
               {yearJourney.map((m, i) => (
                 <div key={m.id} ref={(el) => (jRowRefs.current[i] = el)}
@@ -2069,6 +2143,28 @@ function AdminBody({
                 <button onClick={() => setSearchQuery("")} aria-label="検索をクリア"
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 p-0.5"><X size={15} /></button>
               )}
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <p className="text-xs font-bold text-gray-500 mb-1.5">並び替え</p>
+            <div className="flex gap-1.5">
+              <select value={sortKey} onChange={(e) => setSortKey(e.target.value)}
+                className="flex-1 min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm font-bold bg-white">
+                <option value="kana">フリガナ（あいうえお順）</option>
+                <option value="univ">大学</option>
+                <option value="offerDate">内定出し日</option>
+                <option value="acceptDate">内定承諾日</option>
+                <option value="source">流入経路</option>
+                <option value="status">ステータス</option>
+                <option value="progress">タスク進捗</option>
+                <option value="lastLogin">最終ログイン</option>
+              </select>
+              <button onClick={() => setSortAsc((v) => !v)}
+                className="shrink-0 text-xs font-bold px-3 rounded-lg border"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {sortAsc ? "▲ 昇順" : "▼ 降順"}
+              </button>
             </div>
           </div>
 
@@ -2944,6 +3040,9 @@ function AdminBody({
               ]),
           ["LINE連携", d.lineUserId ? "連携済み" : "未連携"],
           ["タスク進捗", `${p.done}/${p.total} 完了`],
+          ["内定出し日", d.offerDate || "-"],
+          ["内定承諾日", d.acceptDate || "-"],
+          ["流入経路", d.source || "-"],
           ["最終ログイン", lastLoginText(d.id)],
           ["アカウント作成", (logins[d.id] && fmtDateTime(logins[d.id].creationTime)) || "—"],
         ];
@@ -2974,7 +3073,9 @@ function AdminBody({
                 {editDetail ? (
                   <>
                     <p className="text-xs font-bold text-gray-500 mb-1.5">編集できる項目</p>
-                    <StudentEditor key={d.id} student={d} setBanner={setBanner} onDone={() => setEditDetail(false)} />
+                    <StudentEditor key={d.id} student={d} setBanner={setBanner} onDone={() => setEditDetail(false)}
+                      sourceOptions={sourceOptions} onAddSource={addSource}
+                      newSource={newSource} setNewSource={setNewSource} />
                     <p className="text-xs text-gray-400 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
                   </>
                 ) : (
@@ -2987,6 +3088,19 @@ function AdminBody({
                         </div>
                       ))}
                     </div>
+                    {(() => {
+                      const pend = pendingTasksOf(d);
+                      return (
+                        <div className="mt-3 rounded-lg p-3" style={{ background: pend.length ? "#FFF7E6" : "#F1F8F3", border: `1px solid ${pend.length ? "#F5D08C" : "#CDE8D6"}` }}>
+                          <p className="text-xs font-bold mb-1.5" style={{ color: pend.length ? "#B45309" : "#1E874B" }}>
+                            {pend.length ? `未対応のタスク（${pend.length}件）` : "未対応のタスクはありません"}
+                          </p>
+                          {pend.map((t) => (
+                            <p key={t} className="text-xs leading-relaxed" style={{ color: "#6B7280" }}>・{t}</p>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <p className="text-xs text-gray-400 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
                   </>
                 )}
@@ -3062,12 +3176,13 @@ function AdminBody({
 }
 
 // 学生の連絡先などを管理者が編集する（氏名・生年月日・メールは編集不可）
-function StudentEditor({ student, setBanner, onDone }) {
+function StudentEditor({ student, setBanner, onDone, sourceOptions = [], onAddSource, newSource = "", setNewSource }) {
   const [d, setD] = useState({
     kana: student.kana || "", univ: student.univ || "", phone: student.phone || "",
     zip: student.zip || "", address: student.address || "",
     livesAtHome: student.livesAtHome === true,
     homeZip: student.homeZip || "", homeAddress: student.homeAddress || "",
+    offerDate: student.offerDate || "", acceptDate: student.acceptDate || "", source: student.source || "",
   });
   const [saving, setSaving] = useState(false);
   const set = (k, v) => setD((p) => ({ ...p, [k]: v }));
@@ -3087,6 +3202,9 @@ function StudentEditor({ student, setBanner, onDone }) {
         livesAtHome: d.livesAtHome,
         homeZip: d.livesAtHome ? d.zip.trim() : d.homeZip.trim(),
         homeAddress: d.livesAtHome ? d.address.trim() : d.homeAddress.trim(),
+        offerDate: d.offerDate || null,
+        acceptDate: d.acceptDate || null,
+        source: (d.source || "").trim(),
       });
       setBanner("");
       if (onDone) onDone();
@@ -3116,6 +3234,30 @@ function StudentEditor({ student, setBanner, onDone }) {
           <div className="col-span-2"><L>実家の住所</L><input value={d.homeAddress} onChange={(e) => set("homeAddress", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
         </div>
       )}
+      <div className="grid grid-cols-2 gap-2">
+        <div><L>内定出し日</L><input type="date" value={d.offerDate} onChange={(e) => set("offerDate", e.target.value)} className={cls} /></div>
+        <div><L>内定承諾日</L><input type="date" value={d.acceptDate} onChange={(e) => set("acceptDate", e.target.value)} className={cls} /></div>
+      </div>
+      <div>
+        <L>流入経路（媒体・紹介会社）</L>
+        <select value={d.source} onChange={(e) => set("source", e.target.value)} className={`${cls} bg-white`}>
+          <option value="">未設定</option>
+          {sourceOptions.map((o) => (<option key={o.id} value={o.name}>{o.name}</option>))}
+          {d.source && !sourceOptions.some((o) => o.name === d.source) && (<option value={d.source}>{d.source}（登録外）</option>)}
+        </select>
+        {onAddSource && (
+          <div className="flex gap-1.5 mt-1.5">
+            <input value={newSource} onChange={(e) => setNewSource && setNewSource(e.target.value)}
+              placeholder="新しい媒体・紹介会社を追加" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+            <button onClick={async () => { const n = (newSource || "").trim(); if (!n) return; await onAddSource(n); set("source", n); if (setNewSource) setNewSource(""); }}
+              disabled={!(newSource || "").trim()}
+              className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+              追加
+            </button>
+          </div>
+        )}
+        <p className="text-[11px] text-gray-400 mt-1">追加した選択肢は、他の内定者の編集画面でもプルダウンに出ます。</p>
+      </div>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving}
           className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>

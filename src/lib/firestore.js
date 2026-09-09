@@ -382,6 +382,13 @@ export async function addTemplateCategory({ name, order = 0 }) {
   return ref.id;
 }
 export const updateTemplateCategory = (id, patch) => updateDoc(doc(db, "templates", id), patch);
+
+// 流入経路（媒体・紹介会社）の選択肢。新コレクションを作らず templates に _type:"source" で保存＝ルール追加不要
+export async function addSourceOption({ name, order = 0 }) {
+  const ref = await addDoc(collection(db, "templates"), { _type: "source", name, order, createdAt: serverTimestamp() });
+  return ref.id;
+}
+export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
 
 // =====================================================================
