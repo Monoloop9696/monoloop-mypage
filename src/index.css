@@ -137,3 +137,24 @@ button {
     animation: none;
   }
 }
+
+/* 管理画面の編集ドロワー（右からスライドイン） */
+@keyframes ml-drawer-kf {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.ml-drawer {
+  animation: ml-drawer-kf 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ml-drawer {
+    animation: none;
+  }
+}

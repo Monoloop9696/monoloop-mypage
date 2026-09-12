@@ -28,6 +28,8 @@ const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", dead
 // 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
 const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
 const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
+// 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
+const VISIBLE_ITEMS = 3;
 const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
@@ -318,6 +320,7 @@ function AdminBody({
   const [showEventForm, setShowEventForm] = useState(false);
   const [ev, setEv] = useState(EMPTY_EV);
   const [editingDraftId, setEditingDraftId] = useState(null);
+  const [editingEventId, setEditingEventId] = useState(null); // 公開済みイベントの編集
   const [showTplSave, setShowTplSave] = useState(false);
   const [tplName, setTplName] = useState("");
   const [tplSaveCat, setTplSaveCat] = useState("");
@@ -346,6 +349,9 @@ function AdminBody({
   const [sortKey, setSortKey] = useState("kana"); // 一覧の並び替え
   const [sortAsc, setSortAsc] = useState(true);
   const [newSource, setNewSource] = useState(""); // 流入経路の新規追加
+  const [showAllEvents, setShowAllEvents] = useState(false); // 概況：過去のイベントをすべて表示
+  const [showAllSurveys, setShowAllSurveys] = useState(false); // 概況：過去のアンケートをすべて表示
+  const [showInvite, setShowInvite] = useState(false); // アカウント配布情報の開閉（既定は閉じる）
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -657,25 +663,46 @@ function AdminBody({
   const olderSelected = olderCohorts.some((c) => c.year === selectedYear);
 
   // ---- イベント ----
-  const resetForm = () => { setEv(EMPTY_EV); setEditingDraftId(null); setShowEventForm(false); };
+  const resetForm = () => { setEv(EMPTY_EV); setEditingDraftId(null); setEditingEventId(null); setShowEventForm(false); };
 
-  const publishEventData = (data) =>
-    addEvent({
-      title: data.title, dateStr: data.date, time: data.time,
-      place: data.place || "未定",
-      deadlineDate: data.deadlineDate || null,
-      deadline: deadlineLabel(data.deadlineDate),
-      areas: data.areas || [], areaBasis: data.areaBasis || "either",
-      targetUids: Array.isArray(data.targetUids) ? data.targetUids : null,
-      copy: data.copy || "", grad: selectedYear, published: true,
-      arrivalOn: data.arrivalOn !== false,
-      arrivalLabel: (data.arrivalLabel || "").trim(),
-    });
+  // 新規公開・下書き・公開済みの更新で共通に使う保存内容
+  const eventPayload = (data, published) => ({
+    title: data.title, dateStr: data.date, time: data.time,
+    place: data.place || "未定",
+    deadlineDate: data.deadlineDate || null,
+    deadline: deadlineLabel(data.deadlineDate),
+    areas: data.areas || [], areaBasis: data.areaBasis || "either",
+    targetUids: Array.isArray(data.targetUids) ? data.targetUids : null,
+    copy: data.copy || "", grad: selectedYear, published,
+    arrivalOn: data.arrivalOn !== false,
+    arrivalLabel: (data.arrivalLabel || "").trim(),
+  });
+  const publishEventData = (data) => addEvent(eventPayload(data, true));
 
   const doAddEvent = async () => {
-    await publishEventData(ev);
-    if (editingDraftId) await deleteEvent(editingDraftId);
-    resetForm();
+    try {
+      if (editingEventId) {
+        // 公開済みイベントの更新（出欠データはそのまま残る）
+        await updateEvent(editingEventId, eventPayload(ev, true));
+      } else {
+        await publishEventData(ev);
+        if (editingDraftId) await deleteEvent(editingDraftId);
+      }
+      resetForm();
+    } catch (ex) { setBanner(`保存に失敗しました：${ex.message}`); }
+  };
+  // 公開済みイベントをフォームに読み込んで編集
+  const editEvent = (e) => {
+    setEditingDraftId(null);
+    setEditingEventId(e.id);
+    setEv({
+      title: e.title || "", date: e.dateStr || "", time: e.time || "18:00", place: e.place || "",
+      copy: e.copy || "", deadlineDate: e.deadlineDate || "",
+      areas: e.areas || [], areaBasis: e.areaBasis || "either",
+      targetUids: Array.isArray(e.targetUids) ? e.targetUids : null,
+      arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "",
+    });
+    setShowEventForm(true);
   };
   const saveDraft = async () => {
     const base = {
@@ -692,6 +719,7 @@ function AdminBody({
     resetForm();
   };
   const editDraft = (dft) => {
+    setEditingEventId(null);
     setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null, arrivalOn: dft.arrivalOn !== false, arrivalLabel: dft.arrivalLabel || "" });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
@@ -843,6 +871,7 @@ function AdminBody({
     sv.title.trim() && sv.questions.length > 0 &&
     sv.questions.every((q) => q.label.trim() && (q.type === "text" || (q.options || []).map((o) => o.trim()).filter(Boolean).length >= 1));
   const resetSurveyForm = () => { setSv(EMPTY_SV); setEditingSurveyId(null); setSelectedSvTpl(""); setSvShowTplSave(false); setSvTplName(""); };
+  const closeSurveyForm = () => { resetSurveyForm(); setShowSurveyForm(false); };
   const submitSurvey = async (published) => {
     if (!surveyValid()) { setBanner("アンケート名と、各設問のタイトル・選択肢（選択式）を入力してください。"); return; }
     try {
@@ -872,6 +901,7 @@ function AdminBody({
   const openHistory = (kind) => { setHistoryExpanded(null); setHistoryPicker(kind); };
   const useEventFromHistory = (e) => {
     setEditingDraftId(null);
+    setEditingEventId(null);
     setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null, arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "" });
     setShowEventForm(true);
     setHistoryPicker(null);
@@ -1279,8 +1309,20 @@ function AdminBody({
             </div>
 
             {showEventForm && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
-                {editingDraftId && <p className="text-xs font-bold" style={{ color: BRAND }}>✎ 下書きを編集中</p>}
+              <div className="fixed inset-0 z-[65] flex justify-end">
+                <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={resetForm} />
+                <div className="ml-drawer relative h-full w-full max-w-2xl bg-white flex flex-col"
+                  style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+                  <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold" style={{ color: BRAND }}>
+                        {editingEventId ? "✎ 公開中のイベントを編集" : editingDraftId ? "✎ 下書きを編集" : "イベントを追加"}
+                      </p>
+                      <p className="text-base font-bold truncate">{ev.title || "（イベント名を入力してください）"}</p>
+                    </div>
+                    <button onClick={resetForm} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">イベント名<span className="text-red-500 ml-0.5">*</span></p>
                   <input value={ev.title} onChange={(e) => setEv({ ...ev, title: e.target.value })}
@@ -1380,17 +1422,27 @@ function AdminBody({
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <button disabled={!ev.title} onClick={saveDraft}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 border bg-white" style={{ borderColor: BRAND, color: BRAND }}>
-                    下書き保存
-                  </button>
-                  <button disabled={!ev.title || !ev.date} onClick={doAddEvent}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                    公開する
-                  </button>
+                  </div>
+                  <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+                    <div className="flex gap-2">
+                      {!editingEventId && (
+                        <button disabled={!ev.title} onClick={saveDraft}
+                          className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 border bg-white" style={{ borderColor: BRAND, color: BRAND }}>
+                          下書き保存
+                        </button>
+                      )}
+                      <button disabled={!ev.title || !ev.date} onClick={doAddEvent}
+                        className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+                        {editingEventId ? "更新して保存" : "公開する"}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {editingEventId
+                        ? "変更は学生画面に即時反映されます。すでに回答された出欠・到着はそのまま残ります。"
+                        : "公開すると学生画面に即時反映されます。下書きは学生には表示されません。"}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-xs text-gray-400">公開すると学生画面に即時反映されます。下書きは学生には表示されません。</p>
               </div>
             )}
 
@@ -1415,7 +1467,7 @@ function AdminBody({
               </div>
             )}
 
-            {yearEvents.map((e) => {
+            {(showAllEvents ? yearEvents : yearEvents.slice(0, VISIBLE_ITEMS)).map((e) => {
               const aud = eventAudience(e);
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: rsvpOf(st, e) }));
@@ -1509,6 +1561,9 @@ function AdminBody({
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
                         </button>
+                        <button onClick={() => editEvent(e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                          編集
+                        </button>
                         <button onClick={() => openDocTargetModal("event", e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
                           対象者を調整{Array.isArray(e.targetUids) ? `（個別 ${e.targetUids.length}名）` : ""}
                         </button>
@@ -1538,6 +1593,13 @@ function AdminBody({
                 </div>
               );
             })}
+            {yearEvents.length > VISIBLE_ITEMS && (
+              <button onClick={() => setShowAllEvents((v) => !v)}
+                className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {showAllEvents ? "最新3件だけ表示する ▲" : `過去のイベントをすべて表示（残り ${yearEvents.length - VISIBLE_ITEMS}件）▼`}
+              </button>
+            )}
           </div>
 
           {/* アンケート */}
@@ -1558,8 +1620,18 @@ function AdminBody({
             </div>
 
             {showSurveyForm && (
-              <div className="bg-white border border-gray-200 rounded-xl p-4 mb-3 space-y-3">
-                {editingSurveyId && <p className="text-xs font-bold" style={{ color: BRAND }}>✎ 編集中</p>}
+              <div className="fixed inset-0 z-[65] flex justify-end">
+                <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeSurveyForm} />
+                <div className="ml-drawer relative h-full w-full max-w-2xl bg-white flex flex-col"
+                  style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+                  <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold" style={{ color: BRAND }}>{editingSurveyId ? "✎ アンケートを編集" : "アンケートを追加"}</p>
+                      <p className="text-base font-bold truncate">{sv.title || "（アンケート名を入力してください）"}</p>
+                    </div>
+                    <button onClick={closeSurveyForm} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
 
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">アンケート名<span className="text-red-500 ml-0.5">*</span></p>
@@ -1754,13 +1826,22 @@ function AdminBody({
                   </div>
                 </div>
 
-                <div className="flex gap-2">
-                  <button onClick={() => submitSurvey(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border" style={{ borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
-                    下書き保存
-                  </button>
-                  <button onClick={() => submitSurvey(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>
-                    {editingSurveyId ? "更新して公開" : "公開する"}
-                  </button>
+                  </div>
+                  <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+                    <div className="flex gap-2">
+                      <button onClick={() => submitSurvey(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border" style={{ borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                        下書き保存
+                      </button>
+                      <button onClick={() => submitSurvey(true)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>
+                        {editingSurveyId ? "更新して公開" : "公開する"}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {editingSurveyId
+                        ? "変更は学生画面に即時反映されます。すでに送信された回答はそのまま残ります。"
+                        : "公開すると学生画面に即時反映されます。下書きは学生には表示されません。"}
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
@@ -1785,7 +1866,7 @@ function AdminBody({
               </div>
             )}
 
-            {yearSurveys.map((s) => {
+            {(showAllSurveys ? yearSurveys : yearSurveys.slice(0, VISIBLE_ITEMS)).map((s) => {
               const aud = surveyAudience(s);
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: answeredOf(st, s) }));
@@ -1910,6 +1991,13 @@ function AdminBody({
                 </div>
               );
             })}
+            {yearSurveys.length > VISIBLE_ITEMS && (
+              <button onClick={() => setShowAllSurveys((v) => !v)}
+                className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {showAllSurveys ? "最新3件だけ表示する ▲" : `過去のアンケートをすべて表示（残り ${yearSurveys.length - VISIBLE_ITEMS}件）▼`}
+              </button>
+            )}
             <button onClick={refreshAnswers} className="text-xs font-bold text-gray-400 mt-1">回答状況を更新</button>
           </div>
 
@@ -2044,11 +2132,18 @@ function AdminBody({
         <div className={pc ? "" : "px-4 pt-4"}>
           <div className="flex items-center justify-between">
             <SectionTitle>アカウント配布 / 卒年度</SectionTitle>
+            <div className="flex items-center gap-1.5 mb-3">
+            <button onClick={() => setShowInvite((v) => !v)}
+              className="text-xs font-bold px-3 py-1.5 rounded-lg border"
+              style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+              {showInvite ? "配布情報を隠す ▲" : "配布情報を表示 ▼"}
+            </button>
             <button onClick={() => { setShowAddCohort(!showAddCohort); setCohortErr(""); }}
-              className="text-xs font-bold px-3 py-1.5 rounded-lg mb-3 border"
+              className="text-xs font-bold px-3 py-1.5 rounded-lg border"
               style={showAddCohort ? { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" } : { background: BRAND, color: "#fff", borderColor: BRAND }}>
               {showAddCohort ? "閉じる" : "+ 卒年度を追加"}
             </button>
+            </div>
           </div>
 
           {showAddCohort && (
@@ -2085,6 +2180,7 @@ function AdminBody({
                 </div>
               );
             }
+            if (!showInvite) return null; // 既定は折りたたみ
             const g = { year: `${c.year}卒`, yearNum: c.year, url: `${origin}/signup/${c.year}`, pw: c.initialPassword || "", active: c.active };
             return (
               <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5" style={{ opacity: g.active ? 1 : 0.85 }}>
