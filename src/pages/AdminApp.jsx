@@ -377,13 +377,12 @@ function AdminBody({
   const [showAllEvents, setShowAllEvents] = useState(false); // 概況：過去のイベントをすべて表示
   const [showAllSurveys, setShowAllSurveys] = useState(false); // 概況：過去のアンケートをすべて表示
   const [showInvite, setShowInvite] = useState(false); // アカウント配布情報の開閉（既定は閉じる）
-  // 内定者の一括変更
-  const [bulkIds, setBulkIds] = useState([]); // 選択中の学生id
-  const [bulkField, setBulkField] = useState("source");
-  const [bulkValue, setBulkValue] = useState("");
-  const [bulkOnlyEmpty, setBulkOnlyEmpty] = useState(true); // 未入力の人だけに適用
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkDone, setBulkDone] = useState("");
+  // 内定者のまとめて編集（一覧の学生をそれぞれ個別に入力して一括保存）
+  const [multiEditOpen, setMultiEditOpen] = useState(false);
+  const [multiDrafts, setMultiDrafts] = useState({}); // id -> 変更中の値
+  const [multiSaving, setMultiSaving] = useState(false);
+  const [multiErr, setMultiErr] = useState("");
+  const [multiDone, setMultiDone] = useState("");
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -597,51 +596,76 @@ function AdminBody({
     });
   };
   const filteredActive = sortStudents(activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s)));
-  // ---- 一括変更 ----
-  const bulkSet = new Set(bulkIds);
-  const toggleBulk = (id) => setBulkIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const bulkFields = [
-    { key: "source", label: "流入経路（媒体・紹介会社）", type: "source" },
-    { key: "offerDate", label: "内定出し日", type: "date" },
-    { key: "acceptDate", label: "内定承諾日", type: "date" },
-    { key: "univ", label: "大学・学部", type: "text" },
-    { key: "status", label: "ステータス", type: "status" },
-  ];
-  const bulkFieldDef = bulkFields.find((f) => f.key === bulkField) || bulkFields[0];
-  // 対象＝選択中のうち、「未入力だけ」指定なら該当項目が空の人
-  const bulkTargets = () => {
-    const picked = activeList.filter((s) => bulkSet.has(s.id));
-    if (!bulkOnlyEmpty || bulkField === "status") return picked;
-    return picked.filter((s) => !(s[bulkField] || "").toString().trim());
+  // ---- まとめて編集（学生ごとに個別入力して一括保存） ----
+  // 編集できる項目は個別の「編集」画面と同じ
+  const multiFieldsOf = (st) => ({
+    kana: st.kana || "", univ: st.univ || "", phone: st.phone || "",
+    zip: st.zip || "", address: st.address || "",
+    livesAtHome: st.livesAtHome === true,
+    homeZip: st.homeZip || "", homeAddress: st.homeAddress || "",
+    offerDate: st.offerDate || "", acceptDate: st.acceptDate || "", source: st.source || "",
+  });
+  const multiValue = (st, key) => {
+    const d = multiDrafts[st.id];
+    if (d && Object.prototype.hasOwnProperty.call(d, key)) return d[key];
+    return multiFieldsOf(st)[key];
   };
-  const applyBulk = async () => {
-    const targets = bulkTargets();
-    const v = (bulkValue || "").trim();
-    if (!targets.length) { setBanner("適用できる学生が選択されていません。"); return; }
-    if (!v) { setBanner("変更する内容を入力・選択してください。"); return; }
-    setBulkBusy(true);
-    setBulkDone("");
+  const setMultiValue = (id, key, val) => {
+    setMultiDone("");
+    setMultiDrafts((p) => ({ ...p, [id]: { ...(p[id] || {}), [key]: val } }));
+  };
+  // 実際に値が変わっている学生だけを保存対象にする
+  const multiChanged = () => activeList.filter((st) => {
+    const d = multiDrafts[st.id];
+    if (!d) return false;
+    const base = multiFieldsOf(st);
+    return Object.keys(d).some((k) => d[k] !== base[k]);
+  });
+  const openMultiEdit = () => { setMultiDrafts({}); setMultiErr(""); setMultiDone(""); setMultiEditOpen(true); };
+  const closeMultiEdit = () => { setMultiEditOpen(false); setMultiDrafts({}); setMultiErr(""); };
+  const saveMultiEdit = async () => {
+    const zipRe = /^\d{3}-\d{4}$/;
+    const phoneRe = /^\d{2,4}-\d{2,4}-\d{3,4}$/;
+    const targets = multiChanged();
+    if (!targets.length) { setMultiErr("変更された内容がありません。"); return; }
+    // 先に全件チェック（1件でも不正なら保存しない）
+    for (const st of targets) {
+      const v = (k) => (multiValue(st, k) || "").toString().trim();
+      if (v("phone") && !phoneRe.test(v("phone"))) { setMultiErr(`${st.name}さんの電話番号はハイフン入りで入力してください（例：090-1234-5678）。`); return; }
+      if (v("zip") && !zipRe.test(v("zip"))) { setMultiErr(`${st.name}さんの郵便番号はハイフン入りで入力してください（例：123-4567）。`); return; }
+      if (!multiValue(st, "livesAtHome") && v("homeZip") && !zipRe.test(v("homeZip"))) { setMultiErr(`${st.name}さんの実家の郵便番号はハイフン入りで入力してください。`); return; }
+    }
+    setMultiErr("");
+    setMultiSaving(true);
     try {
-      const todayStr = (() => {
+      const today = (() => {
         const n = new Date();
         return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
       })();
       for (const st of targets) {
-        const patch = { [bulkField]: v };
-        // ステータスを承諾にしたときは、単体変更と同じく承諾日を自動で入れる
-        if (bulkField === "status" && v === "承諾" && !st.acceptDate) patch.acceptDate = todayStr;
-        await updateStudent(st.id, patch);
+        const v = (k) => (multiValue(st, k) || "").toString().trim();
+        const atHome = multiValue(st, "livesAtHome") === true;
+        await updateStudent(st.id, {
+          kana: v("kana"), univ: v("univ"), phone: v("phone"),
+          zip: v("zip"), address: v("address"),
+          livesAtHome: atHome,
+          homeZip: atHome ? v("zip") : v("homeZip"),
+          homeAddress: atHome ? v("address") : v("homeAddress"),
+          offerDate: v("offerDate") || null,
+          acceptDate: v("acceptDate") || null,
+          source: v("source"),
+        });
       }
-      setBulkDone(`${targets.length}名を更新しました。`);
-      setBulkValue("");
+      setMultiDone(`${targets.length}名を保存しました。`);
+      setMultiDrafts({});
     } catch (ex) {
-      setBanner(`一括変更に失敗しました：${ex.message}`);
+      setMultiErr(`保存に失敗しました：${ex.message}`);
     } finally {
-      setBulkBusy(false);
+      setMultiSaving(false);
     }
   };
-  // 年度やフィルターを切り替えたら選択を解除
-  useEffect(() => { setBulkIds([]); setBulkDone(""); }, [selectedYear, listFilter]);
+  // 年度を切り替えたら編集中の内容は破棄
+  useEffect(() => { setMultiEditOpen(false); setMultiDrafts({}); setMultiErr(""); setMultiDone(""); }, [selectedYear]);
 
   const filteredRetired = retiredList.filter((s) =>
     matchesSearch(s) && (
@@ -2342,62 +2366,6 @@ function AdminBody({
             </div>
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <p className="text-xs font-bold text-gray-500">一括変更</p>
-              <p className="text-xs font-bold" style={{ color: bulkIds.length ? BRAND : "#9CA3AF" }}>選択中 {bulkIds.length}名</p>
-            </div>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              <button onClick={() => setBulkIds(filteredActive.map((s) => s.id))}
-                className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
-                表示中の{filteredActive.length}名を選択
-              </button>
-              <button onClick={() => setBulkIds([])}
-                className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">選択を解除</button>
-            </div>
-            <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-2"}>
-              <select value={bulkField} onChange={(e) => { setBulkField(e.target.value); setBulkValue(""); setBulkDone(""); }}
-                className="w-full border border-gray-300 rounded-lg p-2 text-sm font-bold bg-white">
-                {bulkFields.map((f) => (<option key={f.key} value={f.key}>{f.label}</option>))}
-              </select>
-              {bulkFieldDef.type === "source" ? (
-                <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
-                  <option value="">選択してください</option>
-                  {sourceOptions.map((o) => (<option key={o.id} value={o.name}>{o.name}</option>))}
-                </select>
-              ) : bulkFieldDef.type === "status" ? (
-                <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
-                  <option value="">選択してください</option>
-                  <option value="内定">内定（承諾前）</option>
-                  <option value="承諾">内定承諾済</option>
-                  <option value="テスト">テスト</option>
-                </select>
-              ) : bulkFieldDef.type === "date" ? (
-                <input type="date" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg p-2 text-sm" />
-              ) : (
-                <input value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
-                  placeholder="変更後の内容" className="w-full border border-gray-300 rounded-lg p-2 text-sm" />
-              )}
-            </div>
-            {bulkField !== "status" && (
-              <label className="flex items-center gap-1.5 text-xs text-gray-500 mt-2">
-                <input type="checkbox" checked={bulkOnlyEmpty} onChange={(e) => setBulkOnlyEmpty(e.target.checked)} />
-                未入力の人だけに適用する（入力済みは上書きしない）
-              </label>
-            )}
-            <button onClick={applyBulk} disabled={bulkBusy || !bulkIds.length || !bulkValue}
-              className="w-full mt-2 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-              {bulkBusy ? "更新中…" : `この内容で ${bulkTargets().length}名に適用`}
-            </button>
-            {bulkDone && <p className="text-xs font-bold mt-1.5" style={{ color: "#1E874B" }}>{bulkDone}</p>}
-            <p className="text-[11px] text-gray-400 mt-1.5">
-              下の一覧のチェックで対象を選びます。辞退・削除済みの学生は対象外です。ステータスの一括変更は「内定／承諾／テスト」のみで、辞退は個別に変更してください。
-            </p>
-          </div>
-
           <div className="mb-4">
             <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（ステータス）</p>
             <select value={listFilter} onChange={(e) => setListFilter(e.target.value)}
@@ -2415,6 +2383,11 @@ function AdminBody({
           <div className="flex items-center justify-between mb-1">
             <SectionTitle>内定者一覧（{selectedYear - 2000}卒）</SectionTitle>
             <div className="flex items-center gap-1.5 mb-3">
+              <button onClick={openMultiEdit}
+                className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg text-white"
+                style={{ background: BRAND }}>
+                まとめて編集
+              </button>
               <button onClick={loadLogins} disabled={loginsState === "loading"}
                 className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border disabled:opacity-50"
                 style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
@@ -2430,7 +2403,6 @@ function AdminBody({
             <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
               {pc && filteredActive.length > 0 && (
                 <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ background: "#F6F7F9" }}>
-                  <span className="shrink-0" style={{ width: 13 }} aria-hidden="true" />
                   <div className="min-w-0 flex-1 grid gap-3 items-center text-[11px] font-bold text-gray-400"
                     style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
                     <span>氏名 / LINE</span>
@@ -2446,10 +2418,7 @@ function AdminBody({
               {filteredActive.map((s) => {
                 const p = progressOf(s);
                 return (
-                  <div key={s.id} className="p-3 flex items-center justify-between gap-2"
-                    style={bulkSet.has(s.id) ? { background: BRAND_LIGHT } : undefined}>
-                    <input type="checkbox" checked={bulkSet.has(s.id)} onChange={() => toggleBulk(s.id)}
-                      aria-label={`${s.name}を一括変更の対象にする`} className="shrink-0" />
+                  <div key={s.id} className="p-3 flex items-center justify-between gap-2">
                     <button onClick={() => setDetailStudent(s.id)} className={pc ? "min-w-0 flex-1 text-left" : "min-w-0 text-left"}>
                       {pc ? (
                         <div className="grid gap-3 items-center" style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
@@ -3022,6 +2991,90 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* まとめて編集（学生ごとに個別入力して一括保存） */}
+      {multiEditOpen && (() => {
+        const list = filteredActive;
+        const changed = multiChanged();
+        const cls = "w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm";
+        const L = ({ children }) => <p className="text-[11px] font-bold text-gray-400 mb-1">{children}</p>;
+        return (
+          <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: "#F4F7F6" }}>
+            <div className="shrink-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs text-gray-400">まとめて編集（{selectedYear}卒）</p>
+                <p className="text-base font-bold">一覧の{list.length}名・変更中 {changed.length}名</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button onClick={saveMultiEdit} disabled={multiSaving || !changed.length}
+                  className="text-xs font-bold px-3 py-2 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>
+                  {multiSaving ? "保存中…" : `変更を保存（${changed.length}名）`}
+                </button>
+                <button onClick={closeMultiEdit} aria-label="閉じる" className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+            </div>
+            {(multiErr || multiDone) && (
+              <div className="shrink-0 px-5 py-2 text-xs font-bold"
+                style={multiErr ? { background: "#FEF2F2", color: "#B91C1C" } : { background: "#F1F8F3", color: "#1E874B" }}>
+                {multiErr || multiDone}
+              </div>
+            )}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <p className="text-xs text-gray-400 mb-3">
+                内定者タブの検索・フィルター・並び替えで絞り込んだ一覧がそのまま並びます。必要な人だけ入力して、上の「変更を保存」でまとめて保存できます。
+              </p>
+              {list.length === 0 && <p className="text-xs text-gray-400">該当する学生がいません。</p>}
+              <div className="space-y-3">
+                {list.map((st) => {
+                  const isChanged = changed.some((x) => x.id === st.id);
+                  const atHome = multiValue(st, "livesAtHome") === true;
+                  return (
+                    <div key={st.id} className="bg-white border rounded-xl p-3"
+                      style={{ borderColor: isChanged ? BRAND : "#E5E7EB" }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-sm font-bold truncate">{st.name}</p>
+                        <span className="text-xs text-gray-400 truncate">{st.email}</span>
+                        {isChanged && <span className="ml-auto shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>変更あり</span>}
+                      </div>
+                      <div className={pc ? "grid grid-cols-4 gap-2" : "grid grid-cols-2 gap-2"}>
+                        <div><L>フリガナ</L><input value={multiValue(st, "kana")} onChange={(e) => setMultiValue(st.id, "kana", e.target.value)} placeholder="サトウ ミサキ" className={cls} /></div>
+                        <div><L>大学・学部</L><input value={multiValue(st, "univ")} onChange={(e) => setMultiValue(st.id, "univ", e.target.value)} placeholder="早稲田大学 商学部" className={cls} /></div>
+                        <div><L>電話番号</L><input value={multiValue(st, "phone")} onChange={(e) => setMultiValue(st.id, "phone", e.target.value)} placeholder="090-1234-5678" className={cls} /></div>
+                        <div><L>流入経路</L>
+                          <select value={multiValue(st, "source")} onChange={(e) => setMultiValue(st.id, "source", e.target.value)} className={`${cls} bg-white`}>
+                            <option value="">未設定</option>
+                            {sourceOptions.map((o) => (<option key={o.id} value={o.name}>{o.name}</option>))}
+                            {multiValue(st, "source") && !sourceOptions.some((o) => o.name === multiValue(st, "source")) && (
+                              <option value={multiValue(st, "source")}>{multiValue(st, "source")}（登録外）</option>
+                            )}
+                          </select>
+                        </div>
+                        <div><L>内定出し日</L><input type="date" value={multiValue(st, "offerDate")} onChange={(e) => setMultiValue(st.id, "offerDate", e.target.value)} className={cls} /></div>
+                        <div><L>内定承諾日</L><input type="date" value={multiValue(st, "acceptDate")} onChange={(e) => setMultiValue(st.id, "acceptDate", e.target.value)} className={cls} /></div>
+                        <div><L>郵便番号</L><input value={multiValue(st, "zip")} onChange={(e) => setMultiValue(st.id, "zip", e.target.value)} placeholder="123-4567" className={cls} /></div>
+                        <div><L>現住所</L><input value={multiValue(st, "address")} onChange={(e) => setMultiValue(st.id, "address", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
+                      </div>
+                      <label className="flex items-center gap-2 text-xs text-gray-500 mt-2">
+                        <input type="checkbox" checked={atHome} onChange={(e) => setMultiValue(st.id, "livesAtHome", e.target.checked)} />
+                        実家に住んでいる（実家＝現住所と同じ）
+                      </label>
+                      {!atHome && (
+                        <div className={pc ? "grid grid-cols-4 gap-2 mt-2" : "grid grid-cols-2 gap-2 mt-2"}>
+                          <div><L>実家の郵便番号</L><input value={multiValue(st, "homeZip")} onChange={(e) => setMultiValue(st.id, "homeZip", e.target.value)} placeholder="123-4567" className={cls} /></div>
+                          <div className={pc ? "col-span-3" : ""}><L>実家の住所</L><input value={multiValue(st, "homeAddress")} onChange={(e) => setMultiValue(st.id, "homeAddress", e.target.value)} placeholder="〇〇県〇〇市…" className={cls} /></div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-400 mt-4 leading-relaxed">
+                氏名・生年月日・メールアドレスは学生本人の申告情報のため変更できません（メールはログインIDのため）。ステータスの変更は一覧のプルダウンから行ってください。
+              </p>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 出欠編集モーダル */}
       {attendEdit && (() => {
