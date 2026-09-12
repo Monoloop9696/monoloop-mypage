@@ -1274,7 +1274,7 @@ function AdminBody({
       </div>
 
       {tab === "dash" && (
-        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-5"}>
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-5"}>
           <div className={pc ? "grid grid-cols-5 gap-2 col-span-2" : "grid grid-cols-3 gap-1.5"}>
             {[["内定者", totalActive], ["承諾済", accepted], ["LINE連携", linked], ["内定辞退", declinedPre], ["承諾後辞退", declinedPost]].map(([k, v]) => (
               <div key={k} className="bg-white border border-gray-200 rounded-xl p-2.5 text-center">
@@ -2129,7 +2129,7 @@ function AdminBody({
       )}
 
       {tab === "students" && (
-        <div className={pc ? "" : "px-4 pt-4"}>
+        <div className={pc ? "pt-5" : "px-4 pt-4"}>
           <div className="flex items-center justify-between">
             <SectionTitle>アカウント配布 / 卒年度</SectionTitle>
             <div className="flex items-center gap-1.5 mb-3">
@@ -2440,7 +2440,7 @@ function AdminBody({
       )}
 
       {tab === "news" && (
-        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-4"}>
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-4"}>
           <SectionTitle>{editingArticleId ? "記事を編集" : "NEWS記事を投稿"}</SectionTitle>
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
             <div>
@@ -2546,7 +2546,7 @@ function AdminBody({
       )}
 
       {tab === "qbox" && (
-        <div className={pc ? "space-y-3" : "px-4 pt-4 space-y-3"}>
+        <div className={pc ? "space-y-3 pt-5" : "px-4 pt-4 space-y-3"}>
           <div className="flex items-center justify-between">
             <SectionTitle>質問箱</SectionTitle>
             <button onClick={loadQuestions} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
@@ -2567,7 +2567,7 @@ function AdminBody({
       )}
 
       {tab === "line" && (
-        <div className={pc ? "grid grid-cols-2 gap-5 items-start" : "px-4 pt-4 space-y-4"}>
+        <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-4"}>
           <SectionTitle>LINE一括配信</SectionTitle>
 
           {/* 今月のLINE送信数（無料枠） */}
