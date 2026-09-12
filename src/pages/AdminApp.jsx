@@ -17,7 +17,7 @@ import {
   addSurveyTemplate, deleteSurveyTemplate,
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
-  addSourceOption, deleteSourceOption,
+  addSourceOption, updateSourceOption, deleteSourceOption,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
@@ -383,6 +383,13 @@ function AdminBody({
   const [multiSaving, setMultiSaving] = useState(false);
   const [multiErr, setMultiErr] = useState("");
   const [multiDone, setMultiDone] = useState("");
+  // 流入経路（媒体・紹介会社）の管理
+  const [showSourceMgr, setShowSourceMgr] = useState(false);
+  const [srcEditId, setSrcEditId] = useState(null);
+  const [srcEditName, setSrcEditName] = useState("");
+  const [srcNewName, setSrcNewName] = useState("");
+  const [srcBusy, setSrcBusy] = useState(false);
+  const [srcDelId, setSrcDelId] = useState(null);
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -1146,6 +1153,53 @@ function AdminBody({
     if (!n || sourceOptions.some((x) => x.name === n)) return;
     try { await addSourceOption({ name: n, order: sourceOptions.length }); }
     catch (ex) { setBanner(`流入経路の追加に失敗しました：${ex.message}`); }
+  };
+  // その流入経路が設定されている学生数（全年度）
+  const sourceUsage = (name) => students.filter((s) => (s.source || "") === name).length;
+  // 名称変更：選択肢と、その経路が入っている学生の値も合わせて更新する
+  const renameSource = async (opt, nextName) => {
+    const n = (nextName || "").trim();
+    if (!n) { setBanner("名称を入力してください。"); return; }
+    if (n === opt.name) { setSrcEditId(null); return; }
+    if (sourceOptions.some((x) => x.id !== opt.id && x.name === n)) { setBanner("同じ名称の流入経路がすでにあります。"); return; }
+    setSrcBusy(true);
+    try {
+      await updateSourceOption(opt.id, { name: n });
+      const affected = students.filter((s) => (s.source || "") === opt.name);
+      for (const st of affected) await updateStudent(st.id, { source: n });
+      setSrcEditId(null); setSrcEditName("");
+    } catch (ex) { setBanner(`名称の変更に失敗しました：${ex.message}`); }
+    finally { setSrcBusy(false); }
+  };
+  const removeSource = async (opt) => {
+    setSrcBusy(true);
+    try { await deleteSourceOption(opt.id); setSrcDelId(null); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+    finally { setSrcBusy(false); }
+  };
+  // 並び順をまとめて書き込む（手動・自動の両方で使う）
+  const writeSourceOrder = async (list) => {
+    setSrcBusy(true);
+    try { for (let i = 0; i < list.length; i++) await updateSourceOption(list[i].id, { order: i }); }
+    catch (ex) { setBanner(`並び替えに失敗しました：${ex.message}`); }
+    finally { setSrcBusy(false); }
+  };
+  // 手動：上下ひとつ入れ替え
+  const moveSource = (idx, dir) => {
+    const arr = [...sourceOptions];
+    const j = idx + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    writeSourceOrder(arr);
+  };
+  // 自動：あいうえお順 / 使用人数の多い順
+  const autoSortSources = (mode) => {
+    const arr = [...sourceOptions].sort((a, b) => (
+      mode === "usage"
+        ? sourceUsage(b.name) - sourceUsage(a.name) || (a.name || "").localeCompare(b.name || "", "ja")
+        : (a.name || "").localeCompare(b.name || "", "ja")
+    ));
+    writeSourceOrder(arr);
   };
   const surveyTemplates = savedTemplates.filter((t) => t._type === "surveyTemplate");
   const sortedCategories = [...templateCategories].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -2329,6 +2383,75 @@ function AdminBody({
               </div>
             );
           })()}
+
+          <div className="mb-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-bold text-gray-500">流入経路（媒体・紹介会社）</p>
+              <button onClick={() => setShowSourceMgr((v) => !v)}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg border"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {showSourceMgr ? "閉じる ▲" : `管理する（${sourceOptions.length}件）▼`}
+              </button>
+            </div>
+            {showSourceMgr && (
+              <div className="bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                  <span className="text-[11px] font-bold text-gray-400">自動で並び替え</span>
+                  <button onClick={() => autoSortSources("kana")} disabled={srcBusy}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">あいうえお順</button>
+                  <button onClick={() => autoSortSources("usage")} disabled={srcBusy}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">使用人数の多い順</button>
+                </div>
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {sourceOptions.length === 0 && <p className="text-xs text-gray-400 py-3">まだ登録がありません。下の欄から追加してください。</p>}
+                  {sourceOptions.map((o, i) => (
+                    <div key={o.id} className="py-2 flex items-center gap-1.5">
+                      {srcEditId === o.id ? (
+                        <>
+                          <input value={srcEditName} onChange={(e) => setSrcEditName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") renameSource(o, srcEditName); }}
+                            className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-sm" autoFocus />
+                          <button onClick={() => renameSource(o, srcEditName)} disabled={srcBusy}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>保存</button>
+                          <button onClick={() => { setSrcEditId(null); setSrcEditName(""); }}
+                            className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                        </>
+                      ) : srcDelId === o.id ? (
+                        <>
+                          <p className="flex-1 min-w-0 text-xs text-gray-600 truncate">「{o.name}」を削除しますか？</p>
+                          <button onClick={() => removeSource(o)} disabled={srcBusy}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => setSrcDelId(null)}
+                            className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="flex-1 min-w-0 text-sm truncate">{o.name}</p>
+                          <span className="shrink-0 text-[11px] text-gray-400">{sourceUsage(o.name)}名</span>
+                          <button onClick={() => moveSource(i, -1)} disabled={i === 0 || srcBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▲</button>
+                          <button onClick={() => moveSource(i, 1)} disabled={i === sourceOptions.length - 1 || srcBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▼</button>
+                          <button onClick={() => { setSrcEditId(o.id); setSrcEditName(o.name); setSrcDelId(null); }}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                          <button onClick={() => { setSrcDelId(o.id); setSrcEditId(null); }} aria-label={`${o.name}を削除`} className="shrink-0 text-gray-300 p-1"><Trash2 size={14} /></button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <input value={srcNewName} onChange={(e) => setSrcNewName(e.target.value)}
+                    onKeyDown={async (e) => { if (e.key === "Enter" && srcNewName.trim()) { await addSource(srcNewName); setSrcNewName(""); } }}
+                    placeholder="新しい媒体・紹介会社を追加" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+                  <button onClick={async () => { if (!srcNewName.trim()) return; await addSource(srcNewName); setSrcNewName(""); }}
+                    disabled={!srcNewName.trim() || srcBusy}
+                    className="shrink-0 text-xs font-bold px-3 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>追加</button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                  名称を変更すると、その経路が設定されている学生の値も自動で書き換わります。削除しても学生に設定済みの値は残ります（プルダウンでは「（登録外）」と表示されます）。並び順は編集画面のプルダウンや並び替えに反映されます。
+                </p>
+              </div>
+            )}
+          </div>
 
           <div className="mb-3">
             <p className="text-xs font-bold text-gray-500 mb-1.5">検索</p>

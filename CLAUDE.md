@@ -64,7 +64,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `surveys/{id}`: title, **desc**(説明文・任意。学生の回答画面でタイトル下に表示), dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required, **sectionId**, **branch**{選択肢:sectionId|"end"}}）, **sections[]**（{id,title,desc}・空=1ページ）, grad, published(false=下書き), **areas[]/areaBasis/targetUids[]**(イベントと同じ住所エリア絞り込み・個別指定。audienceの母集団に対してAND)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
   - surveys には **audience**（{type:"all"} または {type:"event", eventId, group:"yes"|"arrived"}）で対象者を限定可。学生側は自分のrsvpで判定して表示、管理集計/CSVも対象者を分母に。LINE配信のイベント対象は group=yes/arrived/no/none（arrived=出席かつ当日到着ボタン押下）
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
-- 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要
+- 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要。内定者タブの「管理する」から**名称変更（該当学生の値も自動で書き換え）・削除・並び替え（手動▲▼／自動=あいうえお順・使用人数順）**が可能
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
 - `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
 - `notices/{id}`: text, createdAt（全学年に表示）

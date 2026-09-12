@@ -388,6 +388,7 @@ export async function addSourceOption({ name, order = 0 }) {
   const ref = await addDoc(collection(db, "templates"), { _type: "source", name, order, createdAt: serverTimestamp() });
   return ref.id;
 }
+export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
 
