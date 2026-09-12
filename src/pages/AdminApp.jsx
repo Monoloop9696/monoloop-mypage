@@ -377,6 +377,13 @@ function AdminBody({
   const [showAllEvents, setShowAllEvents] = useState(false); // 概況：過去のイベントをすべて表示
   const [showAllSurveys, setShowAllSurveys] = useState(false); // 概況：過去のアンケートをすべて表示
   const [showInvite, setShowInvite] = useState(false); // アカウント配布情報の開閉（既定は閉じる）
+  // 内定者の一括変更
+  const [bulkIds, setBulkIds] = useState([]); // 選択中の学生id
+  const [bulkField, setBulkField] = useState("source");
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkOnlyEmpty, setBulkOnlyEmpty] = useState(true); // 未入力の人だけに適用
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkDone, setBulkDone] = useState("");
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -590,6 +597,52 @@ function AdminBody({
     });
   };
   const filteredActive = sortStudents(activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s)));
+  // ---- 一括変更 ----
+  const bulkSet = new Set(bulkIds);
+  const toggleBulk = (id) => setBulkIds((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const bulkFields = [
+    { key: "source", label: "流入経路（媒体・紹介会社）", type: "source" },
+    { key: "offerDate", label: "内定出し日", type: "date" },
+    { key: "acceptDate", label: "内定承諾日", type: "date" },
+    { key: "univ", label: "大学・学部", type: "text" },
+    { key: "status", label: "ステータス", type: "status" },
+  ];
+  const bulkFieldDef = bulkFields.find((f) => f.key === bulkField) || bulkFields[0];
+  // 対象＝選択中のうち、「未入力だけ」指定なら該当項目が空の人
+  const bulkTargets = () => {
+    const picked = activeList.filter((s) => bulkSet.has(s.id));
+    if (!bulkOnlyEmpty || bulkField === "status") return picked;
+    return picked.filter((s) => !(s[bulkField] || "").toString().trim());
+  };
+  const applyBulk = async () => {
+    const targets = bulkTargets();
+    const v = (bulkValue || "").trim();
+    if (!targets.length) { setBanner("適用できる学生が選択されていません。"); return; }
+    if (!v) { setBanner("変更する内容を入力・選択してください。"); return; }
+    setBulkBusy(true);
+    setBulkDone("");
+    try {
+      const todayStr = (() => {
+        const n = new Date();
+        return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+      })();
+      for (const st of targets) {
+        const patch = { [bulkField]: v };
+        // ステータスを承諾にしたときは、単体変更と同じく承諾日を自動で入れる
+        if (bulkField === "status" && v === "承諾" && !st.acceptDate) patch.acceptDate = todayStr;
+        await updateStudent(st.id, patch);
+      }
+      setBulkDone(`${targets.length}名を更新しました。`);
+      setBulkValue("");
+    } catch (ex) {
+      setBanner(`一括変更に失敗しました：${ex.message}`);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+  // 年度やフィルターを切り替えたら選択を解除
+  useEffect(() => { setBulkIds([]); setBulkDone(""); }, [selectedYear, listFilter]);
+
   const filteredRetired = retiredList.filter((s) =>
     matchesSearch(s) && (
       listFilter === "all" ? true
@@ -2289,6 +2342,62 @@ function AdminBody({
             </div>
           </div>
 
+          <div className="bg-white border border-gray-200 rounded-xl p-3 mb-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-bold text-gray-500">一括変更</p>
+              <p className="text-xs font-bold" style={{ color: bulkIds.length ? BRAND : "#9CA3AF" }}>選択中 {bulkIds.length}名</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              <button onClick={() => setBulkIds(filteredActive.map((s) => s.id))}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                表示中の{filteredActive.length}名を選択
+              </button>
+              <button onClick={() => setBulkIds([])}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">選択を解除</button>
+            </div>
+            <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-2"}>
+              <select value={bulkField} onChange={(e) => { setBulkField(e.target.value); setBulkValue(""); setBulkDone(""); }}
+                className="w-full border border-gray-300 rounded-lg p-2 text-sm font-bold bg-white">
+                {bulkFields.map((f) => (<option key={f.key} value={f.key}>{f.label}</option>))}
+              </select>
+              {bulkFieldDef.type === "source" ? (
+                <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
+                  <option value="">選択してください</option>
+                  {sourceOptions.map((o) => (<option key={o.id} value={o.name}>{o.name}</option>))}
+                </select>
+              ) : bulkFieldDef.type === "status" ? (
+                <select value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
+                  <option value="">選択してください</option>
+                  <option value="内定">内定（承諾前）</option>
+                  <option value="承諾">内定承諾済</option>
+                  <option value="テスト">テスト</option>
+                </select>
+              ) : bulkFieldDef.type === "date" ? (
+                <input type="date" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-2 text-sm" />
+              ) : (
+                <input value={bulkValue} onChange={(e) => setBulkValue(e.target.value)}
+                  placeholder="変更後の内容" className="w-full border border-gray-300 rounded-lg p-2 text-sm" />
+              )}
+            </div>
+            {bulkField !== "status" && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-500 mt-2">
+                <input type="checkbox" checked={bulkOnlyEmpty} onChange={(e) => setBulkOnlyEmpty(e.target.checked)} />
+                未入力の人だけに適用する（入力済みは上書きしない）
+              </label>
+            )}
+            <button onClick={applyBulk} disabled={bulkBusy || !bulkIds.length || !bulkValue}
+              className="w-full mt-2 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+              {bulkBusy ? "更新中…" : `この内容で ${bulkTargets().length}名に適用`}
+            </button>
+            {bulkDone && <p className="text-xs font-bold mt-1.5" style={{ color: "#1E874B" }}>{bulkDone}</p>}
+            <p className="text-[11px] text-gray-400 mt-1.5">
+              下の一覧のチェックで対象を選びます。辞退・削除済みの学生は対象外です。ステータスの一括変更は「内定／承諾／テスト」のみで、辞退は個別に変更してください。
+            </p>
+          </div>
+
           <div className="mb-4">
             <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（ステータス）</p>
             <select value={listFilter} onChange={(e) => setListFilter(e.target.value)}
@@ -2321,6 +2430,7 @@ function AdminBody({
             <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
               {pc && filteredActive.length > 0 && (
                 <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ background: "#F6F7F9" }}>
+                  <span className="shrink-0" style={{ width: 13 }} aria-hidden="true" />
                   <div className="min-w-0 flex-1 grid gap-3 items-center text-[11px] font-bold text-gray-400"
                     style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
                     <span>氏名 / LINE</span>
@@ -2336,7 +2446,10 @@ function AdminBody({
               {filteredActive.map((s) => {
                 const p = progressOf(s);
                 return (
-                  <div key={s.id} className="p-3 flex items-center justify-between gap-2">
+                  <div key={s.id} className="p-3 flex items-center justify-between gap-2"
+                    style={bulkSet.has(s.id) ? { background: BRAND_LIGHT } : undefined}>
+                    <input type="checkbox" checked={bulkSet.has(s.id)} onChange={() => toggleBulk(s.id)}
+                      aria-label={`${s.name}を一括変更の対象にする`} className="shrink-0" />
                     <button onClick={() => setDetailStudent(s.id)} className={pc ? "min-w-0 flex-1 text-left" : "min-w-0 text-left"}>
                       {pc ? (
                         <div className="grid gap-3 items-center" style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
