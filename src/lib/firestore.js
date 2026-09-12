@@ -439,12 +439,14 @@ export function listenAllArticles(cb) {
   });
 }
 
-export async function addArticle({ title, body = "", grad = null, published = true }) {
+// publishAt（Date）を入れると、その日時まで学生側に表示されない（予約投稿）
+export async function addArticle({ title, body = "", grad = null, published = true, publishAt = null }) {
   const ref = await addDoc(collection(db, "articles"), {
     title,
     body,
     grad: grad ?? null,
     published,
+    publishAt: publishAt || null,
     createdAt: serverTimestamp(),
   });
   return ref.id;

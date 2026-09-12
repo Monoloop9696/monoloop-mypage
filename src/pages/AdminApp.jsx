@@ -195,6 +195,7 @@ function AdminBody({
   const [artDelId, setArtDelId] = useState(null);
   const [editingArticleId, setEditingArticleId] = useState(null); // null=新規投稿モード
   const [artNotify, setArtNotify] = useState(true); // 投稿時に対象者の公式LINEへ通知
+  const [artPublishAt, setArtPublishAt] = useState(""); // 公開予約（datetime-local。空＝即時公開）
   useEffect(() => listenAllArticles(setArticles), []);
 
   // ---- 質問箱（API経由で取得・更新） ----
@@ -242,7 +243,27 @@ function AdminBody({
   };
   const removeArtImage = (i) => setArtImages((prev) => prev.filter((_, idx) => idx !== i));
   const resetArtForm = () => {
-    setArtTitle(""); setArtBody(""); setArtGrad(""); setArtImages([]); setEditingArticleId(null);
+    setArtTitle(""); setArtBody(""); setArtGrad(""); setArtImages([]); setEditingArticleId(null); setArtPublishAt("");
+  };
+  // Firestore の Timestamp / Date を datetime-local 用の文字列に
+  const tsToLocalInput = (ts) => {
+    if (!ts) return "";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const fmtScheduled = (ts) => {
+    if (!ts) return "";
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const isScheduled = (a) => {
+    if (!a || !a.publishAt) return false;
+    const d = a.publishAt.toDate ? a.publishAt.toDate() : new Date(a.publishAt);
+    return !Number.isNaN(d.getTime()) && d.getTime() > Date.now();
   };
   // 記事投稿時に対象者の公式LINEへお知らせ（LINEのみ・メールは送らない）
   const notifyArticleLine = async (title, grad) => {
@@ -260,23 +281,26 @@ function AdminBody({
     try {
       const grad = artGrad ? Number(artGrad) : null;
       const title = artTitle.trim();
+      const publishAt = artPublishAt ? new Date(artPublishAt) : null;
+      const scheduled = !!(publishAt && !Number.isNaN(publishAt.getTime()) && publishAt.getTime() > Date.now());
       if (editingArticleId) {
         // 更新：本文等を更新し、画像は一旦全削除して現在の内容で再登録
         const id = editingArticleId;
-        await updateArticle(id, { title, body: artBody, grad });
+        await updateArticle(id, { title, body: artBody, grad, publishAt: publishAt || null });
         const existing = await loadArticleImages(id);
         for (const im of existing) await deleteArticleImage(id, im.id);
         for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
         const thumb = artImages[0] ? await dataUrlToThumb(artImages[0]) : null;
         await updateArticle(id, { thumb: thumb || null });
       } else {
-        const id = await addArticle({ title, body: artBody, grad, published: true });
+        const id = await addArticle({ title, body: artBody, grad, published: true, publishAt });
         for (let i = 0; i < artImages.length; i++) await addArticleImage(id, artImages[i], i);
         if (artImages[0]) {
           const thumb = await dataUrlToThumb(artImages[0]);
           if (thumb) await updateArticle(id, { thumb });
         }
-        if (artNotify) await notifyArticleLine(title, grad);
+        // 予約投稿のときは公開時点でLINE通知を送れないため、この場では送らない
+        if (artNotify && !scheduled) await notifyArticleLine(title, grad);
       }
       resetArtForm();
     } catch (ex) {
@@ -291,6 +315,7 @@ function AdminBody({
     setArtTitle(a.title || "");
     setArtBody(a.body || "");
     setArtGrad(a.grad ? String(a.grad) : "");
+    setArtPublishAt(tsToLocalInput(a.publishAt));
     setArtImages([]);
     setArtBusy(true);
     try { const imgs = await loadArticleImages(a.id); setArtImages(imgs.map((im) => im.data)); }
@@ -2441,6 +2466,7 @@ function AdminBody({
 
       {tab === "news" && (
         <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-4"}>
+          <div className="space-y-3">
           <SectionTitle>{editingArticleId ? "記事を編集" : "NEWS記事を投稿"}</SectionTitle>
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
             <div>
@@ -2479,16 +2505,34 @@ function AdminBody({
             </div>
             {!editingArticleId && (
               <label className="flex items-start gap-2 text-xs" style={{ color: INK }}>
-                <input type="checkbox" checked={artNotify} onChange={(e) => setArtNotify(e.target.checked)} className="mt-0.5" />
+                <input type="checkbox" checked={artNotify} onChange={(e) => setArtNotify(e.target.checked)} className="mt-0.5" disabled={!!artPublishAt} />
                 <span>投稿時に<span className="font-bold" style={{ color: LINE_GREEN }}>対象者の公式LINE</span>へお知らせを送る（LINE連携済みの方のみ。メールは送りません）</span>
               </label>
             )}
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1">公開タイミング</p>
+              <input type="datetime-local" value={artPublishAt} onChange={(e) => setArtPublishAt(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+              <div className="flex items-center gap-2 mt-1">
+                <p className="text-[11px] text-gray-400 flex-1">
+                  {artPublishAt
+                    ? "指定した日時になると学生のNEWSに表示されます。予約投稿ではLINE通知は送られません（公開後に「LINE配信」から手動でお知らせできます）。"
+                    : "未指定＝すぐに公開します。日時を入れると予約投稿になります。"}
+                </p>
+                {artPublishAt && (
+                  <button onClick={() => setArtPublishAt("")} className="shrink-0 text-[11px] font-bold text-gray-400">予約を解除</button>
+                )}
+              </div>
+            </div>
             {artErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{artErr}</p>}
             {artBusy && <p className="text-xs text-gray-400">処理中…</p>}
             <div className="flex gap-2">
               <button disabled={!artTitle.trim() || artBusy} onClick={submitArticle}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                {artBusy ? "処理中…" : editingArticleId ? "記事を更新する" : (artNotify ? "投稿してLINE通知（即時公開）" : "記事を投稿する（即時公開）")}
+                {artBusy ? "処理中…"
+                  : editingArticleId ? "記事を更新する"
+                  : artPublishAt ? "予約投稿する"
+                  : (artNotify ? "投稿してLINE通知（即時公開）" : "記事を投稿する（即時公開）")}
               </button>
               {editingArticleId && (
                 <button onClick={resetArtForm} disabled={artBusy}
@@ -2499,6 +2543,8 @@ function AdminBody({
             </div>
           </div>
 
+          </div>
+          <div className="space-y-3">
           <SectionTitle>投稿済みの記事</SectionTitle>
           {articles.length === 0 ? (
             <p className="text-xs text-gray-400">まだ記事はありません。</p>
@@ -2519,6 +2565,11 @@ function AdminBody({
                       {a.createdAt?.toDate ? `${a.createdAt.toDate().getFullYear()}.${a.createdAt.toDate().getMonth() + 1}.${a.createdAt.toDate().getDate()}` : ""}
                       ・{a.grad ? `${a.grad}卒` : "全学年"}・{a.published ? "公開中" : "非公開"}
                     </p>
+                    {isScheduled(a) && (
+                      <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: "#FFF7E6", color: "#B45309" }}>
+                        予約公開 {fmtScheduled(a.publishAt)}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button onClick={() => startEditArticle(a)}
@@ -2542,6 +2593,7 @@ function AdminBody({
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 
@@ -2568,6 +2620,7 @@ function AdminBody({
 
       {tab === "line" && (
         <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-4"}>
+          <div className="space-y-3">
           <SectionTitle>LINE一括配信</SectionTitle>
 
           {/* 今月のLINE送信数（無料枠） */}
@@ -2761,6 +2814,8 @@ function AdminBody({
             </div>
           )}
 
+          </div>
+          <div className="space-y-3">
           {/* 配信履歴 */}
           <div>
             <div className="flex items-center justify-between">
@@ -2850,6 +2905,7 @@ function AdminBody({
                 )}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}

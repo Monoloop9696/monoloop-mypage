@@ -176,7 +176,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     return d ? `${d.getMonth() + 1}.${d.getDate()}` : "";
   };
   // 自分の卒年度向け or 全学年の記事
-  const myArticles = articles.filter((a) => a.grad == null || a.grad === grad);
+  // publishAt（公開予約）が未来の記事はまだ表示しない
+  const articleReleased = (a) => {
+    if (!a.publishAt) return true;
+    const d = a.publishAt.toDate ? a.publishAt.toDate() : new Date(a.publishAt);
+    return !(d instanceof Date) || Number.isNaN(d.getTime()) ? true : d.getTime() <= Date.now();
+  };
+  const myArticles = articles.filter((a) => (a.grad == null || a.grad === grad) && articleReleased(a));
 
   const studentName = student.name || "";
   const lineLinked = !!student.lineUserId;
