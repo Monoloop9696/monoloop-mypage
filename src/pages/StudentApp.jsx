@@ -393,21 +393,32 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   // （新しいイベントが追加されても Now が前に戻らないようにするため）
   const anyEventDone = myEvents.some((e) => e.rsvp != null);
   const anySurveyDone = mySurveys.some((s) => s.done);
-  const stepDone = (m) => {
-    // 内定承諾ステップは、管理者が「承諾」にした時点で完了になる
-    if (m.type === "accept") return accepted;
+  // 受付終了の判定（イベントタブと同じ基準）
+  const eventClosed = (e) => e.closed === true || (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
+  const surveyClosed = (s) => !!(s.dueDate && s.dueDate < todayStr);
+  // まだ回答できるものが1つも残っていない＝これ以上進みようがない
+  const noOpenEvents = myEvents.length > 0 && myEvents.every((e) => e.rsvp != null || eventClosed(e));
+  const noOpenSurveys = mySurveys.length > 0 && mySurveys.every((s) => s.done || surveyClosed(s));
+  // ステップの状態： "done"=対応済み / "expired"=未対応のまま受付終了 / "pending"=これから
+  const stepState = (m) => {
+    if (m.type === "accept") return accepted ? "done" : "pending";
     const r = stepRef(m);
-    if (r && r.item) return r.kind === "event" ? r.item.rsvp != null : !!r.item.done;
-    if (m.link === "event") return anyEventDone;
-    if (m.link === "survey") return anySurveyDone;
-    if (m.link === "profile") return profileDone;
-    return m.type === "profile" ? profileDone
-      : m.type === "event" ? anyEventDone
-      : false;
+    if (r && r.item) {
+      if (r.kind === "event") return r.item.rsvp != null ? "done" : (eventClosed(r.item) ? "expired" : "pending");
+      return r.item.done ? "done" : (surveyClosed(r.item) ? "expired" : "pending");
+    }
+    if (m.link === "event") return anyEventDone ? "done" : (noOpenEvents ? "expired" : "pending");
+    if (m.link === "survey") return anySurveyDone ? "done" : (noOpenSurveys ? "expired" : "pending");
+    if (m.link === "profile") return profileDone ? "done" : "pending";
+    if (m.type === "profile") return profileDone ? "done" : "pending";
+    if (m.type === "event") return anyEventDone ? "done" : (noOpenEvents ? "expired" : "pending");
+    return "pending";
   };
-  const flags = visibleJourney.map(stepDone);
+  const states = visibleJourney.map(stepState);
+  // 期限切れのステップも「済み」として扱い、Now が止まらないようにする
+  const flags = states.map((x) => x !== "pending");
   const nowIdx = flags.findIndex((x) => !x);
-  const milestones = visibleJourney.map((m) => {
+  const milestones = visibleJourney.map((m, i) => {
     let cta = null, onTap = null, isLink = false;
     if (m.link && !/^https?:\/\/$/i.test(m.link)) {
       // 手入力ステップのリンク（内部タブ or 外部URL）
@@ -436,7 +447,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     }
     // 内定承諾ステップの表示名は status に合わせて自動で切り替える
     const label = m.type === "accept" ? (accepted ? "内定承諾" : "内定") : m.label;
-    return { ...m, label, cta, onTap, isLink };
+    return { ...m, label, cta, onTap, isLink, expired: states[i] === "expired" };
   });
 
   const statusTag = (e) =>
@@ -587,7 +598,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                             <div className="flex items-center justify-between gap-3">
                               <p className="jp-mincho font-bold" style={{ fontSize: 16, color: state === "next" ? "#A78F98" : INK }}>{m.label}</p>
                               {state === "done" && (
-                                <span className="flex items-center gap-1.5" style={caps(9, MAUVE, "0.18em")}><Check size={11} strokeWidth={3} /> Done</span>
+                                m.expired
+                                  ? <span style={caps(9, "#B7A2AA", "0.18em")}>Closed</span>
+                                  : <span className="flex items-center gap-1.5" style={caps(9, MAUVE, "0.18em")}><Check size={11} strokeWidth={3} /> Done</span>
                               )}
                               {state === "now" && (
                                 <span className="flex items-center gap-1.5" style={caps(9, GOLD, "0.18em")}>

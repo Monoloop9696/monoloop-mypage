@@ -66,7 +66,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
 - 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
-- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
+- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
 - `notices/{id}`: text, createdAt（全学年に表示）
 - `articles/{id}`: title, body, grad(null=全学年), published, thumb, createdAt
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order
