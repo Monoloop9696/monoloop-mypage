@@ -42,6 +42,7 @@ src/
     area.js              住所→エリア(地方10区分)判定（AREAS / addressArea / matchesAreas）
     csv.js               CSV出力
     image.js             画像圧縮（fileToCompressedDataURL / dataUrlToThumb / downloadDataUrl）
+    scrollLock.js        useBodyScrollLock（モーダル/ドロワー表示中に背面を固定。iOS対策で position:fixed 方式・多重表示はカウントで管理）
   components/common.jsx  SectionTitle / EdHeader / FullLoader
   pages/
     Login / Signup（/signup/:year 動的・フリガナ/電話郵便ハイフン必須）/ ResetPassword / ResetConfirm（日本語再設定）

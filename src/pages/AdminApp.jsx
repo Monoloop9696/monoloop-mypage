@@ -8,6 +8,7 @@ import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
+import { useBodyScrollLock } from "../lib/scrollLock";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
@@ -1353,6 +1354,12 @@ function AdminBody({
     });
     downloadCsv(`アンケート回答_${s.title}_${selectedYear}卒.csv`, [header, ...rows]);
   };
+
+  // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
+  useBodyScrollLock(
+    !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
+       historyPicker || targetModal || detailStudent || pendingStatus || preview)
+  );
 
   const tabs = [
     { key: "dash", label: "概況", icon: BarChart3 },

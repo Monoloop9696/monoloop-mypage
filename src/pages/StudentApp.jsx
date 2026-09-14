@@ -17,6 +17,7 @@ import {
 } from "../lib/firestore";
 import { askQuestion, listQuestions } from "../lib/api";
 import { matchesAreas } from "../lib/area";
+import { useBodyScrollLock } from "../lib/scrollLock";
 import { downloadDataUrl } from "../lib/image";
 
 const ADD_FRIEND_URL = import.meta.env.VITE_LINE_ADD_FRIEND_URL || "";
@@ -238,6 +239,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     // 対象者：個別指定(targetUids)があれば優先、無ければ住所エリアで判定（イベントと同じ）
     .filter((s) => readOnly || (Array.isArray(s.targetUids) ? s.targetUids.includes(uid) : matchesAreas(student, s.areas, s.areaBasis)))
     .map((s) => ({ ...s, done: responseSet.has(s.id) }));
+
+  // モーダル表示中は背面をスクロール・操作できないようにする
+  useBodyScrollLock(!!(activeSurvey || activeArticle || showProfile || celebrate || menuOpen));
 
   const profileDone = !!(student.address && student.phone);
   // 管理者がステータスを「承諾」にすると、学生側の表示が切り替わる
