@@ -702,6 +702,14 @@ function AdminBody({
   // アンケートの対象者のうち、回答済み／未回答で絞る
   const surveyGroupList = (sv, g) =>
     surveyAudience(sv).filter((st) => (g === "answered" ? !!respMap[`${sv.id}_${st.id}`] : !respMap[`${sv.id}_${st.id}`]));
+  // 受付が終了しているか（学生画面と同じ基準）。折りたたみ状態の期限表示に使う
+  const adminTodayStr = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  })();
+  const eventIsClosed = (e) =>
+    e.closed === true || (e.deadlineDate ? pastDeadline(e.deadlineDate, e.deadlineTime) : !!(e.dateStr && e.dateStr < adminTodayStr));
+  const surveyIsClosed = (s) => pastDeadline(s.dueDate, s.dueTime);
   const eventAreaText = (e) => {
     if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
     if (!e.areas || !e.areas.length) return null;
@@ -1646,7 +1654,10 @@ function AdminBody({
                     <div key={dft.id} className="py-2.5 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-bold truncate">{dft.title}</p>
-                        <p className="text-xs text-gray-400">{dft.dateStr ? `${dft.dateStr} ${dft.time}` : "開催日未定"}</p>
+                        <p className="text-xs text-gray-400">
+                          {dft.dateStr ? `${dft.dateStr} ${dft.time}` : "開催日未定"}
+                          ・出欠期限 {dft.deadlineDate ? deadlineText(dft.deadlineDate, dft.deadlineTime) : "開催日まで"}
+                        </p>
                       </div>
                       <div className="flex gap-1.5 shrink-0">
                         <button onClick={() => editDraft(dft)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">編集</button>
@@ -1677,7 +1688,11 @@ function AdminBody({
                           {e.title}
                           {e.closed && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#F3F4F6", color: "#6B7280" }}>受付終了済み</span>}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{e.date}・{e.place}</p>
+                        <p className="text-xs text-gray-400 mt-0.5">{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}・{e.place}</p>
+                        <p className="text-xs mt-0.5" style={{ color: eventIsClosed(e) ? "#B45309" : "#6B7280" }}>
+                          出欠期限：{e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}
+                          {eventIsClosed(e) ? "（受付終了）" : ""}
+                        </p>
                         {areaTxt && <p className="text-xs mt-0.5" style={{ color: BRAND }}>対象：{areaTxt}</p>}
                       </div>
                       <div className="text-right shrink-0">
@@ -2079,6 +2094,10 @@ function AdminBody({
                     <div className="flex justify-between text-sm gap-2">
                       <div className="min-w-0">
                         <p className="font-bold truncate">{s.title}</p>
+                        <p className="text-xs mt-0.5" style={{ color: surveyIsClosed(s) ? "#B45309" : "#6B7280" }}>
+                          回答期限：{s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし"}
+                          {surveyIsClosed(s) ? "（受付終了）" : ""}
+                        </p>
                         {targetText && <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>対象：{targetText}</p>}
                       </div>
                       <div className="text-right shrink-0">
