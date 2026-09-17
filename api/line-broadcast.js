@@ -52,6 +52,19 @@ export default async function handler(req, res) {
         if (group === "no") return no.has(s.id);
         return !yes.has(s.id) && !no.has(s.id); // none = 未回答
       });
+    } else if (typeof target === "string" && target.startsWith("survey:")) {
+      // アンケートの回答状況で絞り込み： survey:<surveyId>:<group>（group = answered/unanswered）
+      const [, surveyId, group] = target.split(":");
+      const rsnap = await dbAdmin.collection("responses").where("surveyId", "==", surveyId).get();
+      const answered = new Set(rsnap.docs.map((d) => d.data().uid));
+      // アンケートの対象者（個別指定があれば優先）だけに絞る
+      const sdoc = await dbAdmin.collection("surveys").doc(surveyId).get();
+      const sv = sdoc.exists ? sdoc.data() : null;
+      if (sv && Array.isArray(sv.targetUids)) {
+        const allow = new Set(sv.targetUids);
+        recipients = recipients.filter((s) => allow.has(s.id));
+      }
+      recipients = recipients.filter((s) => (group === "answered" ? answered.has(s.id) : !answered.has(s.id)));
     } else if (target === "内定者（承諾前）") {
       recipients = recipients.filter((s) => s.status === "内定");
     } else if (target === "内定承諾者") {

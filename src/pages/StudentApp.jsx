@@ -18,6 +18,7 @@ import {
 import { askQuestion, listQuestions } from "../lib/api";
 import { matchesAreas } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
+import { pastDeadline } from "../lib/deadline";
 import { downloadDataUrl } from "../lib/image";
 
 const ADD_FRIEND_URL = import.meta.env.VITE_LINE_ADD_FRIEND_URL || "";
@@ -404,8 +405,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const anyEventDone = myEvents.some((e) => e.rsvp != null);
   const anySurveyDone = mySurveys.some((s) => s.done);
   // 受付終了の判定（イベントタブと同じ基準）
-  const eventClosed = (e) => e.closed === true || (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
-  const surveyClosed = (s) => !!(s.dueDate && s.dueDate < todayStr);
+  const eventClosed = (e) => e.closed === true || (e.deadlineDate ? pastDeadline(e.deadlineDate, e.deadlineTime) : !!(e.dateStr && e.dateStr < todayStr));
+  const surveyClosed = (s) => pastDeadline(s.dueDate, s.dueTime);
   // まだ回答できるものが1つも残っていない＝これ以上進みようがない
   const noOpenEvents = myEvents.length > 0 && myEvents.every((e) => e.rsvp != null || eventClosed(e));
   const noOpenSurveys = mySurveys.length > 0 && mySurveys.every((s) => s.done || surveyClosed(s));
@@ -479,8 +480,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
   // 上部アラート：未対応タスクの集約（受付終了＝期日超過は対象外）
-  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !e.closed && !(e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr))).length;
-  const pendingSurveys = mySurveys.filter((s) => !s.done && !(s.dueDate && s.dueDate < todayStr)).length;
+  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !eventClosed(e)).length;
+  const pendingSurveys = mySurveys.filter((s) => !s.done && !surveyClosed(s)).length;
   const alerts = [];
   if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
   if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
@@ -686,7 +687,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           {/* イベント */}
           {tab === "event" && (() => {
             // 受付終了＝管理者が手動終了(closed) or 回答期限(deadlineDate)超過。未設定は開催日を基準にフォールバック
-            const isClosed = (e) => e.closed === true || (e.deadlineDate ? e.deadlineDate < todayStr : (e.dateStr && e.dateStr < todayStr));
+            const isClosed = (e) => eventClosed(e);
             const ended = myEvents.filter(isClosed);
             const activeEv = myEvents.filter((e) => !isClosed(e));
             const unanswered = activeEv.filter((e) => e.rsvp === null);
@@ -792,7 +793,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* アンケート */}
           {tab === "survey" && (() => {
-            const isPast = (s) => s.dueDate && s.dueDate < todayStr;
+            const isPast = (s) => surveyClosed(s);
             const ended = mySurveys.filter(isPast);
             const activeSv = mySurveys.filter((s) => !isPast(s));
             const unanswered = activeSv.filter((s) => !s.done);

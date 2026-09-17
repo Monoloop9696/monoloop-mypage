@@ -9,6 +9,7 @@ import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
 import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
+import { pastDeadline, deadlineText } from "../lib/deadline";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
@@ -25,13 +26,13 @@ import {
   loadArticleImages, deleteArticleImage,
 } from "../lib/firestore";
 
-const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", areas: [], areaBasis: "either", targetUids: null, arrivalOn: true, arrivalLabel: "" };
+const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", deadlineDate: "", deadlineTime: "", areas: [], areaBasis: "either", targetUids: null, arrivalOn: true, arrivalLabel: "" };
 // 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
 const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
-const deadlineLabel = (d) => (d ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))} まで` : "追ってご案内");
+const deadlineLabel = (d, t) => deadlineText(d, t);
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
 const VISIBLE_ITEMS = 3;
-const EMPTY_SV = { title: "", desc: "", dueDate: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
+const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -391,6 +392,7 @@ function AdminBody({
   const [srcNewName, setSrcNewName] = useState("");
   const [srcBusy, setSrcBusy] = useState(false);
   const [srcDelId, setSrcDelId] = useState(null);
+  const [showTargetPicker, setShowTargetPicker] = useState(false); // LINE配信の対象を選ぶモーダル
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -688,10 +690,18 @@ function AdminBody({
   const showRetiredSection =
     listFilter === "all" ? retiredList.length > 0 : ["辞退", "承諾後辞退", "削除済"].includes(listFilter);
 
-  // 配信対象。イベント別は "event:<eventId>:<group>"（group = yes/no/none）で表現
+  // 配信対象。イベント別は "event:<eventId>:<group>"（group = yes/arrived/no/none）、
+  // アンケート別は "survey:<surveyId>:<group>"（group = answered/unanswered）で表現
   const isEventTarget = target.startsWith("event:");
   const [, tEventId, tGroup] = isEventTarget ? target.split(":") : [];
   const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
+  const isSurveyTarget = target.startsWith("survey:");
+  const [, tSurveyId, tSGroup] = isSurveyTarget ? target.split(":") : [];
+  const targetSurvey = isSurveyTarget ? yearSurveys.find((s) => s.id === tSurveyId) : null;
+  const surveyGroupLabelOf = (g) => (g === "answered" ? "回答済み" : "未回答");
+  // アンケートの対象者のうち、回答済み／未回答で絞る
+  const surveyGroupList = (sv, g) =>
+    surveyAudience(sv).filter((st) => (g === "answered" ? !!respMap[`${sv.id}_${st.id}`] : !respMap[`${sv.id}_${st.id}`]));
   const eventAreaText = (e) => {
     if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
     if (!e.areas || !e.areas.length) return null;
@@ -701,6 +711,8 @@ function AdminBody({
 
   const targetCount = isEventTarget
     ? (targetEvent ? activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup)).length : 0)
+    : isSurveyTarget
+    ? (targetSurvey ? surveyGroupList(targetSurvey, tSGroup).length : 0)
     : target === "全員" ? activeStudents.length
     : target === "内定者（承諾前）" ? preAccept
     : target === "内定承諾者" ? accepted
@@ -708,6 +720,8 @@ function AdminBody({
 
   const targetLabel = isEventTarget
     ? `${targetEvent ? targetEvent.title : "イベント"}・${groupLabelOf(tGroup)}`
+    : isSurveyTarget
+    ? `${targetSurvey ? targetSurvey.title : "アンケート"}・${surveyGroupLabelOf(tSGroup)}`
     : target;
 
   // この配信で使うLINE送信数（＝連携済みの宛先数）。無料枠の消費見込み
@@ -715,6 +729,10 @@ function AdminBody({
     if (isEventTarget) {
       if (!targetEvent) return [];
       return activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup));
+    }
+    if (isSurveyTarget) {
+      if (!targetSurvey) return [];
+      return surveyGroupList(targetSurvey, tSGroup);
     }
     if (target === "内定者（承諾前）") return activeStudents.filter((s) => s.status === "内定");
     if (target === "内定承諾者") return activeStudents.filter((s) => s.status === "承諾");
@@ -780,7 +798,8 @@ function AdminBody({
     title: data.title, dateStr: data.date, time: data.time,
     place: data.place || "未定",
     deadlineDate: data.deadlineDate || null,
-    deadline: deadlineLabel(data.deadlineDate),
+    deadlineTime: data.deadlineTime || null,
+    deadline: deadlineLabel(data.deadlineDate, data.deadlineTime),
     areas: data.areas || [], areaBasis: data.areaBasis || "either",
     targetUids: Array.isArray(data.targetUids) ? data.targetUids : null,
     copy: data.copy || "", grad: selectedYear, published,
@@ -807,7 +826,7 @@ function AdminBody({
     setEditingEventId(e.id);
     setEv({
       title: e.title || "", date: e.dateStr || "", time: e.time || "18:00", place: e.place || "",
-      copy: e.copy || "", deadlineDate: e.deadlineDate || "",
+      copy: e.copy || "", deadlineDate: e.deadlineDate || "", deadlineTime: e.deadlineTime || "",
       areas: e.areas || [], areaBasis: e.areaBasis || "either",
       targetUids: Array.isArray(e.targetUids) ? e.targetUids : null,
       arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "",
@@ -817,7 +836,7 @@ function AdminBody({
   const saveDraft = async () => {
     const base = {
       title: ev.title, dateStr: ev.date, time: ev.time, place: ev.place,
-      copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadline: deadlineLabel(ev.deadlineDate),
+      copy: ev.copy, deadlineDate: ev.deadlineDate || null, deadlineTime: ev.deadlineTime || null, deadline: deadlineLabel(ev.deadlineDate, ev.deadlineTime),
       areas: ev.areas || [], areaBasis: ev.areaBasis || "either",
       targetUids: Array.isArray(ev.targetUids) ? ev.targetUids : null,
       arrivalOn: ev.arrivalOn !== false,
@@ -830,7 +849,7 @@ function AdminBody({
   };
   const editDraft = (dft) => {
     setEditingEventId(null);
-    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null, arrivalOn: dft.arrivalOn !== false, arrivalLabel: dft.arrivalLabel || "" });
+    setEv({ title: dft.title, date: dft.dateStr || "", time: dft.time, place: dft.place, copy: dft.copy, deadlineDate: dft.deadlineDate || "", deadlineTime: dft.deadlineTime || "", areas: dft.areas || [], areaBasis: dft.areaBasis || "either", targetUids: Array.isArray(dft.targetUids) ? dft.targetUids : null, arrivalOn: dft.arrivalOn !== false, arrivalLabel: dft.arrivalLabel || "" });
     setEditingDraftId(dft.id);
     setShowEventForm(true);
   };
@@ -949,7 +968,8 @@ function AdminBody({
     title: sv.title.trim(),
     desc: (sv.desc || "").trim(),
     dueDate: sv.dueDate || null,
-    due: sv.dueDate ? `${Number(sv.dueDate.slice(5, 7))}/${Number(sv.dueDate.slice(8, 10))} まで` : "期限なし",
+    dueTime: sv.dueTime || null,
+    due: deadlineText(sv.dueDate, sv.dueTime, "期限なし"),
     time: sv.time || "約3分",
     questions: svOrderedQuestions().map((q) => {
       const options = q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean);
@@ -994,7 +1014,7 @@ function AdminBody({
     setEditingSurveyId(s.id);
     const a = s.audience;
     setSv({
-      title: s.title || "", desc: s.desc || "", dueDate: s.dueDate || "", time: s.time || "約3分",
+      title: s.title || "", desc: s.desc || "", dueDate: s.dueDate || "", dueTime: s.dueTime || "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: a && a.type === "event" ? "event" : "all",
@@ -1012,7 +1032,7 @@ function AdminBody({
   const useEventFromHistory = (e) => {
     setEditingDraftId(null);
     setEditingEventId(null);
-    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null, arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "" });
+    setEv({ title: e.title || "", date: "", time: e.time || "18:00", place: e.place || "", copy: e.copy || "", deadlineDate: "", deadlineTime: "", areas: e.areas || [], areaBasis: e.areaBasis || "either", targetUids: null, arrivalOn: e.arrivalOn !== false, arrivalLabel: e.arrivalLabel || "" });
     setShowEventForm(true);
     setHistoryPicker(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1020,7 +1040,7 @@ function AdminBody({
   const useSurveyFromHistory = (s) => {
     setEditingSurveyId(null);
     setSv({
-      title: s.title || "", desc: s.desc || "", dueDate: "", time: s.time || "約3分",
+      title: s.title || "", desc: s.desc || "", dueDate: "", dueTime: "", time: s.time || "約3分",
       questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
@@ -1043,7 +1063,7 @@ function AdminBody({
     const t = surveyTemplates.find((x) => x.id === tplId);
     if (!t || !t.data) return;
     setSv({
-      title: t.data.title || "", desc: t.data.desc || "", dueDate: "", time: t.data.time || "約3分",
+      title: t.data.title || "", desc: t.data.desc || "", dueDate: "", dueTime: "", time: t.data.time || "約3分",
       questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(t.data.sections) ? t.data.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
@@ -1358,7 +1378,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker)
   );
 
   const tabs = [
@@ -1515,9 +1535,18 @@ function AdminBody({
                 </div>
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">出欠の回答期限</p>
-                  <input type="date" value={ev.deadlineDate} onChange={(e) => setEv({ ...ev, deadlineDate: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
-                  <p className="text-[11px] text-gray-400 mt-1">この日を過ぎると学生は出欠を回答・変更できなくなります（未設定なら開催日まで回答可）。</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={ev.deadlineDate} onChange={(e) => setEv({ ...ev, deadlineDate: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    <input type="time" value={ev.deadlineTime} onChange={(e) => setEv({ ...ev, deadlineTime: e.target.value })}
+                      disabled={!ev.deadlineDate}
+                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm disabled:bg-gray-50" />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    {ev.deadlineDate && ev.deadlineTime
+                      ? `${ev.deadlineDate} ${ev.deadlineTime} を過ぎると出欠を回答・変更できなくなります。`
+                      : "時刻を空欄にするとその日いっぱい（23:59）まで回答できます。日付も未設定なら開催日まで回答可。"}
+                  </p>
                 </div>
 
                 {/* 会場到着ボタン */}
@@ -1810,8 +1839,14 @@ function AdminBody({
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">回答期限</p>
-                    <input type="date" value={sv.dueDate} onChange={(e) => setSv({ ...sv, dueDate: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <input type="date" value={sv.dueDate} onChange={(e) => setSv({ ...sv, dueDate: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                      <input type="time" value={sv.dueTime} onChange={(e) => setSv({ ...sv, dueTime: e.target.value })}
+                        disabled={!sv.dueDate}
+                        className="w-full border border-gray-300 rounded-lg p-2.5 text-sm disabled:bg-gray-50" />
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1">時刻は任意（空欄ならその日いっぱい）。</p>
                   </div>
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">所要時間の目安</p>
@@ -2863,41 +2898,16 @@ function AdminBody({
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-2">配信対象</p>
-
-              {/* ステータス別 */}
-              <p className="text-[11px] font-bold text-gray-400 mb-1">ステータス別</p>
-              <div className="flex flex-wrap gap-2">
-                {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
-                  <button key={t} onClick={() => setTarget(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
-                    style={!isEventTarget && target === t ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-
-              {/* イベント参加状況で送る */}
-              <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">イベント参加状況で送る</p>
-              <select value={isEventTarget ? tEventId : ""}
-                onChange={(e) => setTarget(e.target.value ? `event:${e.target.value}:yes` : "全員")}
-                className="w-full border border-gray-300 rounded-lg p-2.5 text-xs font-bold bg-white">
-                <option value="">イベントを選択…</option>
-                {yearEvents.map((e) => (<option key={e.id} value={e.id}>{e.title}</option>))}
-              </select>
-              {isEventTarget && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {["yes", "arrived", "no", "none"].map((g) => (
-                    <button key={g} onClick={() => setTarget(`event:${tEventId}:${g}`)} className="text-xs font-bold px-3 py-2 rounded-full border"
-                      style={tGroup === g ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: INK }}>
-                      {groupLabelOf(g)}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <p className="text-xs font-bold mt-3" style={{ color: BRAND }}>
-                配信対象：{targetLabel}　{targetCount}名
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
+              <button onClick={() => setShowTargetPicker(true)}
+                className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left bg-white"
+                style={{ borderColor: BRAND }}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-bold truncate" style={{ color: BRAND }}>{targetLabel}</span>
+                  <span className="block text-xs text-gray-500 mt-0.5">{targetCount}名が対象</span>
+                </span>
+                <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>変更</span>
+              </button>
+              <p className="text-xs text-gray-500 mt-1.5">
                 未連携者にはメールで自動送信されます。辞退者は配信対象から自動的に除外されます。
               </p>
             </div>
@@ -3122,6 +3132,98 @@ function AdminBody({
         </div>
       )}
 
+      {/* 配信対象を選ぶモーダル */}
+      {showTargetPicker && (() => {
+        const pick = (t) => { setTarget(t); setShowTargetPicker(false); };
+        const chip = (active) => (active
+          ? { background: BRAND, color: "#fff", borderColor: BRAND }
+          : { borderColor: "#D7DEDB", color: INK, background: "#fff" });
+        return (
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+            onClick={() => setShowTargetPicker(false)}>
+            <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">配信対象を選ぶ</p>
+                  <p className="text-base font-bold mt-0.5 truncate">{targetLabel}・{targetCount}名</p>
+                </div>
+                <button onClick={() => setShowTargetPicker(false)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="overflow-y-auto px-5 py-4 space-y-5">
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">ステータス別</p>
+                  <div className="flex flex-wrap gap-2">
+                    {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
+                      <button key={t} onClick={() => pick(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
+                        style={chip(!isEventTarget && !isSurveyTarget && target === t)}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">イベントの参加状況で送る</p>
+                  {yearEvents.length === 0 ? (
+                    <p className="text-xs text-gray-400">この年度のイベントはまだありません。</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {yearEvents.map((e) => (
+                        <div key={e.id} className="border border-gray-200 rounded-xl p-2.5">
+                          <p className="text-sm font-bold truncate">{e.title}</p>
+                          <p className="text-xs text-gray-400 mb-1.5">{e.dateStr || "日付未定"}</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {["yes", "arrived", "no", "none"].map((g) => {
+                              const n = activeStudents.filter((s) => inEventGroup(s, e, g)).length;
+                              return (
+                                <button key={g} onClick={() => pick(`event:${e.id}:${g}`)}
+                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border"
+                                  style={chip(isEventTarget && tEventId === e.id && tGroup === g)}>
+                                  {groupLabelOf(g)} {n}名
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">アンケートの回答状況で送る</p>
+                  {yearSurveys.length === 0 ? (
+                    <p className="text-xs text-gray-400">この年度のアンケートはまだありません。</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {yearSurveys.map((sv) => (
+                        <div key={sv.id} className="border border-gray-200 rounded-xl p-2.5">
+                          <p className="text-sm font-bold truncate">{sv.title}</p>
+                          <p className="text-xs text-gray-400 mb-1.5">{sv.dueDate ? `期限 ${sv.due || sv.dueDate}` : "期限なし"}・対象 {surveyAudience(sv).length}名</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {["unanswered", "answered"].map((g) => (
+                              <button key={g} onClick={() => pick(`survey:${sv.id}:${g}`)}
+                                className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border"
+                                style={chip(isSurveyTarget && tSurveyId === sv.id && tSGroup === g)}>
+                                {surveyGroupLabelOf(g)} {surveyGroupList(sv, g).length}名
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  人数は「回答状況を更新」で取得した時点のものです。最新にするには概況タブの更新ボタンを押してください。
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* まとめて編集（学生ごとに個別入力して一括保存） */}
       {multiEditOpen && (() => {
         const list = filteredActive;
@@ -3213,7 +3315,7 @@ function AdminBody({
         const arr = arrivedOf(st, e);
         const save = () => { setAdminRsvp(e, st, attendAns, attendAns === "欠席" ? cancelReason : ""); setAttendEdit(null); };
         return (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-40 px-6">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
             <div className="bg-white rounded-2xl w-full max-w-sm p-5">
               <div className="flex items-start justify-between">
                 <div>
@@ -3309,7 +3411,7 @@ function AdminBody({
           return labels.length ? labels.join(" / ") : "エリア不明";
         };
         return (
-          <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
@@ -3368,7 +3470,7 @@ function AdminBody({
 
       {/* 選択肢の回答者モーダル */}
       {optionVoters && (
-        <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setOptionVoters(null)}>
+        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setOptionVoters(null)}>
           <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
@@ -3401,7 +3503,7 @@ function AdminBody({
           ? [...events].sort((a, b) => (b.dateStr || "").localeCompare(a.dateStr || ""))
           : [...surveys].sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
         return (
-          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "82vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
@@ -3495,7 +3597,7 @@ function AdminBody({
           ["アカウント作成", (logins[d.id] && fmtDateTime(logins[d.id].creationTime)) || "—"],
         ];
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-6">
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
             <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
               {/* 固定ヘッダー：名前の横に編集、右上に閉じる（スクロールで隠れない） */}
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
@@ -3559,7 +3661,7 @@ function AdminBody({
       })()}
 
       {pendingStatus && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40 px-6">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
             <p className="text-sm font-bold">ステータスの変更</p>
             <p className="text-xs text-gray-600 mt-2 leading-relaxed">

@@ -42,6 +42,7 @@ src/
     area.js              住所→エリア(地方10区分)判定（AREAS / addressArea / matchesAreas）
     csv.js               CSV出力
     image.js             画像圧縮（fileToCompressedDataURL / dataUrlToThumb / downloadDataUrl）
+    deadline.js          pastDeadline / deadlineText（日付＋任意の時刻で締切判定・表示を共通化）
     scrollLock.js        useBodyScrollLock（モーダル/ドロワー表示中に背面を固定。iOS対策で position:fixed 方式・多重表示はカウントで管理）
   components/common.jsx  SectionTitle / EdHeader / FullLoader
   pages/
@@ -60,9 +61,9 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 
 - `students/{uid}`: name, kana(フリガナ・あいうえお順の並び替えに使用), univ, birth, email, phone, zip, address, livesAtHome, homeZip, homeAddress, grad, joinDate, status(内定/承諾/辞退/承諾後辞退), **offerDate**(内定出し日), **acceptDate**(内定承諾日・ステータスを承諾にすると未入力なら自動で当日), **source**(流入経路＝媒体/紹介会社。選択肢は templates の _type:"source"), deleted, lineUserId, linkCode, createdAt
 - `cohorts/{year}`: year, initialPassword, joinDate, active ※**管理者のみ読取可**（初期PWを含む）
-- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), deadline(表示ラベル), **areas[]**(対象エリア地方区分キー・空=全員), **areaBasis**(current/home/either=現住所/実家/どちらか), targetUids[](個別指定の対象者uid・あればエリアより優先。公開後も管理画面の「対象者を調整」で変更可＝後から登録した学生の表示/非表示もここで), closed(管理者の最終受付終了。trueで到着も締切), **arrivalOn**(false=学生に会場到着ボタンを出さない。既定true), **arrivalLabel**(到着ボタンの文言。空なら「会場に到着したら押す」), copy, grad, published(false=下書き)。※回答期限超過で出欠回答は締切。到着は開催日当日以降いつでも押下可（管理者が closed にするまで）。エリア判定は住所文字列の先頭都道府県から（`src/lib/area.js`）
+- `events/{id}`: title, dateStr, time, date(Timestamp), place, deadlineDate(YYYY-MM-DD・出欠受付の締切／未設定は開催日基準), **deadlineTime**(HH:MM・任意。未設定はその日いっぱい), deadline(表示ラベル), **areas[]**(対象エリア地方区分キー・空=全員), **areaBasis**(current/home/either=現住所/実家/どちらか), targetUids[](個別指定の対象者uid・あればエリアより優先。公開後も管理画面の「対象者を調整」で変更可＝後から登録した学生の表示/非表示もここで), closed(管理者の最終受付終了。trueで到着も締切), **arrivalOn**(false=学生に会場到着ボタンを出さない。既定true), **arrivalLabel**(到着ボタンの文言。空なら「会場に到着したら押す」), copy, grad, published(false=下書き)。※回答期限超過で出欠回答は締切。到着は開催日当日以降いつでも押下可（管理者が closed にするまで）。エリア判定は住所文字列の先頭都道府県から（`src/lib/area.js`）
 - `rsvps/{eventId}_{uid}`: eventId, uid, answer(yes/no), arrived, arrivedAt(当日到着ボタン), changedAt/changeSeen(既回答からの変更を管理者に通知), cancelReason(管理者が欠席にした際のキャンセル理由)。※`setRsvp`はmerge。管理者用に `adminSetRsvp`(理由つき)/`deleteRsvp`(未回答に戻す)/`setRsvpArrived`/`markRsvpChangeSeen`
-- `surveys/{id}`: title, **desc**(説明文・任意。学生の回答画面でタイトル下に表示), dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required, **sectionId**, **branch**{選択肢:sectionId|"end"}}）, **sections[]**（{id,title,desc}・空=1ページ）, grad, published(false=下書き), **areas[]/areaBasis/targetUids[]**(イベントと同じ住所エリア絞り込み・個別指定。audienceの母集団に対してAND)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
+- `surveys/{id}`: title, **dueTime**(HH:MM・任意。回答期限の時刻), **desc**(説明文・任意。学生の回答画面でタイトル下に表示), dueDate(YYYY-MM-DD・自動終了), due(表示ラベル), time, **questions[]**（{id,type:single/multi/text,label,options[],required, **sectionId**, **branch**{選択肢:sectionId|"end"}}）, **sections[]**（{id,title,desc}・空=1ページ）, grad, published(false=下書き), **areas[]/areaBasis/targetUids[]**(イベントと同じ住所エリア絞り込み・個別指定。audienceの母集団に対してAND)。※旧形式 q1/opts[]/multi/q2 も後方互換で表示可（`surveyQuestions()` が吸収）
   - surveys には **audience**（{type:"all"} または {type:"event", eventId, group:"yes"|"arrived"}）で対象者を限定可。学生側は自分のrsvpで判定して表示、管理集計/CSVも対象者を分母に。LINE配信のイベント対象は group=yes/arrived/no/none（arrived=出席かつ当日到着ボタン押下）
 - `responses/{surveyId}_{uid}`: surveyId, uid, **answers**（{[questionId]: 配列=選択 / 文字列=記述}）。旧形式 q1[]/q2 は `responseAnswers()` で吸収
 - 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要。内定者タブの「管理する」から**名称変更（該当学生の値も自動で書き換え）・削除・並び替え（手動▲▼／自動=あいうえお順・使用人数順）**が可能
@@ -152,7 +153,7 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - 内定者: 配布カード・初期PW変更・卒年度追加/受付停止・**検索(名前/大学/住所/メール等)**・一覧/フィルタ・**詳細(閲覧/「編集」で連絡先編集=現住所/実家分離・電話郵便ハイフン必須・氏名/生年月日/メールは編集不可・フリガナ)**・**24時間無操作で自動ログアウト**（最終ログイン日時を実態に合わせるため）・**内定出し日/内定承諾日/流入経路(プルダウン・選択肢は編集画面から追加可)**・**詳細に未対応タスクの内訳表示**・**まとめて編集(一覧の絞り込み結果を全画面で開き、学生ごとに個別入力して変更分だけ一括保存。編集範囲は個別編集と同じ。保存前に電話/郵便番号の形式を全件チェック)**・**一覧の並び替え(フリガナ/大学/内定出し日/内定承諾日/流入経路/ステータス/タスク進捗/最終ログイン＋昇順降順)**・**最終ログイン日時/アカウント作成日時**(Firebase Auth メタデータ。内定者タブで自動取得＋「ログイン状況を更新」ボタン、一覧・詳細・CSVに表示)・ステータス変更(内定/承諾/辞退/承諾後辞退/**テスト**)・辞退→無効化/復元・CSV。名前は**フリガナであいうえお順**。テストアカウントは集計/配信対象外。
 - 記事: **予約投稿(publishAt。予約時はLINE通知なし＝公開時刻に動くサーバー処理が無いため)**・写真アップロード(自動圧縮・**画質重視 最大1600px/品質0.85/1MB枠**)・公開対象・公開/非公開・**編集**・削除・**投稿時に対象者の公式LINEへ自動通知**(任意ON)。
 - 質問箱: 一覧・回答(質問者へLINE通知)・公開切替・削除・未回答バッジ。
-- LINE一括配信: 対象=ステータス別／**イベント参加状況(出席者/到着者/欠席者/未回答者)**。**{name}差し込み**(個別push)。**今月の送信数(無料枠200/月・毎月リセット)表示＋超過ガード**。**配信履歴**(本文・宛先氏名・日時・件数、折りたたみ＋ページング、**個別削除**)。テンプレ管理(種別カテゴリ・並び替え・削除)。※Managerの「メッセージ配信」履歴には出ない旨の注記あり。
+- LINE一括配信: 対象は**モーダルで選択**（各選択肢に人数表示）。ステータス別／**イベント参加状況(出席者/到着者/欠席者/未回答者)**／**アンケート回答状況(未回答/回答済み)**。対象の判定は `/api/line-broadcast` 側にも同じロジックがある（片方だけ直すとズレる）。**{name}差し込み**(個別push)。**今月の送信数(無料枠200/月・毎月リセット)表示＋超過ガード**。**配信履歴**(本文・宛先氏名・日時・件数、折りたたみ＋ページング、**個別削除**)。テンプレ管理(種別カテゴリ・並び替え・削除)。※Managerの「メッセージ配信」履歴には出ない旨の注記あり。
 - 学生画面プレビュー(操作可・DB非保存)。
 
 **LINE Webhook**: 友だち追加(follow)時・その他メッセージへの自動返信は廃止し、**連携完了時のみ**「連携が完了しました」を送信。
