@@ -21,6 +21,7 @@ import {
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   addSourceOption, updateSourceOption, deleteSourceOption,
   addMeeting, updateMeeting, deleteMeeting,
+  addInterviewerOption, updateInterviewerOption, deleteInterviewerOption,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
@@ -405,6 +406,13 @@ function AdminBody({
   const [meetSearch, setMeetSearch] = useState("");
   const [meetDelId, setMeetDelId] = useState(null);
   const [meetView, setMeetView] = useState("recent"); // recent=日付順 / student=学生別
+  const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
+  const [showIvMgr, setShowIvMgr] = useState(false); // 担当者の管理パネル
+  const [ivEditId, setIvEditId] = useState(null);
+  const [ivEditName, setIvEditName] = useState("");
+  const [ivNewName, setIvNewName] = useState("");
+  const [ivDelId, setIvDelId] = useState(null);
+  const [ivBusy, setIvBusy] = useState(false);
   // 分析
   const [statsAllYears, setStatsAllYears] = useState(false);
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
@@ -1186,7 +1194,17 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting" && t._type !== "interviewer");
+  // ---- 面談の担当者マスタ ----
+  const interviewerOptions = savedTemplates
+    .filter((t) => t._type === "interviewer")
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || (a.name || "").localeCompare(b.name || "", "ja"));
+  const addInterviewer = async (name) => {
+    const nm = (name || "").trim();
+    if (!nm || interviewerOptions.some((x) => x.name === nm)) return;
+    try { await addInterviewerOption({ name: nm, order: interviewerOptions.length }); }
+    catch (ex) { setBanner(`担当者の追加に失敗しました：${ex.message}`); }
+  };
   // ---- 面談記録 ----
   const allMeetings = savedTemplates.filter((t) => t._type === "meeting");
   const yearMeetings = allMeetings
@@ -1233,6 +1251,50 @@ function AdminBody({
   const removeMeeting = async (id) => {
     try { await deleteMeeting(id); setMeetDelId(null); }
     catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+  };
+  // 担当者ごとの面談件数
+  const interviewerUsage = (name) => allMeetings.filter((m) => (m.interviewer || "") === name).length;
+  // 名称変更：選択肢と、その担当者が入っている面談記録もあわせて更新
+  const renameInterviewer = async (opt, nextName) => {
+    const nm = (nextName || "").trim();
+    if (!nm) { setBanner("担当者名を入力してください。"); return; }
+    if (nm === opt.name) { setIvEditId(null); return; }
+    if (interviewerOptions.some((x) => x.id !== opt.id && x.name === nm)) { setBanner("同じ名前の担当者がすでにいます。"); return; }
+    setIvBusy(true);
+    try {
+      await updateInterviewerOption(opt.id, { name: nm });
+      const affected = allMeetings.filter((m) => (m.interviewer || "") === opt.name);
+      for (const m of affected) await updateMeeting(m.id, { interviewer: nm });
+      setIvEditId(null); setIvEditName("");
+    } catch (ex) { setBanner(`担当者名の変更に失敗しました：${ex.message}`); }
+    finally { setIvBusy(false); }
+  };
+  const removeInterviewer = async (opt) => {
+    setIvBusy(true);
+    try { await deleteInterviewerOption(opt.id); setIvDelId(null); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+    finally { setIvBusy(false); }
+  };
+  const writeInterviewerOrder = async (list) => {
+    setIvBusy(true);
+    try { for (let i = 0; i < list.length; i++) await updateInterviewerOption(list[i].id, { order: i }); }
+    catch (ex) { setBanner(`並び替えに失敗しました：${ex.message}`); }
+    finally { setIvBusy(false); }
+  };
+  const moveInterviewer = (idx, dir) => {
+    const arr = [...interviewerOptions];
+    const j = idx + dir;
+    if (j < 0 || j >= arr.length) return;
+    [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    writeInterviewerOrder(arr);
+  };
+  const autoSortInterviewers = (mode) => {
+    const arr = [...interviewerOptions].sort((a, b) => (
+      mode === "usage"
+        ? interviewerUsage(b.name) - interviewerUsage(a.name) || (a.name || "").localeCompare(b.name || "", "ja")
+        : (a.name || "").localeCompare(b.name || "", "ja")
+    ));
+    writeInterviewerOrder(arr);
   };
   // 流入経路（媒体・紹介会社）の選択肢
   const sourceOptions = savedTemplates
@@ -2803,6 +2865,75 @@ function AdminBody({
             </button>
           </div>
 
+          <div className="mb-3">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-bold text-gray-500">面談の担当者</p>
+              <button onClick={() => setShowIvMgr((v) => !v)}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg border"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {showIvMgr ? "閉じる ▲" : `管理する（${interviewerOptions.length}名）▼`}
+              </button>
+            </div>
+            {showIvMgr && (
+              <div className="bg-white border border-gray-200 rounded-xl p-3">
+                <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                  <span className="text-[11px] font-bold text-gray-400">自動で並び替え</span>
+                  <button onClick={() => autoSortInterviewers("kana")} disabled={ivBusy}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">あいうえお順</button>
+                  <button onClick={() => autoSortInterviewers("usage")} disabled={ivBusy}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">面談数の多い順</button>
+                </div>
+                <div className="divide-y divide-gray-100 border-t border-gray-100">
+                  {interviewerOptions.length === 0 && <p className="text-xs text-gray-400 py-3">まだ登録がありません。下の欄から追加してください。</p>}
+                  {interviewerOptions.map((o, i) => (
+                    <div key={o.id} className="py-2 flex items-center gap-1.5">
+                      {ivEditId === o.id ? (
+                        <>
+                          <input value={ivEditName} onChange={(e) => setIvEditName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") renameInterviewer(o, ivEditName); }}
+                            className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-sm" autoFocus />
+                          <button onClick={() => renameInterviewer(o, ivEditName)} disabled={ivBusy}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>保存</button>
+                          <button onClick={() => { setIvEditId(null); setIvEditName(""); }}
+                            className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                        </>
+                      ) : ivDelId === o.id ? (
+                        <>
+                          <p className="flex-1 min-w-0 text-xs text-gray-600 truncate">「{o.name}」を削除しますか？</p>
+                          <button onClick={() => removeInterviewer(o)} disabled={ivBusy}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => setIvDelId(null)}
+                            className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="flex-1 min-w-0 text-sm truncate">{o.name}</p>
+                          <span className="shrink-0 text-[11px] text-gray-400">{interviewerUsage(o.name)}件</span>
+                          <button onClick={() => moveInterviewer(i, -1)} disabled={i === 0 || ivBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▲</button>
+                          <button onClick={() => moveInterviewer(i, 1)} disabled={i === interviewerOptions.length - 1 || ivBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▼</button>
+                          <button onClick={() => { setIvEditId(o.id); setIvEditName(o.name); setIvDelId(null); }}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                          <button onClick={() => { setIvDelId(o.id); setIvEditId(null); }} aria-label={`${o.name}を削除`} className="shrink-0 text-gray-300 p-1"><Trash2 size={14} /></button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-1.5 mt-2">
+                  <input value={ivNewName} onChange={(e) => setIvNewName(e.target.value)}
+                    onKeyDown={async (e) => { if (e.key === "Enter" && ivNewName.trim()) { await addInterviewer(ivNewName); setIvNewName(""); } }}
+                    placeholder="担当者を追加（例：今井）" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
+                  <button onClick={async () => { if (!ivNewName.trim()) return; await addInterviewer(ivNewName); setIvNewName(""); }}
+                    disabled={!ivNewName.trim() || ivBusy}
+                    className="shrink-0 text-xs font-bold px-3 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>追加</button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                  名前を変更すると、その担当者の面談記録も自動で書き換わります。削除しても記録に残っている担当者名はそのままです。
+                </p>
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-1.5 mb-3">
             {[["recent", "日付順"], ["student", "内定者別"]].map(([v, label]) => (
               <button key={v} onClick={() => setMeetView(v)}
@@ -3551,9 +3682,31 @@ function AdminBody({
                 </div>
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">担当者</p>
-                  <input value={meetForm.interviewer} onChange={(e) => setMeetForm({ ...meetForm, interviewer: e.target.value })}
-                    placeholder="例）今井" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  <select value={meetForm.interviewer} onChange={(e) => setMeetForm({ ...meetForm, interviewer: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+                    <option value="">未設定</option>
+                    {interviewerOptions.map((o) => (<option key={o.id} value={o.name}>{o.name}</option>))}
+                    {meetForm.interviewer && !interviewerOptions.some((o) => o.name === meetForm.interviewer) && (
+                      <option value={meetForm.interviewer}>{meetForm.interviewer}（登録外）</option>
+                    )}
+                  </select>
                 </div>
+              </div>
+              <div className="flex gap-1.5">
+                <input value={newInterviewer} onChange={(e) => setNewInterviewer(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && newInterviewer.trim()) {
+                      const nm = newInterviewer.trim();
+                      await addInterviewer(nm); setMeetForm((p) => ({ ...p, interviewer: nm })); setNewInterviewer("");
+                    }
+                  }}
+                  placeholder="担当者を新しく追加" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                <button onClick={async () => {
+                  const nm = (newInterviewer || "").trim();
+                  if (!nm) return;
+                  await addInterviewer(nm); setMeetForm((p) => ({ ...p, interviewer: nm })); setNewInterviewer("");
+                }} disabled={!newInterviewer.trim()}
+                  className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>追加</button>
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-500 mb-1">面談内容</p>
