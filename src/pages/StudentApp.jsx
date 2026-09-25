@@ -1166,6 +1166,27 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         {q.type === "text" ? (
                           <textarea value={svAnswers[q.id] || ""} onChange={(e) => setText(q, e.target.value)} rows={3}
                             placeholder="自由にご記入ください" className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                        ) : q.type === "scale" ? (
+                          <div>
+                            <div className="flex gap-1.5">
+                              {[1, 2, 3, 4, 5].map((v) => {
+                                const on = String(toArr(svAnswers[q.id])[0] || "") === String(v);
+                                return (
+                                  <button key={v} onClick={() => setText(q, String(v))}
+                                    className="flex-1 py-3 text-sm font-bold bg-white"
+                                    style={on
+                                      ? { border: `1px solid ${ROSE}`, background: ROSE, color: IVORY }
+                                      : { border: `1px solid ${HAIR}`, color: INK }}>
+                                    {v}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div className="flex justify-between mt-1.5">
+                              <span className="text-xs" style={{ color: MUTE }}>{q.minLabel || "低い"}</span>
+                              <span className="text-xs" style={{ color: MUTE }}>{q.maxLabel || "高い"}</span>
+                            </div>
+                          </div>
                         ) : (
                           <div className="space-y-2">
                             {(q.options || []).map((o) => {

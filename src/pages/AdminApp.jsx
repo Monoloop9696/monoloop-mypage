@@ -32,6 +32,15 @@ const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", dead
 // 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
 const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
 const deadlineLabel = (d, t) => deadlineText(d, t);
+// モチベーション調査（パルス調査）の設問。毎回同じ設問idを使うので推移が比較できる。
+// 保存先は surveys（学生が読めるのはこのコレクションのため）。pulse:true で通常アンケートと区別する。
+const PULSE_QUESTIONS = [
+  { id: "p_motivation", type: "scale", label: "いまの入社に向けたモチベーションはどのくらいですか？", minLabel: "とても低い", maxLabel: "とても高い", options: [], required: true },
+  { id: "p_connection", type: "scale", label: "会社や社員とのつながりを感じられていますか？", minLabel: "感じない", maxLabel: "とても感じる", options: [], required: true },
+  { id: "p_ready", type: "scale", label: "入社に向けた準備は順調ですか？", minLabel: "進んでいない", maxLabel: "順調", options: [], required: true },
+  { id: "p_anxiety", type: "scale", label: "不安なく過ごせていますか？", minLabel: "不安が大きい", maxLabel: "不安はない", options: [], required: true },
+  { id: "p_free", type: "text", label: "気になっていること・要望があれば教えてください（任意）", options: [], required: false },
+];
 const MEETING_KINDS = ["個別面談", "オンライン面談", "電話", "ランチ面談", "保護者面談", "その他"];
 const EMPTY_MEETING = { uid: "", date: "", time: "", interviewer: "", kind: "個別面談", note: "", next: "" };
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
@@ -422,7 +431,7 @@ function AdminBody({
   useEffect(() => { setEditDetail(false); }, [detailStudent]);
   // 内定者タブを最初に開いたときに、最終ログインを一度だけ取得
   useEffect(() => {
-    if (tab !== "students" || loginsState !== "idle" || !students.length) return;
+    if ((tab !== "students" && tab !== "stats") || loginsState !== "idle" || !students.length) return;
     loadLogins();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, students.length]);
@@ -1252,6 +1261,90 @@ function AdminBody({
     try { await deleteMeeting(id); setMeetDelId(null); }
     catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
+  // ---- モチベーション調査（パルス） ----
+  const pulseRounds = surveys
+    .filter((s) => s.pulse === true && (s.grad || 2027) === selectedYear)
+    .sort((a, b) => (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0));
+  const latestPulse = pulseRounds[pulseRounds.length - 1] || null;
+  const prevPulse = pulseRounds[pulseRounds.length - 2] || null;
+  const scaleIdsOf = (sv) => surveyQuestions(sv).filter((q) => q.type === "scale").map((q) => q.id);
+  // その学生のそのラウンドの平均スコア（1〜5）。未回答は null
+  const pulseScore = (sv, uid) => {
+    if (!sv) return null;
+    const a = respMap[`${sv.id}_${uid}`];
+    if (!a) return null;
+    const vals = scaleIdsOf(sv)
+      .map((id) => Number(Array.isArray(a[id]) ? a[id][0] : a[id]))
+      .filter((v) => Number.isFinite(v) && v > 0);
+    return vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null;
+  };
+  const pulseAvg = (sv) => {
+    const vals = activeStudents.map((st) => pulseScore(sv, st.id)).filter((v) => v != null);
+    return vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null;
+  };
+  const createPulseRound = async () => {
+    const now = new Date();
+    const p2 = (n) => String(n).padStart(2, "0");
+    const due = new Date(now.getTime() + 7 * 86400000);
+    const dueDate = `${due.getFullYear()}-${p2(due.getMonth() + 1)}-${p2(due.getDate())}`;
+    try {
+      await addSurvey({
+        title: `モチベーション調査 ${now.getFullYear()}年${now.getMonth() + 1}月`,
+        desc: "毎月のかんたんな調査です。いまの気持ちに一番近いものを選んでください（所要1分）。回答内容が選考や評価に影響することはありません。",
+        pulse: true,
+        dueDate, dueTime: null, due: deadlineText(dueDate, null, "期限なし"), time: "約1分",
+        questions: PULSE_QUESTIONS, sections: [],
+        audience: { type: "all" }, areas: [], areaBasis: "either", targetUids: null,
+        grad: selectedYear, published: true,
+      });
+    } catch (ex) { setBanner(`調査の作成に失敗しました：${ex.message}`); }
+  };
+  // 要フォロー判定：スコアの推移と、システムに溜まっている行動データを組み合わせる
+  const followUpOf = (st) => {
+    const reasons = [];
+    let point = 0;
+    const cur = pulseScore(latestPulse, st.id);
+    const prev = pulseScore(prevPulse, st.id);
+    if (latestPulse && cur == null) { point += 2; reasons.push({ t: "調査が未回答", a: "回答を個別に依頼" }); }
+    if (cur != null) {
+      if (cur <= 2.5) { point += 3; reasons.push({ t: `スコアが低い（${cur.toFixed(1)}）`, a: "早めに1on1を設定" }); }
+      else if (cur <= 3.5) { point += 1; reasons.push({ t: `スコアがやや低い（${cur.toFixed(1)}）`, a: "様子を確認" }); }
+      if (prev != null) {
+        const d = cur - prev;
+        if (d <= -1) { point += 3; reasons.push({ t: `前回から大きく低下（${d.toFixed(1)}）`, a: "変化の理由をヒアリング" }); }
+        else if (d <= -0.5) { point += 1; reasons.push({ t: `前回より低下（${d.toFixed(1)}）`, a: "近況を確認" }); }
+      }
+    }
+    // ログインの間隔
+    const lg = logins[st.id];
+    const last = lg && lg.lastSignInTime ? new Date(lg.lastSignInTime).getTime() : null;
+    if (loginsState === "done") {
+      if (!last) { point += 2; reasons.push({ t: "一度もログインしていない", a: "ログイン方法を案内" }); }
+      else {
+        const days = Math.floor((Date.now() - last) / 86400000);
+        if (days >= 30) { point += 2; reasons.push({ t: `${days}日ログインなし`, a: "LINEや電話で接触" }); }
+        else if (days >= 14) { point += 1; reasons.push({ t: `${days}日ログインなし`, a: "お知らせや記事で接点をつくる" }); }
+      }
+    }
+    // イベント・アンケートの反応
+    const evAbsent = taskTargets.events.filter(({ item, set }) => set.has(st.id) && rsvpOf(st, item) === "欠席").length;
+    const evNone = taskTargets.events.filter(({ item, set }) => set.has(st.id) && rsvpOf(st, item) === "未回答").length;
+    if (evAbsent >= 2) { point += 2; reasons.push({ t: `イベント欠席 ${evAbsent}回`, a: "参加しやすい日程を個別調整" }); }
+    if (evNone >= 2) { point += 1; reasons.push({ t: `イベント未回答 ${evNone}件`, a: "出欠の回答を個別に依頼" }); }
+    const svNone = taskTargets.surveys.filter(({ item, set }) => set.has(st.id) && !respMap[`${item.id}_${st.id}`]).length;
+    if (svNone >= 2) { point += 1; reasons.push({ t: `アンケート未回答 ${svNone}件`, a: "回答を個別に依頼" }); }
+    // 面談の間隔
+    const ms = meetingsOf(st.id);
+    if (ms.length === 0) { point += 1; reasons.push({ t: "面談の記録なし", a: "初回の面談を設定" }); }
+    else {
+      const d = Math.floor((Date.now() - new Date(ms[0].date).getTime()) / 86400000);
+      if (Number.isFinite(d) && d >= 90) { point += 1; reasons.push({ t: `前回の面談から${d}日`, a: "面談を設定" }); }
+    }
+    if (!st.lineUserId) { point += 1; reasons.push({ t: "LINE未連携", a: "連携を案内（連絡が届きやすくなる）" }); }
+    const level = point >= 5 ? "高" : point >= 3 ? "中" : "低";
+    return { point, level, reasons, cur, prev };
+  };
+
   // 担当者ごとの面談件数
   const interviewerUsage = (name) => allMeetings.filter((m) => (m.interviewer || "") === name).length;
   // 名称変更：選択肢と、その担当者が入っている面談記録もあわせて更新
@@ -2218,7 +2311,10 @@ function AdminBody({
                   <button onClick={() => setExpandedSurvey(open ? null : s.id)} className="w-full text-left p-4">
                     <div className="flex justify-between text-sm gap-2">
                       <div className="min-w-0">
-                        <p className="font-bold truncate">{s.title}</p>
+                        <p className="font-bold truncate">
+                          {s.title}
+                          {s.pulse && <span className="ml-1.5 text-[11px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>モチベ調査</span>}
+                        </p>
                         <p className="text-xs mt-0.5" style={{ color: surveyIsClosed(s) ? "#B45309" : "#6B7280" }}>
                           回答期限：{s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし"}
                           {surveyIsClosed(s) ? "（受付終了）" : ""}
@@ -2267,6 +2363,39 @@ function AdminBody({
                                     <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
                                   </div>
                                 ))}
+                              </div>
+                            );
+                          }
+                          if (q.type === "scale") {
+                            const vals = answered
+                              .map((x) => Number(Array.isArray(x.a[q.id]) ? x.a[q.id][0] : x.a[q.id]))
+                              .filter((v) => Number.isFinite(v) && v > 0);
+                            const avg = vals.length ? vals.reduce((a1, b1) => a1 + b1, 0) / vals.length : null;
+                            return (
+                              <div key={q.id}>
+                                {secHead(qi)}
+                                <p className="text-xs font-bold text-gray-500 mb-2">
+                                  Q{qi + 1}. {q.label}
+                                  <span className="font-normal text-gray-400 ml-1">（5段階評価）</span>
+                                </p>
+                                <p className="text-sm font-bold mb-1.5" style={{ color: "#4F46E5" }}>
+                                  平均 {avg != null ? avg.toFixed(2) : "—"} / 5.00
+                                  <span className="text-xs font-normal text-gray-400 ml-1.5">回答 {vals.length}名</span>
+                                </p>
+                                {[5, 4, 3, 2, 1].map((v) => {
+                                  const c = vals.filter((x) => x === v).length;
+                                  return (
+                                    <div key={v} className="mb-1.5">
+                                      <div className="flex justify-between text-xs mb-0.5">
+                                        <span className="text-gray-700">{v}{v === 5 ? `（${q.maxLabel || "高い"}）` : v === 1 ? `（${q.minLabel || "低い"}）` : ""}</span>
+                                        <span className="text-gray-400">{c}名</span>
+                                      </div>
+                                      <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                                        <div className="h-full rounded-full" style={{ width: `${vals.length ? (c / vals.length) * 100 : 0}%`, background: "#4F46E5" }} />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             );
                           }
@@ -3113,6 +3242,97 @@ function AdminBody({
             </div>
 
             <div className={pc ? "grid grid-cols-2 gap-4 items-start" : "space-y-4"}>
+              <div className={pc ? "col-span-2" : ""}>
+                <Card title={`モチベーション調査（${selectedYear - 2000}卒）`}
+                  note="毎回同じ設問なので回を重ねるほど推移が見えます。回答は通常のアンケートと同じ画面から行えます（概況タブでも集計を確認できます）。">
+                  <div className="flex items-center gap-2 flex-wrap mb-3">
+                    <button onClick={createPulseRound}
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
+                      ＋ 今回の調査を実施する
+                    </button>
+                    <span className="text-xs text-gray-400">在籍中の{activeStudents.length}名に配信されます（設問4問＋自由記述・回答期限7日）</span>
+                  </div>
+                  {pulseRounds.length === 0 ? (
+                    <p className="text-xs text-gray-400">まだ実施していません。「＋ 今回の調査を実施する」で1回目を作成してください。</p>
+                  ) : (
+                    <>
+                      <p className="text-[11px] font-bold text-gray-400 mb-1">全体平均スコアの推移（5点満点）</p>
+                      {pulseRounds.map((r) => {
+                        const avg = pulseAvg(r);
+                        const answeredN = activeStudents.filter((st) => pulseScore(r, st.id) != null).length;
+                        return (
+                          <div key={r.id} className="mb-2">
+                            <div className="flex justify-between text-xs mb-0.5 gap-2">
+                              <span className="text-gray-700 truncate">{r.title}</span>
+                              <span className="text-gray-500 shrink-0">
+                                {avg != null ? `${avg.toFixed(2)} / 5` : "回答なし"}・{answeredN}/{activeStudents.length}名
+                              </span>
+                            </div>
+                            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${avg ? (avg / 5) * 100 : 0}%`, background: "#4F46E5" }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                </Card>
+              </div>
+
+              <div className={pc ? "col-span-2" : ""}>
+                <Card title="フォローが必要そうな内定者"
+                  note="調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化して並べています。あくまで目安なので、最終的な判断は担当者の方でお願いします。">
+                  {(() => {
+                    const rows = activeStudents
+                      .map((st) => ({ st, f: followUpOf(st) }))
+                      .filter((r) => r.f.reasons.length > 0)
+                      .sort((a, b) => b.f.point - a.f.point || (a.st.kana || a.st.name || "").localeCompare(b.st.kana || b.st.name || "", "ja"));
+                    if (rows.length === 0) return <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>;
+                    const color = (lv) => (lv === "高" ? "#DC2626" : lv === "中" ? "#B45309" : "#6B7280");
+                    const bg = (lv) => (lv === "高" ? "#FEF2F2" : lv === "中" ? "#FFF7E6" : "#F6F7F9");
+                    return (
+                      <div className="space-y-2">
+                        {rows.map(({ st, f }) => (
+                          <div key={st.id} className="border rounded-xl p-3" style={{ borderColor: "#E5E7EB", background: bg(f.level) }}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-sm font-bold truncate">
+                                  {st.name}
+                                  <span className="ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full align-middle"
+                                    style={{ background: "#fff", color: color(f.level), border: `1px solid ${color(f.level)}` }}>
+                                    要フォロー {f.level}
+                                  </span>
+                                </p>
+                                <p className="text-xs text-gray-500 mt-0.5">
+                                  最新スコア {f.cur != null ? `${f.cur.toFixed(1)}/5` : "未回答"}
+                                  {f.prev != null && f.cur != null ? `（前回 ${f.prev.toFixed(1)} → ${f.cur > f.prev ? "+" : ""}${(f.cur - f.prev).toFixed(1)}）` : ""}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button onClick={() => openMeetForm(null, st.id)}
+                                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                                  面談を記録
+                                </button>
+                                <button onClick={() => setDetailStudent(st.id)}
+                                  className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">詳細</button>
+                              </div>
+                            </div>
+                            <div className="mt-2 space-y-1">
+                              {f.reasons.map((r) => (
+                                <p key={r.t} className="text-xs text-gray-700">
+                                  <span className="font-bold">{r.t}</span>
+                                  <span className="text-gray-500"> → {r.a}</span>
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </Card>
+              </div>
+
               <Card title="採用ファネル" note="テストアカウントは除外しています。内定を出した人数を母数に、承諾率・辞退率を算出しています。">
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[["内定を出した", n], ["承諾", cAccepted], ["検討中（内定）", cPending], ["辞退", cDeclinedPre + cDeclinedPost]].map(([k, v]) => (
