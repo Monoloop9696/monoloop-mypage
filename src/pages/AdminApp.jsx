@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle } from "../components/common";
@@ -20,6 +20,7 @@ import {
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   addSourceOption, updateSourceOption, deleteSourceOption,
+  addMeeting, updateMeeting, deleteMeeting,
   listenCohorts, createCohort, setCohortActive, setCohortPassword,
   listenNotices, addNotice, deleteNotice,
   listenAllArticles, addArticle, updateArticle, addArticleImage, deleteArticleCascade,
@@ -30,6 +31,8 @@ const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", dead
 // 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
 const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
 const deadlineLabel = (d, t) => deadlineText(d, t);
+const MEETING_KINDS = ["個別面談", "オンライン面談", "電話", "ランチ面談", "保護者面談", "その他"];
+const EMPTY_MEETING = { uid: "", date: "", time: "", interviewer: "", kind: "個別面談", note: "", next: "" };
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
 const VISIBLE_ITEMS = 3;
 const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
@@ -393,6 +396,17 @@ function AdminBody({
   const [srcBusy, setSrcBusy] = useState(false);
   const [srcDelId, setSrcDelId] = useState(null);
   const [showTargetPicker, setShowTargetPicker] = useState(false); // LINE配信の対象を選ぶモーダル
+  // 面談記録
+  const [meetOpen, setMeetOpen] = useState(false);
+  const [meetEditId, setMeetEditId] = useState(null);
+  const [meetForm, setMeetForm] = useState(EMPTY_MEETING);
+  const [meetBusy, setMeetBusy] = useState(false);
+  const [meetErr, setMeetErr] = useState("");
+  const [meetSearch, setMeetSearch] = useState("");
+  const [meetDelId, setMeetDelId] = useState(null);
+  const [meetView, setMeetView] = useState("recent"); // recent=日付順 / student=学生別
+  // 分析
+  const [statsAllYears, setStatsAllYears] = useState(false);
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -1172,7 +1186,54 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting");
+  // ---- 面談記録 ----
+  const allMeetings = savedTemplates.filter((t) => t._type === "meeting");
+  const yearMeetings = allMeetings
+    .filter((m) => (m.grad || 2027) === selectedYear)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+  const meetingsOf = (uid) => allMeetings.filter((m) => m.uid === uid)
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const openMeetForm = (m, uid) => {
+    setMeetErr("");
+    if (m) {
+      setMeetEditId(m.id);
+      setMeetForm({ uid: m.uid || "", date: m.date || "", time: m.time || "", interviewer: m.interviewer || "", kind: m.kind || "個別面談", note: m.note || "", next: m.next || "" });
+    } else {
+      setMeetEditId(null);
+      const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })();
+      setMeetForm({ ...EMPTY_MEETING, uid: uid || "", date: today });
+    }
+    setMeetOpen(true);
+  };
+  const closeMeetForm = () => { setMeetOpen(false); setMeetEditId(null); setMeetForm(EMPTY_MEETING); setMeetErr(""); };
+  const saveMeeting = async () => {
+    if (!meetForm.uid) { setMeetErr("対象の内定者を選んでください。"); return; }
+    if (!meetForm.date) { setMeetErr("面談日を入力してください。"); return; }
+    const st = students.find((x) => x.id === meetForm.uid);
+    setMeetBusy(true);
+    try {
+      const data = {
+        uid: meetForm.uid,
+        name: st ? st.name : "",
+        grad: st ? (st.grad || selectedYear) : selectedYear,
+        date: meetForm.date,
+        time: meetForm.time || "",
+        interviewer: (meetForm.interviewer || "").trim(),
+        kind: meetForm.kind || "個別面談",
+        note: (meetForm.note || "").trim(),
+        next: meetForm.next || "",
+      };
+      if (meetEditId) await updateMeeting(meetEditId, data);
+      else await addMeeting(data);
+      closeMeetForm();
+    } catch (ex) { setMeetErr(`保存に失敗しました：${ex.message}`); }
+    finally { setMeetBusy(false); }
+  };
+  const removeMeeting = async (id) => {
+    try { await deleteMeeting(id); setMeetDelId(null); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+  };
   // 流入経路（媒体・紹介会社）の選択肢
   const sourceOptions = savedTemplates
     .filter((t) => t._type === "source")
@@ -1386,12 +1447,14 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen)
   );
 
   const tabs = [
     { key: "dash", label: "概況", icon: BarChart3 },
     { key: "students", label: "内定者", icon: Users },
+    { key: "meet", label: "面談", icon: CalendarDays },
+    { key: "stats", label: "分析", icon: TrendingUp },
     { key: "news", label: "記事", icon: Newspaper },
     { key: "qbox", label: "質問箱", icon: HelpCircle },
     { key: "line", label: "LINE配信", icon: Send },
@@ -2730,6 +2793,298 @@ function AdminBody({
         </div>
       )}
 
+      {tab === "meet" && (
+        <div className={pc ? "pt-5" : "px-4 pt-4"}>
+          <div className="flex items-center justify-between gap-2">
+            <SectionTitle>面談記録（{selectedYear - 2000}卒）</SectionTitle>
+            <button onClick={() => openMeetForm(null)}
+              className="text-xs font-bold px-3 py-1.5 rounded-lg text-white mb-3" style={{ background: BRAND }}>
+              ＋ 面談を記録
+            </button>
+          </div>
+
+          <div className="flex gap-1.5 mb-3">
+            {[["recent", "日付順"], ["student", "内定者別"]].map(([v, label]) => (
+              <button key={v} onClick={() => setMeetView(v)}
+                className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                style={meetView === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input value={meetSearch} onChange={(e) => setMeetSearch(e.target.value)}
+              placeholder="氏名・面談者・内容で検索"
+              className="w-full border border-gray-300 rounded-lg pl-9 pr-9 py-2.5 text-sm" />
+            {meetSearch && (
+              <button onClick={() => setMeetSearch("")} aria-label="検索をクリア"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 p-0.5"><X size={15} /></button>
+            )}
+          </div>
+
+          {(() => {
+            const q = meetSearch.trim().toLowerCase();
+            const hit = (m) => !q || [m.name, m.interviewer, m.note, m.kind].some((v) => (v || "").toLowerCase().includes(q));
+            const list = yearMeetings.filter(hit);
+            const MeetCard = (m) => (
+              <div key={m.id} className="bg-white border border-gray-200 rounded-xl p-3 mb-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold truncate">{m.name || "（削除された内定者）"}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `・担当 ${m.interviewer}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {meetDelId === m.id ? (
+                      <>
+                        <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                        <button onClick={() => setMeetDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                        <button onClick={() => setMeetDelId(m.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {m.note && <p className="text-xs text-gray-700 mt-2 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
+              </div>
+            );
+            if (meetView === "recent") {
+              return list.length === 0
+                ? <p className="text-xs text-gray-400">面談の記録はまだありません。</p>
+                : <div>{list.map(MeetCard)}</div>;
+            }
+            // 内定者別：未実施の学生も出す
+            const rows = activeStudents
+              .filter((st) => !q || (st.name || "").toLowerCase().includes(q) || meetingsOf(st.id).some(hit))
+              .map((st) => ({ st, ms: meetingsOf(st.id).filter((m) => (m.grad || selectedYear) === selectedYear) }));
+            return (
+              <div className="space-y-2">
+                {rows.length === 0 && <p className="text-xs text-gray-400">該当する内定者がいません。</p>}
+                {rows.map(({ st, ms }) => (
+                  <div key={st.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold truncate">{st.name}</p>
+                        <p className="text-xs text-gray-400">
+                          {ms.length ? `面談 ${ms.length}回・最終 ${ms[0].date}` : "面談の記録なし"}
+                        </p>
+                      </div>
+                      <button onClick={() => openMeetForm(null, st.id)}
+                        className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                        ＋ 記録
+                      </button>
+                    </div>
+                    {ms.slice(0, 2).map((m) => (
+                      <div key={m.id} className="mt-2 rounded-lg p-2" style={{ background: "#F6F7F9" }}>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
+                          <button onClick={() => openMeetForm(m)} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
+                        </div>
+                        {m.note && <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                      </div>
+                    ))}
+                    {ms.length > 2 && <p className="text-[11px] text-gray-400 mt-1">ほか{ms.length - 2}件（「日付順」で全件表示）</p>}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {tab === "stats" && (() => {
+        // 分析対象：テストアカウントは除外。全年度 or 表示中の卒年度
+        const pool = (statsAllYears ? students : yearStudents).filter((s) => s.status !== "テスト");
+        const n = pool.length;
+        const cAccepted = pool.filter((s) => s.status === "承諾").length;
+        const cPending = pool.filter((s) => s.status === "内定").length;
+        const cDeclinedPre = pool.filter((s) => s.status === "辞退").length;
+        const cDeclinedPost = pool.filter((s) => s.status === "承諾後辞退").length;
+        const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : 0);
+
+        const groupRows = (list, keyFn) => {
+          const m = new Map();
+          list.forEach((x) => {
+            const k = keyFn(x);
+            const cur = m.get(k) || { label: k, count: 0, accepted: 0, declined: 0 };
+            cur.count += 1;
+            if (x.status === "承諾") cur.accepted += 1;
+            if (x.status === "辞退" || x.status === "承諾後辞退") cur.declined += 1;
+            m.set(k, cur);
+          });
+          return [...m.values()];
+        };
+        const byCount = (a, b) => b.count - a.count || a.label.localeCompare(b.label, "ja");
+        const areaRows = groupRows(pool, (s) => areaLabel(addressArea(s.address)) || "不明").sort(byCount);
+        const sourceRows = groupRows(pool, (s) => s.source || "未設定").sort(byCount);
+        const univRows = groupRows(pool.filter((s) => (s.univ || "").trim()), (s) => s.univ.trim()).sort(byCount).slice(0, 8);
+        const monthRows = (key) => {
+          const rows = groupRows(pool.filter((s) => (s[key] || "").length >= 7), (s) => s[key].slice(0, 7));
+          return rows.sort((a, b) => a.label.localeCompare(b.label));
+        };
+        const offerMonths = monthRows("offerDate");
+        const acceptMonths = monthRows("acceptDate");
+        // 内定 → 承諾までの日数
+        const days = pool
+          .filter((s) => s.offerDate && s.acceptDate)
+          .map((s) => Math.round((new Date(s.acceptDate) - new Date(s.offerDate)) / 86400000))
+          .filter((d) => Number.isFinite(d) && d >= 0)
+          .sort((a, b) => a - b);
+        const avgDays = days.length ? Math.round(days.reduce((a, b) => a + b, 0) / days.length) : null;
+        const medDays = days.length ? days[Math.floor(days.length / 2)] : null;
+        // エンゲージメント（表示中の卒年度のみ）
+        const lineRate = pct(activeStudents.filter((s) => s.lineUserId).length, activeStudents.length);
+        const evRates = yearEvents.map((e) => {
+          const aud = eventAudience(e);
+          return { label: e.title, count: aud.filter((st) => rsvpOf(st, e) === "出席").length, total: aud.length };
+        });
+        const svRates = yearSurveys.map((sv) => {
+          const aud = surveyAudience(sv);
+          return { label: sv.title, count: aud.filter((st) => respMap[`${sv.id}_${st.id}`]).length, total: aud.length };
+        });
+
+        const Bar = ({ label, value, max, sub, color = BRAND }) => (
+          <div className="mb-2">
+            <div className="flex justify-between text-xs mb-0.5 gap-2">
+              <span className="text-gray-700 truncate">{label}</span>
+              <span className="text-gray-500 shrink-0">{sub}</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${max ? (value / max) * 100 : 0}%`, background: color }} />
+            </div>
+          </div>
+        );
+        const Card = ({ title, note, children }) => (
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <p className="text-xs font-bold text-gray-500 mb-2">{title}</p>
+            {children}
+            {note && <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">{note}</p>}
+          </div>
+        );
+        const maxOf = (rows) => rows.reduce((m, r) => Math.max(m, r.count), 0);
+
+        return (
+          <div className={pc ? "pt-5" : "px-4 pt-4"}>
+            <div className="flex items-center justify-between gap-2">
+              <SectionTitle>分析{statsAllYears ? "（全年度）" : `（${selectedYear - 2000}卒）`}</SectionTitle>
+              <button onClick={() => setStatsAllYears((v) => !v)}
+                className="text-xs font-bold px-3 py-1.5 rounded-lg border mb-3"
+                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                {statsAllYears ? "この卒年度だけ" : "全年度で見る"}
+              </button>
+            </div>
+
+            <div className={pc ? "grid grid-cols-2 gap-4 items-start" : "space-y-4"}>
+              <Card title="採用ファネル" note="テストアカウントは除外しています。内定を出した人数を母数に、承諾率・辞退率を算出しています。">
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[["内定を出した", n], ["承諾", cAccepted], ["検討中（内定）", cPending], ["辞退", cDeclinedPre + cDeclinedPost]].map(([k, v]) => (
+                    <div key={k} className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                      <p className="text-[11px] text-gray-500">{k}</p>
+                      <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-400 ml-0.5">名</span></p>
+                    </div>
+                  ))}
+                </div>
+                <Bar label="承諾率" value={cAccepted} max={n} sub={`${pct(cAccepted, n)}%`} />
+                <Bar label="辞退率" value={cDeclinedPre + cDeclinedPost} max={n} sub={`${pct(cDeclinedPre + cDeclinedPost, n)}%`} color="#DC2626" />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  内訳：承諾前の辞退 {cDeclinedPre}名／承諾後の辞退 {cDeclinedPost}名
+                </p>
+              </Card>
+
+              <Card title="内定 → 承諾までの日数" note="内定出し日と内定承諾日の両方が入力されている人だけを集計しています。">
+                {days.length === 0 ? (
+                  <p className="text-xs text-gray-400">内定出し日・内定承諾日を入力すると集計されます。</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {[["平均", avgDays], ["中央値", medDays], ["最短", days[0]], ].map(([k, v]) => (
+                      <div key={k} className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                        <p className="text-[11px] text-gray-500">{k}</p>
+                        <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-400 ml-0.5">日</span></p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {days.length > 0 && <p className="text-[11px] text-gray-400 mt-2">対象 {days.length}名・最長 {days[days.length - 1]}日</p>}
+              </Card>
+
+              <Card title="エリア別（現住所）" note="住所の先頭の都道府県名から判定しています。都道府県が入っていない住所は「不明」になります。">
+                {areaRows.length === 0 ? <p className="text-xs text-gray-400">データがありません。</p> : areaRows.map((r) => (
+                  <Bar key={r.label} label={r.label} value={r.count} max={maxOf(areaRows)} sub={`${r.count}名・承諾${r.accepted}`} />
+                ))}
+              </Card>
+
+              <Card title="流入経路別" note="承諾率＝その経路の承諾者 ÷ その経路の内定者。母数が小さいときは参考値としてご覧ください。">
+                {sourceRows.length === 0 ? <p className="text-xs text-gray-400">データがありません。</p> : sourceRows.map((r) => (
+                  <Bar key={r.label} label={r.label} value={r.count} max={maxOf(sourceRows)}
+                    sub={`${r.count}名・承諾${r.accepted}（${pct(r.accepted, r.count)}%）`} />
+                ))}
+              </Card>
+
+              <Card title="内定を出した時期（月別）">
+                {offerMonths.length === 0 ? <p className="text-xs text-gray-400">内定出し日を入力すると集計されます。</p> : offerMonths.map((r) => (
+                  <Bar key={r.label} label={r.label.replace("-", "/")} value={r.count} max={maxOf(offerMonths)} sub={`${r.count}名`} />
+                ))}
+              </Card>
+
+              <Card title="承諾された時期（月別）">
+                {acceptMonths.length === 0 ? <p className="text-xs text-gray-400">内定承諾日を入力すると集計されます。</p> : acceptMonths.map((r) => (
+                  <Bar key={r.label} label={r.label.replace("-", "/")} value={r.count} max={maxOf(acceptMonths)} sub={`${r.count}名`} color="#1E874B" />
+                ))}
+              </Card>
+
+              <Card title="大学別（上位8校）">
+                {univRows.length === 0 ? <p className="text-xs text-gray-400">大学が未登録です。</p> : univRows.map((r) => (
+                  <Bar key={r.label} label={r.label} value={r.count} max={maxOf(univRows)} sub={`${r.count}名・承諾${r.accepted}`} />
+                ))}
+              </Card>
+
+              <Card title={`エンゲージメント（${selectedYear - 2000}卒）`} note="出席率・回答率は、それぞれの対象者を母数にしています。">
+                <Bar label="LINE連携率" value={lineRate} max={100} sub={`${lineRate}%`} color={LINE_GREEN} />
+                <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">イベント出席率</p>
+                {evRates.length === 0 ? <p className="text-xs text-gray-400">イベントがありません。</p> : evRates.map((r) => (
+                  <Bar key={r.label} label={r.label} value={r.count} max={r.total} sub={`${r.count}/${r.total}（${pct(r.count, r.total)}%）`} />
+                ))}
+                <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">アンケート回答率</p>
+                {svRates.length === 0 ? <p className="text-xs text-gray-400">アンケートがありません。</p> : svRates.map((r) => (
+                  <Bar key={r.label} label={r.label} value={r.count} max={r.total} sub={`${r.count}/${r.total}（${pct(r.count, r.total)}%）`} color="#5B8DEF" />
+                ))}
+                <button onClick={refreshAnswers} className="text-xs font-bold text-gray-400 mt-2">回答状況を更新</button>
+              </Card>
+
+              <Card title="面談の実施状況" note="面談タブで記録した内容を集計しています。">
+                {(() => {
+                  const target = statsAllYears ? students.filter((s) => !s.deleted && s.status !== "テスト") : activeStudents;
+                  const withMeet = target.filter((st) => meetingsOf(st.id).length > 0).length;
+                  const totalMeet = (statsAllYears ? allMeetings : yearMeetings).length;
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                          <p className="text-[11px] text-gray-500">面談の記録数</p>
+                          <p className="text-lg font-bold">{totalMeet}<span className="text-xs font-normal text-gray-400 ml-0.5">件</span></p>
+                        </div>
+                        <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                          <p className="text-[11px] text-gray-500">実施済みの内定者</p>
+                          <p className="text-lg font-bold">{withMeet}<span className="text-xs font-normal text-gray-400 ml-0.5">/{target.length}名</span></p>
+                        </div>
+                      </div>
+                      <Bar label="面談実施率" value={withMeet} max={target.length} sub={`${pct(withMeet, target.length)}%`} color="#B45309" />
+                    </>
+                  );
+                })()}
+              </Card>
+            </div>
+          </div>
+        );
+      })()}
+
       {tab === "news" && (
         <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-4"}>
           <div className="space-y-3">
@@ -3147,6 +3502,81 @@ function AdminBody({
               </div>
             )}
           </div>
+          </div>
+        </div>
+      )}
+
+      {/* 面談の記録ドロワー */}
+      {meetOpen && (
+        <div className="fixed inset-0 z-[65] flex justify-end">
+          <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeMeetForm} />
+          <div className="ml-drawer relative h-full w-full max-w-lg bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+            <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+              <div className="min-w-0">
+                <p className="text-xs font-bold" style={{ color: BRAND }}>{meetEditId ? "✎ 面談記録を編集" : "面談を記録"}</p>
+                <p className="text-base font-bold truncate">
+                  {(students.find((x) => x.id === meetForm.uid) || {}).name || "内定者を選んでください"}
+                </p>
+              </div>
+              <button onClick={closeMeetForm} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div>
+                <p className="text-xs font-bold text-gray-500 mb-1">内定者<span className="text-red-500 ml-0.5">*</span></p>
+                <select value={meetForm.uid} onChange={(e) => setMeetForm({ ...meetForm, uid: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+                  <option value="">選択してください</option>
+                  {activeStudents.map((st) => (<option key={st.id} value={st.id}>{st.name}（{st.univ || "大学未登録"}）</option>))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">面談日<span className="text-red-500 ml-0.5">*</span></p>
+                  <input type="date" value={meetForm.date} onChange={(e) => setMeetForm({ ...meetForm, date: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">開始時刻</p>
+                  <input type="time" value={meetForm.time} onChange={(e) => setMeetForm({ ...meetForm, time: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">種別</p>
+                  <select value={meetForm.kind} onChange={(e) => setMeetForm({ ...meetForm, kind: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+                    {MEETING_KINDS.map((k) => (<option key={k} value={k}>{k}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">担当者</p>
+                  <input value={meetForm.interviewer} onChange={(e) => setMeetForm({ ...meetForm, interviewer: e.target.value })}
+                    placeholder="例）今井" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-bold text-gray-500 mb-1">面談内容</p>
+                <textarea value={meetForm.note} onChange={(e) => setMeetForm({ ...meetForm, note: e.target.value })} rows={10}
+                  placeholder="話した内容・学生の状況・気になった点・次のアクションなど"
+                  className="w-full border border-gray-300 rounded-lg p-3 text-sm leading-relaxed" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-gray-500 mb-1">次回予定日</p>
+                <input type="date" value={meetForm.next} onChange={(e) => setMeetForm({ ...meetForm, next: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed">
+                面談記録は管理者だけが閲覧できます（学生のマイページには表示されません）。
+              </p>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+              {meetErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{meetErr}</p>}
+              <button onClick={saveMeeting} disabled={meetBusy}
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+                {meetBusy ? "保存中…" : meetEditId ? "更新する" : "記録する"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3670,6 +4100,28 @@ function AdminBody({
                         </div>
                       );
                     })()}
+                    {(() => {
+                      const ms = meetingsOf(d.id);
+                      return (
+                        <div className="mt-3 rounded-lg p-3" style={{ background: "#F6F7F9", border: "1px solid #E5E7EB" }}>
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <p className="text-xs font-bold text-gray-500">面談記録（{ms.length}件）</p>
+                            <button onClick={() => { setDetailStudent(null); openMeetForm(null, d.id); }}
+                              className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                              ＋ 記録する
+                            </button>
+                          </div>
+                          {ms.length === 0 && <p className="text-xs text-gray-400">まだ面談の記録はありません。</p>}
+                          {ms.slice(0, 3).map((m) => (
+                            <div key={m.id} className="bg-white rounded-lg p-2 mb-1.5" style={{ border: "1px solid #E5E7EB" }}>
+                              <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
+                              {m.note && <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                            </div>
+                          ))}
+                          {ms.length > 3 && <p className="text-[11px] text-gray-400">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}
+                        </div>
+                      );
+                    })()}
                     <p className="text-xs text-gray-400 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
                   </>
                 )}
@@ -3728,13 +4180,13 @@ function AdminBody({
             return (
               <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
                 <div className="relative">
-                  <Icon size={20} />
+                  <Icon size={18} />
                   {badge > 0 && (
                     <span className="absolute -top-1.5 -right-2.5 text-white rounded-full font-bold flex items-center justify-center"
                       style={{ background: "#DC2626", fontSize: 9, minWidth: 15, height: 15, padding: "0 3px" }}>{badge}</span>
                   )}
                 </div>
-                <span className="text-xs font-bold">{t.label}</span>
+                <span className="text-[10px] font-bold">{t.label}</span>
               </button>
             );
           })}

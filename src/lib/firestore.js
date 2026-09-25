@@ -388,6 +388,15 @@ export async function addSourceOption({ name, order = 0 }) {
   const ref = await addDoc(collection(db, "templates"), { _type: "source", name, order, createdAt: serverTimestamp() });
   return ref.id;
 }
+// 面談記録。学生に見せない情報なので、管理者のみ read/write の templates に保存する
+// （専用コレクションを作るとセキュリティルールの再デプロイが必要になるため）
+export async function addMeeting(data) {
+  const ref = await addDoc(collection(db, "templates"), { _type: "meeting", ...data, createdAt: serverTimestamp() });
+  return ref.id;
+}
+export const updateMeeting = (id, patch) => updateDoc(doc(db, "templates", id), patch);
+export const deleteMeeting = (id) => deleteDoc(doc(db, "templates", id));
+
 export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
