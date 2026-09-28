@@ -42,7 +42,26 @@ const PULSE_QUESTIONS = [
   { id: "p_free", type: "text", label: "気になっていること・要望があれば教えてください", options: [], required: false },
 ];
 const MEETING_KINDS = ["個別面談", "オンライン面談", "電話", "ランチ面談", "保護者面談", "その他"];
-const EMPTY_MEETING = { uid: "", date: "", time: "", interviewer: "", kind: "個別面談", note: "", next: "" };
+// 面談内容の項目。key は Firestore の保存先、label は画面表示
+const MEETING_SECTIONS = [
+  { key: "noteUniv", label: "大学の状況" },
+  { key: "noteJob", label: "就活の状況（他社選考・モノループへの気持ち）" },
+  { key: "noteWorry", label: "ご自身の不安な点" },
+  { key: "noteParent", label: "ご両親などからの質問" },
+  { key: "noteOther", label: "その他" },
+];
+const EMPTY_MEETING = {
+  uid: "", date: "", time: "", interviewer: "", kind: "個別面談", next: "",
+  noteUniv: "", noteJob: "", noteWorry: "", noteParent: "", noteOther: "",
+};
+// 項目ごとの記入内容を取り出す。項目分けする前の記録（note）は「面談内容」として1件返す
+const meetingBody = (m) => {
+  const parts = MEETING_SECTIONS
+    .filter((s) => (m[s.key] || "").trim())
+    .map((s) => ({ key: s.key, label: s.label, text: (m[s.key] || "").trim() }));
+  if (parts.length === 0 && (m.note || "").trim()) return [{ key: "note", label: "面談内容", text: m.note.trim() }];
+  return parts;
+};
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
 const VISIBLE_ITEMS = 3;
 const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", pulse: false, questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
@@ -416,6 +435,7 @@ function AdminBody({
   const [meetSearch, setMeetSearch] = useState("");
   const [meetDelId, setMeetDelId] = useState(null);
   const [meetView, setMeetView] = useState("recent"); // recent=日付順 / student=学生別
+  const [meetHistOpen, setMeetHistOpen] = useState(false); // スマホで過去の記録を開く
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
   const [showIvMgr, setShowIvMgr] = useState(false); // 担当者の管理パネル
   const [ivEditId, setIvEditId] = useState(null);
@@ -1232,7 +1252,13 @@ function AdminBody({
     setMeetErr("");
     if (m) {
       setMeetEditId(m.id);
-      setMeetForm({ uid: m.uid || "", date: m.date || "", time: m.time || "", interviewer: m.interviewer || "", kind: m.kind || "個別面談", note: m.note || "", next: m.next || "" });
+      const hasNew = MEETING_SECTIONS.some((s) => (m[s.key] || "").trim());
+      setMeetForm({
+        uid: m.uid || "", date: m.date || "", time: m.time || "", interviewer: m.interviewer || "", kind: m.kind || "個別面談", next: m.next || "",
+        noteUniv: m.noteUniv || "", noteJob: m.noteJob || "", noteWorry: m.noteWorry || "", noteParent: m.noteParent || "",
+        // 項目分けする前の記録は「その他」に読み込む（内容が消えないように）
+        noteOther: m.noteOther || (hasNew ? "" : (m.note || "")),
+      });
     } else {
       setMeetEditId(null);
       const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })();
@@ -1255,8 +1281,9 @@ function AdminBody({
         time: meetForm.time || "",
         interviewer: (meetForm.interviewer || "").trim(),
         kind: meetForm.kind || "個別面談",
-        note: (meetForm.note || "").trim(),
         next: meetForm.next || "",
+        note: "", // 項目分け前の内容は編集時に「その他」へ移しているので空にする
+        ...Object.fromEntries(MEETING_SECTIONS.map((s) => [s.key, (meetForm[s.key] || "").trim()])),
       };
       if (meetEditId) await updateMeeting(meetEditId, data);
       else await addMeeting(data);
@@ -3190,7 +3217,12 @@ function AdminBody({
                     )}
                   </div>
                 </div>
-                {m.note && <p className="text-xs text-gray-700 mt-2 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                {meetingBody(m).map((b) => (
+                  <div key={b.key} className="mt-2">
+                    <p className="text-[11px] font-bold" style={{ color: BRAND }}>{b.label}</p>
+                    <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                  </div>
+                ))}
                 {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
               </div>
             );
@@ -3226,7 +3258,12 @@ function AdminBody({
                           <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
                           <button onClick={() => openMeetForm(m)} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
                         </div>
-                        {m.note && <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                        {meetingBody(m).map((b) => (
+                          <div key={b.key} className="mt-1">
+                            <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
+                            <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                          </div>
+                        ))}
                       </div>
                     ))}
                     {ms.length > 2 && <p className="text-[11px] text-gray-400 mt-1">ほか{ms.length - 2}件（「日付順」で全件表示）</p>}
@@ -3964,7 +4001,7 @@ function AdminBody({
       {meetOpen && (
         <div className="fixed inset-0 z-[65] flex justify-end">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeMeetForm} />
-          <div className="ml-drawer relative h-full w-full max-w-lg bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+          <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-5xl" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
               <div className="min-w-0">
                 <p className="text-xs font-bold" style={{ color: BRAND }}>{meetEditId ? "✎ 面談記録を編集" : "面談を記録"}</p>
@@ -3974,7 +4011,8 @@ function AdminBody({
               </div>
               <button onClick={closeMeetForm} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            <div className={pc ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"}>
+            <div className={pc ? "w-1/2 overflow-y-auto px-5 py-4 space-y-3 border-r border-gray-200" : "px-5 py-4 space-y-3"}>
               <div>
                 <p className="text-xs font-bold text-gray-500 mb-1">内定者<span className="text-red-500 ml-0.5">*</span></p>
                 <select value={meetForm.uid} onChange={(e) => setMeetForm({ ...meetForm, uid: e.target.value })}
@@ -4031,12 +4069,15 @@ function AdminBody({
                 }} disabled={!newInterviewer.trim()}
                   className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>追加</button>
               </div>
-              <div>
-                <p className="text-xs font-bold text-gray-500 mb-1">面談内容</p>
-                <textarea value={meetForm.note} onChange={(e) => setMeetForm({ ...meetForm, note: e.target.value })} rows={10}
-                  placeholder="話した内容・学生の状況・気になった点・次のアクションなど"
-                  className="w-full border border-gray-300 rounded-lg p-3 text-sm leading-relaxed" />
-              </div>
+              <p className="text-xs font-bold text-gray-500 pt-1">面談内容</p>
+              {MEETING_SECTIONS.map((sec, i) => (
+                <div key={sec.key}>
+                  <p className="text-xs font-bold text-gray-500 mb-1">{i + 1}. {sec.label}</p>
+                  <textarea value={meetForm[sec.key] || ""} onChange={(e) => setMeetForm({ ...meetForm, [sec.key]: e.target.value })} rows={4}
+                    placeholder="記入がなければ空欄のままで構いません"
+                    className="w-full border border-gray-300 rounded-lg p-3 text-sm leading-relaxed" />
+                </div>
+              ))}
               <div>
                 <p className="text-xs font-bold text-gray-500 mb-1">次回予定日</p>
                 <input type="date" value={meetForm.next} onChange={(e) => setMeetForm({ ...meetForm, next: e.target.value })}
@@ -4045,6 +4086,79 @@ function AdminBody({
               <p className="text-[11px] text-gray-400 leading-relaxed">
                 面談記録は管理者だけが閲覧できます（学生のマイページには表示されません）。
               </p>
+            </div>
+
+            {/* 右カラム：その内定者の過去の記録とパルス調査の推移（PCは左右に並べて同時に見られる） */}
+            <div className={pc ? "w-1/2 overflow-y-auto px-5 py-4" : "px-5 pb-4"}>
+              {!pc && (
+                <button onClick={() => setMeetHistOpen((v) => !v)}
+                  className="w-full py-2 rounded-lg text-xs font-bold border mb-2"
+                  style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  {meetHistOpen ? "過去の記録を閉じる ▲" : "過去の記録・パルス調査を見る ▼"}
+                </button>
+              )}
+              {(pc || meetHistOpen) && (() => {
+                const uid = meetForm.uid;
+                if (!uid) return <p className="text-xs text-gray-400">内定者を選ぶと、その方の過去の面談記録とパルス調査の結果がここに表示されます。</p>;
+                const past = meetingsOf(uid).filter((m) => m.id !== meetEditId);
+                const rounds = pulseRounds.filter((r) => pulseScore(r, uid) != null);
+                return (
+                  <div className="space-y-3">
+                    <div className="rounded-xl p-3" style={{ background: "#F6F7F9" }}>
+                      <p className="text-xs font-bold text-gray-500 mb-1.5">パルス調査の推移</p>
+                      {rounds.length === 0 ? (
+                        <p className="text-xs text-gray-400">回答がまだありません。</p>
+                      ) : rounds.map((r) => {
+                        const sc = pulseScore(r, uid);
+                        const avg = pulseAvg(r);
+                        return (
+                          <div key={r.id} className="mb-2">
+                            <div className="flex justify-between text-xs mb-0.5 gap-2">
+                              <span className="text-gray-700 truncate">{r.title}</span>
+                              <span className="text-gray-500 shrink-0">
+                                {sc.toFixed(1)}/5{avg != null ? `（全体 ${avg.toFixed(1)}）` : ""}
+                              </span>
+                            </div>
+                            <div className="h-2 rounded-full bg-white overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${(sc / 5) * 100}%`, background: "#4F46E5" }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {rounds.length > 0 && (() => {
+                        const last = pulseRounds.filter((r) => pulseScore(r, uid) != null);
+                        const free = last.length ? (respMap[`${last[last.length - 1].id}_${uid}`] || {}).p_free : null;
+                        const txt = Array.isArray(free) ? free[0] : free;
+                        return txt ? (
+                          <div className="mt-2 bg-white rounded-lg p-2">
+                            <p className="text-[11px] font-bold text-gray-500">直近の自由記述</p>
+                            <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{txt}</p>
+                          </div>
+                        ) : null;
+                      })()}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 mb-1.5">過去の面談記録（{past.length}件）</p>
+                      {past.length === 0 ? (
+                        <p className="text-xs text-gray-400">過去の記録はありません。</p>
+                      ) : past.map((m) => (
+                        <div key={m.id} className="border border-gray-200 rounded-xl p-3 mb-2">
+                          <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
+                          {meetingBody(m).map((b) => (
+                            <div key={b.key} className="mt-1.5">
+                              <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                            </div>
+                          ))}
+                          {m.next && <p className="text-xs font-bold mt-1.5" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
             </div>
             <div className="px-5 py-3 border-t border-gray-200 shrink-0">
               {meetErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{meetErr}</p>}
@@ -4591,7 +4705,12 @@ function AdminBody({
                           {ms.slice(0, 3).map((m) => (
                             <div key={m.id} className="bg-white rounded-lg p-2 mb-1.5" style={{ border: "1px solid #E5E7EB" }}>
                               <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
-                              {m.note && <p className="text-xs text-gray-600 mt-1 whitespace-pre-wrap leading-relaxed">{m.note}</p>}
+                              {meetingBody(m).map((b) => (
+                                <div key={b.key} className="mt-1">
+                                  <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
+                                  <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                                </div>
+                              ))}
                             </div>
                           ))}
                           {ms.length > 3 && <p className="text-[11px] text-gray-400">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}
