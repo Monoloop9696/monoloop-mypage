@@ -1160,7 +1160,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       <div key={q.id}>
                         <p className="text-sm font-bold mb-2">
                           Q{qi + 1}. {q.label}
-                          {q.type !== "text" && <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>{q.type === "multi" ? "（複数選択可）" : "（1つ選択）"}</span>}
+                          {q.type !== "text" && <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>{q.type === "multi" ? "（複数選択可）" : q.type === "scale" ? "（5段階で選択）" : "（1つ選択）"}</span>}
                           {q.required === false && <span className="ml-1.5 text-xs font-normal" style={{ color: MUTE }}>（任意）</span>}
                         </p>
                         {q.type === "text" ? (

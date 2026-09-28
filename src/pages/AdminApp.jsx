@@ -39,7 +39,7 @@ const PULSE_QUESTIONS = [
   { id: "p_connection", type: "scale", label: "会社や社員とのつながりを感じられていますか？", minLabel: "感じない", maxLabel: "とても感じる", options: [], required: true },
   { id: "p_ready", type: "scale", label: "入社に向けた準備は順調ですか？", minLabel: "進んでいない", maxLabel: "順調", options: [], required: true },
   { id: "p_anxiety", type: "scale", label: "不安なく過ごせていますか？", minLabel: "不安が大きい", maxLabel: "不安はない", options: [], required: true },
-  { id: "p_free", type: "text", label: "気になっていること・要望があれば教えてください（任意）", options: [], required: false },
+  { id: "p_free", type: "text", label: "気になっていること・要望があれば教えてください", options: [], required: false },
 ];
 const MEETING_KINDS = ["個別面談", "オンライン面談", "電話", "ランチ面談", "保護者面談", "その他"];
 const EMPTY_MEETING = { uid: "", date: "", time: "", interviewer: "", kind: "個別面談", note: "", next: "" };
