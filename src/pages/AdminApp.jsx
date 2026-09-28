@@ -32,7 +32,7 @@ const EMPTY_EV = { title: "", date: "", time: "18:00", place: "", copy: "", dead
 // 会場到着ボタンの既定文言（イベントごとに arrivalLabel で上書きできる）
 const ARRIVAL_LABEL_DEFAULT = "会場に到着したら押す";
 const deadlineLabel = (d, t) => deadlineText(d, t);
-// モチベーション調査（パルス調査）の設問。毎回同じ設問idを使うので推移が比較できる。
+// パルス調査（モチベーション・エンゲージメント調査）の設問。毎回同じ設問idを使うので推移が比較できる。
 // 保存先は surveys（学生が読めるのはこのコレクションのため）。pulse:true で通常アンケートと区別する。
 const PULSE_QUESTIONS = [
   { id: "p_motivation", type: "scale", label: "いまの入社に向けたモチベーションはどのくらいですか？", minLabel: "とても低い", maxLabel: "とても高い", options: [], required: true },
@@ -426,6 +426,7 @@ function AdminBody({
   // 分析
   const [statsAllYears, setStatsAllYears] = useState(false);
   const [pulseDelId, setPulseDelId] = useState(null);
+  const [followDrawer, setFollowDrawer] = useState(false); // 要フォロー一覧のドロワー
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -1267,7 +1268,7 @@ function AdminBody({
     try { await deleteMeeting(id); setMeetDelId(null); }
     catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
-  // ---- モチベーション調査（パルス） ----
+  // ---- パルス調査 ----
   const pulseRounds = surveys
     .filter((s) => s.pulse === true && (s.grad || 2027) === selectedYear)
     .sort((a, b) => (a.createdAt?.toMillis?.() || 0) - (b.createdAt?.toMillis?.() || 0));
@@ -1289,7 +1290,9 @@ function AdminBody({
     return vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null;
   };
   // パルス調査は通常のアンケート作成ドロワーを設問入りで開く（対象者・期限を通常どおり指定できる）
+  // ドロワーは概況タブの中に描画しているため、分析タブから開くときは概況へ移動させる
   const startPulseRound = () => {
+    setTab("dash");
     const now = new Date();
     const p2 = (n) => String(n).padStart(2, "0");
     const due = new Date(now.getTime() + 7 * 86400000);
@@ -1297,7 +1300,7 @@ function AdminBody({
     setSelectedSvTpl(""); setSvShowTplSave(false); setSvTplName("");
     setSv({
       ...EMPTY_SV,
-      title: `モチベーション調査 ${now.getFullYear()}年${now.getMonth() + 1}月`,
+      title: `パルス調査 ${now.getFullYear()}年${now.getMonth() + 1}月`,
       desc: "毎月のかんたんな調査です。いまの気持ちに一番近いものを選んでください（所要1分）。回答内容が選考や評価に影響することはありません。",
       pulse: true,
       dueDate: `${due.getFullYear()}-${p2(due.getMonth() + 1)}-${p2(due.getDate())}`,
@@ -1355,6 +1358,49 @@ function AdminBody({
     const level = point >= 5 ? "高" : point >= 3 ? "中" : "低";
     return { point, level, reasons, cur, prev };
   };
+
+  // 要フォローの内定者（点数の高い順）
+  const followRows = () => activeStudents
+    .map((st) => ({ st, f: followUpOf(st) }))
+    .filter((r) => r.f.reasons.length > 0)
+    .sort((a, b) => b.f.point - a.f.point || (a.st.kana || a.st.name || "").localeCompare(b.st.kana || b.st.name || "", "ja"));
+  const followColor = (lv) => (lv === "高" ? "#DC2626" : lv === "中" ? "#B45309" : "#6B7280");
+  const followBg = (lv) => (lv === "高" ? "#FEF2F2" : lv === "中" ? "#FFF7E6" : "#F6F7F9");
+  const renderFollowRow = ({ st, f }) => (
+    <div key={st.id} className="border rounded-xl p-3" style={{ borderColor: "#E5E7EB", background: followBg(f.level) }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-bold truncate">
+            {st.name}
+            <span className="ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full align-middle"
+              style={{ background: "#fff", color: followColor(f.level), border: `1px solid ${followColor(f.level)}` }}>
+              要フォロー {f.level}
+            </span>
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            最新スコア {f.cur != null ? `${f.cur.toFixed(1)}/5` : "未回答"}
+            {f.prev != null && f.cur != null ? `（前回 ${f.prev.toFixed(1)} → ${f.cur > f.prev ? "+" : ""}${(f.cur - f.prev).toFixed(1)}）` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button onClick={() => openMeetForm(null, st.id)}
+            className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+            面談を記録
+          </button>
+          <button onClick={() => setDetailStudent(st.id)}
+            className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">詳細</button>
+        </div>
+      </div>
+      <div className="mt-2 space-y-1">
+        {f.reasons.map((r) => (
+          <p key={r.t} className="text-xs text-gray-700">
+            <span className="font-bold">{r.t}</span>
+            <span className="text-gray-500"> → {r.a}</span>
+          </p>
+        ))}
+      </div>
+    </div>
+  );
 
   // 担当者ごとの面談件数
   const interviewerUsage = (name) => allMeetings.filter((m) => (m.interviewer || "") === name).length;
@@ -1613,7 +1659,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer)
   );
 
   const tabs = [
@@ -2346,7 +2392,7 @@ function AdminBody({
                       <div className="min-w-0">
                         <p className="font-bold truncate">
                           {s.title}
-                          {s.pulse && <span className="ml-1.5 text-[11px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>モチベ調査</span>}
+                          {s.pulse && <span className="ml-1.5 text-[11px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>パルス調査</span>}
                         </p>
                         <p className="text-xs mt-0.5" style={{ color: surveyIsClosed(s) ? "#B45309" : "#6B7280" }}>
                           回答期限：{s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし"}
@@ -3276,7 +3322,7 @@ function AdminBody({
 
             <div className={pc ? "grid grid-cols-2 gap-4 items-start" : "space-y-4"}>
               <div className={pc ? "col-span-2" : ""}>
-                <Card title={`モチベーション調査（${selectedYear - 2000}卒）`}
+                <Card title={`パルス調査（${selectedYear - 2000}卒）`}
                   note="毎回同じ設問なので回を重ねるほど推移が見えます。回答は通常のアンケートと同じ画面から行えます（概況タブでも集計を確認できます）。">
                   <div className="flex items-center gap-2 flex-wrap mb-3">
                     <button onClick={startPulseRound}
@@ -3307,7 +3353,7 @@ function AdminBody({
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">
                               <span className="text-[11px] text-gray-400 flex-1 truncate">対象：{surveyAreaText(r) || (r.audience && r.audience.type === "event" ? audienceLabel(r) : "全員")}</span>
-                              <button onClick={() => editSurvey(r)} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
+                              <button onClick={() => { setTab("dash"); editSurvey(r); }} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
                               {pulseDelId === r.id ? (
                                 <>
                                   <button onClick={() => deletePulseRound(r.id)} className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>
@@ -3325,59 +3371,39 @@ function AdminBody({
                 </Card>
               </div>
 
-              <div className={pc ? "col-span-2" : ""}>
-                <Card title="フォローが必要そうな内定者"
-                  note="調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化して並べています。あくまで目安なので、最終的な判断は担当者の方でお願いします。">
-                  {(() => {
-                    const rows = activeStudents
-                      .map((st) => ({ st, f: followUpOf(st) }))
-                      .filter((r) => r.f.reasons.length > 0)
-                      .sort((a, b) => b.f.point - a.f.point || (a.st.kana || a.st.name || "").localeCompare(b.st.kana || b.st.name || "", "ja"));
-                    if (rows.length === 0) return <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>;
-                    const color = (lv) => (lv === "高" ? "#DC2626" : lv === "中" ? "#B45309" : "#6B7280");
-                    const bg = (lv) => (lv === "高" ? "#FEF2F2" : lv === "中" ? "#FFF7E6" : "#F6F7F9");
-                    return (
-                      <div className="space-y-2">
-                        {rows.map(({ st, f }) => (
-                          <div key={st.id} className="border rounded-xl p-3" style={{ borderColor: "#E5E7EB", background: bg(f.level) }}>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-sm font-bold truncate">
-                                  {st.name}
-                                  <span className="ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full align-middle"
-                                    style={{ background: "#fff", color: color(f.level), border: `1px solid ${color(f.level)}` }}>
-                                    要フォロー {f.level}
-                                  </span>
-                                </p>
-                                <p className="text-xs text-gray-500 mt-0.5">
-                                  最新スコア {f.cur != null ? `${f.cur.toFixed(1)}/5` : "未回答"}
-                                  {f.prev != null && f.cur != null ? `（前回 ${f.prev.toFixed(1)} → ${f.cur > f.prev ? "+" : ""}${(f.cur - f.prev).toFixed(1)}）` : ""}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <button onClick={() => openMeetForm(null, st.id)}
-                                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
-                                  面談を記録
-                                </button>
-                                <button onClick={() => setDetailStudent(st.id)}
-                                  className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">詳細</button>
-                              </div>
-                            </div>
-                            <div className="mt-2 space-y-1">
-                              {f.reasons.map((r) => (
-                                <p key={r.t} className="text-xs text-gray-700">
-                                  <span className="font-bold">{r.t}</span>
-                                  <span className="text-gray-500"> → {r.a}</span>
-                                </p>
-                              ))}
-                            </div>
+              <Card title="フォローが必要そうな内定者"
+                note="調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化しています。あくまで目安です。">
+                {(() => {
+                  const rows = followRows();
+                  if (rows.length === 0) return <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>;
+                  const cnt = (lv) => rows.filter((r) => r.f.level === lv).length;
+                  return (
+                    <>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {["高", "中", "低"].map((lv) => (
+                          <div key={lv} className="rounded-lg p-2.5" style={{ background: followBg(lv) }}>
+                            <p className="text-[11px] font-bold" style={{ color: followColor(lv) }}>要フォロー {lv}</p>
+                            <p className="text-lg font-bold">{cnt(lv)}<span className="text-xs font-normal text-gray-400 ml-0.5">名</span></p>
                           </div>
                         ))}
                       </div>
-                    );
-                  })()}
-                </Card>
-              </div>
+                      <p className="text-[11px] font-bold text-gray-400 mb-1">優先度の高い3名</p>
+                      {rows.slice(0, 3).map(({ st, f }) => (
+                        <div key={st.id} className="flex items-center gap-2 py-1.5 border-b border-gray-100 last:border-b-0">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                            style={{ background: "#fff", color: followColor(f.level), border: `1px solid ${followColor(f.level)}` }}>{f.level}</span>
+                          <span className="text-sm font-bold truncate flex-1">{st.name}</span>
+                          <span className="text-xs text-gray-500 truncate shrink-0" style={{ maxWidth: 160 }}>{f.reasons[0] ? f.reasons[0].t : ""}</span>
+                        </div>
+                      ))}
+                      <button onClick={() => setFollowDrawer(true)}
+                        className="w-full mt-3 py-2 rounded-lg text-xs font-bold text-white" style={{ background: BRAND }}>
+                        すべて見る（{rows.length}名）
+                      </button>
+                    </>
+                  );
+                })()}
+              </Card>
 
               <Card title="採用ファネル" note="テストアカウントは除外しています。内定を出した人数を母数に、承諾率・辞退率を算出しています。">
                 <div className="grid grid-cols-2 gap-2 mb-3">
@@ -3902,6 +3928,37 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* フォローが必要そうな内定者の一覧（ドロワー） */}
+      {followDrawer && (() => {
+        const rows = followRows();
+        return (
+          <div className="fixed inset-0 z-[65] flex justify-end">
+            <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setFollowDrawer(false)} />
+            <div className="ml-drawer relative h-full w-full max-w-xl bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+              <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">フォローが必要そうな内定者</p>
+                  <p className="text-base font-bold">
+                    {rows.length}名
+                    <span className="text-xs font-normal text-gray-500 ml-2">
+                      高 {rows.filter((r) => r.f.level === "高").length}／中 {rows.filter((r) => r.f.level === "中").length}／低 {rows.filter((r) => r.f.level === "低").length}
+                    </span>
+                  </p>
+                </div>
+                <button onClick={() => setFollowDrawer(false)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
+                {rows.length === 0 && <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>}
+                {rows.map(renderFollowRow)}
+                <p className="text-[11px] text-gray-400 leading-relaxed pt-2">
+                  調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化しています。あくまで目安なので、最終的な判断は担当者の方でお願いします。
+                </p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 面談の記録ドロワー */}
       {meetOpen && (
