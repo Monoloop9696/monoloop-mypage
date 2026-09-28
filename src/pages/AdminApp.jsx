@@ -45,12 +45,13 @@ const MEETING_KINDS = ["個別面談", "オンライン面談", "電話", "ラ�
 const EMPTY_MEETING = { uid: "", date: "", time: "", interviewer: "", kind: "個別面談", note: "", next: "" };
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
 const VISIBLE_ITEMS = 3;
-const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
+const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", pulse: false, questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
   label: "",
-  options: type === "text" ? [] : ["", ""],
+  options: type === "text" || type === "scale" ? [] : ["", ""],
+  ...(type === "scale" ? { minLabel: "とても低い", maxLabel: "とても高い" } : {}),
   required: true,
 });
 
@@ -424,6 +425,7 @@ function AdminBody({
   const [ivBusy, setIvBusy] = useState(false);
   // 分析
   const [statsAllYears, setStatsAllYears] = useState(false);
+  const [pulseDelId, setPulseDelId] = useState(null);
   const [logins, setLogins] = useState({}); // uid -> { lastSignInTime, creationTime }
   const [loginsState, setLoginsState] = useState("idle"); // idle | loading | done | error
   const [editDetail, setEditDetail] = useState(false);
@@ -1010,14 +1012,16 @@ function AdminBody({
     dueTime: sv.dueTime || null,
     due: deadlineText(sv.dueDate, sv.dueTime, "期限なし"),
     time: sv.time || "約3分",
+    pulse: sv.pulse === true,
     questions: svOrderedQuestions().map((q) => {
-      const options = q.type === "text" ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean);
+      const options = (q.type === "text" || q.type === "scale") ? [] : (q.options || []).map((o) => o.trim()).filter(Boolean);
       // 分岐は「今ある選択肢」かつ「今あるセクション or end」だけ残す
       const branch = (q.type === "single" && q.branch)
         ? Object.fromEntries(Object.entries(q.branch).filter(([o, t]) => options.includes(o) && (t === "end" || svSections().some((s) => s.id === t))))
         : {};
       return {
         id: q.id, type: q.type, label: (q.label || "").trim(), options,
+        ...(q.type === "scale" ? { minLabel: (q.minLabel || "").trim() || "とても低い", maxLabel: (q.maxLabel || "").trim() || "とても高い" } : {}),
         required: q.required !== false,
         sectionId: svSecOf(q) || null,
         branch: Object.keys(branch).length ? branch : null,
@@ -1038,7 +1042,7 @@ function AdminBody({
   });
   const surveyValid = () =>
     sv.title.trim() && sv.questions.length > 0 &&
-    sv.questions.every((q) => q.label.trim() && (q.type === "text" || (q.options || []).map((o) => o.trim()).filter(Boolean).length >= 1));
+    sv.questions.every((q) => q.label.trim() && (q.type === "text" || q.type === "scale" || (q.options || []).map((o) => o.trim()).filter(Boolean).length >= 1));
   const resetSurveyForm = () => { setSv(EMPTY_SV); setEditingSurveyId(null); setSelectedSvTpl(""); setSvShowTplSave(false); setSvTplName(""); };
   const closeSurveyForm = () => { resetSurveyForm(); setShowSurveyForm(false); };
   const submitSurvey = async (published) => {
@@ -1054,7 +1058,8 @@ function AdminBody({
     const a = s.audience;
     setSv({
       title: s.title || "", desc: s.desc || "", dueDate: s.dueDate || "", dueTime: s.dueTime || "", time: s.time || "約3分",
-      questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      pulse: s.pulse === true,
+      questions: surveyQuestions(s).map((q) => ({ id: q.id, type: q.type, label: q.label || "", options: (q.type === "text" || q.type === "scale") ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), minLabel: q.minLabel || "", maxLabel: q.maxLabel || "", required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: a && a.type === "event" ? "event" : "all",
       audEventId: a && a.type === "event" ? (a.eventId || "") : "",
@@ -1080,7 +1085,8 @@ function AdminBody({
     setEditingSurveyId(null);
     setSv({
       title: s.title || "", desc: s.desc || "", dueDate: "", dueTime: "", time: s.time || "約3分",
-      questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      pulse: s.pulse === true,
+      questions: surveyQuestions(s).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: (q.type === "text" || q.type === "scale") ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), minLabel: q.minLabel || "", maxLabel: q.maxLabel || "", required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(s.sections) ? s.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
       areas: s.areas || [], areaBasis: s.areaBasis || "either", targetUids: null,
@@ -1103,7 +1109,7 @@ function AdminBody({
     if (!t || !t.data) return;
     setSv({
       title: t.data.title || "", desc: t.data.desc || "", dueDate: "", dueTime: "", time: t.data.time || "約3分",
-      questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: q.type === "text" ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
+      questions: (t.data.questions || []).map((q) => ({ id: `q_${Math.random().toString(36).slice(2, 9)}`, type: q.type, label: q.label || "", options: (q.type === "text" || q.type === "scale") ? [] : (q.options && q.options.length ? [...q.options] : ["", ""]), minLabel: q.minLabel || "", maxLabel: q.maxLabel || "", required: q.required !== false, sectionId: q.sectionId || null, branch: q.branch || {} })),
       sections: Array.isArray(t.data.sections) ? t.data.sections.map((x) => ({ id: x.id, title: x.title || "", desc: x.desc || "" })) : [],
       audType: "all", audEventId: "", audGroup: "arrived",
       areas: [], areaBasis: "either", targetUids: null,
@@ -1282,22 +1288,27 @@ function AdminBody({
     const vals = activeStudents.map((st) => pulseScore(sv, st.id)).filter((v) => v != null);
     return vals.length ? vals.reduce((x, y) => x + y, 0) / vals.length : null;
   };
-  const createPulseRound = async () => {
+  // パルス調査は通常のアンケート作成ドロワーを設問入りで開く（対象者・期限を通常どおり指定できる）
+  const startPulseRound = () => {
     const now = new Date();
     const p2 = (n) => String(n).padStart(2, "0");
     const due = new Date(now.getTime() + 7 * 86400000);
-    const dueDate = `${due.getFullYear()}-${p2(due.getMonth() + 1)}-${p2(due.getDate())}`;
-    try {
-      await addSurvey({
-        title: `モチベーション調査 ${now.getFullYear()}年${now.getMonth() + 1}月`,
-        desc: "毎月のかんたんな調査です。いまの気持ちに一番近いものを選んでください（所要1分）。回答内容が選考や評価に影響することはありません。",
-        pulse: true,
-        dueDate, dueTime: null, due: deadlineText(dueDate, null, "期限なし"), time: "約1分",
-        questions: PULSE_QUESTIONS, sections: [],
-        audience: { type: "all" }, areas: [], areaBasis: "either", targetUids: null,
-        grad: selectedYear, published: true,
-      });
-    } catch (ex) { setBanner(`調査の作成に失敗しました：${ex.message}`); }
+    setEditingSurveyId(null);
+    setSelectedSvTpl(""); setSvShowTplSave(false); setSvTplName("");
+    setSv({
+      ...EMPTY_SV,
+      title: `モチベーション調査 ${now.getFullYear()}年${now.getMonth() + 1}月`,
+      desc: "毎月のかんたんな調査です。いまの気持ちに一番近いものを選んでください（所要1分）。回答内容が選考や評価に影響することはありません。",
+      pulse: true,
+      dueDate: `${due.getFullYear()}-${p2(due.getMonth() + 1)}-${p2(due.getDate())}`,
+      time: "約1分",
+      questions: PULSE_QUESTIONS.map((q) => ({ ...q })),
+    });
+    setShowSurveyForm(true);
+  };
+  const deletePulseRound = async (id) => {
+    try { await deleteSurveyCascade(id); await refreshAnswers(); setPulseDelId(null); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
   // 要フォロー判定：スコアの推移と、システムに溜まっている行動データを組み合わせる
   const followUpOf = (st) => {
@@ -2196,10 +2207,18 @@ function AdminBody({
                         <div key={q.id} className="border rounded-lg p-3 space-y-2" style={{ background: g.section ? "#fff" : "#FAFBFC", borderColor: "#E5E7EB" }}>
                           <div className="flex items-center gap-2">
                             <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "#EEF1F4", color: "#6B7280" }}>Q{no}</span>
-                            <select value={q.type} onChange={(e) => updateSvQuestion(q.id, { type: e.target.value, options: e.target.value === "text" ? [] : (q.options.length ? q.options : ["", ""]) })}
+                            <select value={q.type} onChange={(e) => {
+                                const t = e.target.value;
+                                updateSvQuestion(q.id, {
+                                  type: t,
+                                  options: (t === "text" || t === "scale") ? [] : (q.options.length ? q.options : ["", ""]),
+                                  ...(t === "scale" ? { minLabel: q.minLabel || "とても低い", maxLabel: q.maxLabel || "とても高い" } : {}),
+                                });
+                              }}
                               className="border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
                               <option value="single">単一選択</option>
                               <option value="multi">複数選択</option>
+                              <option value="scale">5段階評価</option>
                               <option value="text">自由記述</option>
                             </select>
                             <label className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
@@ -2211,7 +2230,21 @@ function AdminBody({
                           </div>
                           <input value={q.label} onChange={(e) => updateSvQuestion(q.id, { label: e.target.value })}
                             placeholder="設問文（例：参加しやすい時間帯は？）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm" />
-                          {q.type !== "text" && (
+                          {q.type === "scale" && (
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <div>
+                                <p className="text-[11px] text-gray-400 mb-1">1 のラベル</p>
+                                <input value={q.minLabel || ""} onChange={(e) => updateSvQuestion(q.id, { minLabel: e.target.value })}
+                                  placeholder="とても低い" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                              </div>
+                              <div>
+                                <p className="text-[11px] text-gray-400 mb-1">5 のラベル</p>
+                                <input value={q.maxLabel || ""} onChange={(e) => updateSvQuestion(q.id, { maxLabel: e.target.value })}
+                                  placeholder="とても高い" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                              </div>
+                            </div>
+                          )}
+                          {q.type !== "text" && q.type !== "scale" && (
                             <div className="space-y-1.5">
                               {q.options.map((o, oi) => (
                                 <div key={oi} className="flex items-center gap-1.5">
@@ -2247,7 +2280,7 @@ function AdminBody({
                         </div>
                       ))}
                         <div className="flex flex-wrap gap-2">
-                          {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["text", "＋ 自由記述"]].map(([t, label]) => (
+                          {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["scale", "＋ 5段階評価"], ["text", "＋ 自由記述"]].map(([t, label]) => (
                             <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-white" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
                           ))}
                         </div>
@@ -3246,11 +3279,11 @@ function AdminBody({
                 <Card title={`モチベーション調査（${selectedYear - 2000}卒）`}
                   note="毎回同じ設問なので回を重ねるほど推移が見えます。回答は通常のアンケートと同じ画面から行えます（概況タブでも集計を確認できます）。">
                   <div className="flex items-center gap-2 flex-wrap mb-3">
-                    <button onClick={createPulseRound}
+                    <button onClick={startPulseRound}
                       className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
-                      ＋ 今回の調査を実施する
+                      ＋ 今回の調査をつくる
                     </button>
-                    <span className="text-xs text-gray-400">在籍中の{activeStudents.length}名に配信されます（設問4問＋自由記述・回答期限7日）</span>
+                    <span className="text-xs text-gray-400">設問4問＋自由記述が入った状態で作成画面が開きます。対象者・期限は通常のアンケートと同じように指定できます。</span>
                   </div>
                   {pulseRounds.length === 0 ? (
                     <p className="text-xs text-gray-400">まだ実施していません。「＋ 今回の調査を実施する」で1回目を作成してください。</p>
@@ -3260,16 +3293,29 @@ function AdminBody({
                       {pulseRounds.map((r) => {
                         const avg = pulseAvg(r);
                         const answeredN = activeStudents.filter((st) => pulseScore(r, st.id) != null).length;
+                        const audN = surveyAudience(r).length;
                         return (
                           <div key={r.id} className="mb-2">
                             <div className="flex justify-between text-xs mb-0.5 gap-2">
                               <span className="text-gray-700 truncate">{r.title}</span>
                               <span className="text-gray-500 shrink-0">
-                                {avg != null ? `${avg.toFixed(2)} / 5` : "回答なし"}・{answeredN}/{activeStudents.length}名
+                                {avg != null ? `${avg.toFixed(2)} / 5` : "回答なし"}・{answeredN}/{audN}名
                               </span>
                             </div>
                             <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
                               <div className="h-full rounded-full" style={{ width: `${avg ? (avg / 5) * 100 : 0}%`, background: "#4F46E5" }} />
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[11px] text-gray-400 flex-1 truncate">対象：{surveyAreaText(r) || (r.audience && r.audience.type === "event" ? audienceLabel(r) : "全員")}</span>
+                              <button onClick={() => editSurvey(r)} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
+                              {pulseDelId === r.id ? (
+                                <>
+                                  <button onClick={() => deletePulseRound(r.id)} className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>
+                                  <button onClick={() => setPulseDelId(null)} className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                                </>
+                              ) : (
+                                <button onClick={() => setPulseDelId(r.id)} aria-label={`${r.title}を削除`} className="shrink-0 text-gray-300 p-0.5"><Trash2 size={13} /></button>
+                              )}
                             </div>
                           </div>
                         );
