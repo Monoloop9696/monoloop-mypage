@@ -15,7 +15,7 @@ import {
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
   listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent, surveyQuestions,
 } from "../lib/firestore";
-import { askQuestion, listQuestions } from "../lib/api";
+import { askQuestion, listQuestions, bookInterview } from "../lib/api";
 import { matchesAreas } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
 import { pastDeadline } from "../lib/deadline";
@@ -57,6 +57,22 @@ function pickLoopChan(student, events) {
   if (h >= 14 && h < 18) return LOOPCHAN.evening;
   if (h >= 18 && h < 23) return LOOPCHAN.night;
   return LOOPCHAN.latenight;
+}
+
+// 面談の候補日時「8/7(金) 16:30 - 17:00（30分）」
+const WEEK_JP = ["日", "月", "火", "水", "木", "金", "土"];
+export function slotText(slot) {
+  if (!slot || !slot.date) return "";
+  const [y, m, d] = String(slot.date).split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  const w = Number.isNaN(dt.getTime()) ? "" : WEEK_JP[dt.getDay()];
+  const toMin = (t) => {
+    const [hh, mm] = String(t || "").split(":").map(Number);
+    return Number.isFinite(hh) && Number.isFinite(mm) ? hh * 60 + mm : null;
+  };
+  const a = toMin(slot.start); const b = toMin(slot.end);
+  const mins = a != null && b != null && b > a ? b - a : null;
+  return `${m}/${d}(${w}) ${slot.start} - ${slot.end}${mins ? `（${mins}分）` : ""}`;
 }
 
 // ホームの日付・時刻表示（毎秒更新）
@@ -146,6 +162,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [qErr, setQErr] = useState("");
   const [svAnswers, setSvAnswers] = useState({});
   const [svPath, setSvPath] = useState([]); // 現在までに進んだセクションid（先頭セクションを除く）
+  const [interviewOpen, setInterviewOpen] = useState(false); // 面談日程の選択モーダル
+  const [interviewSlot, setInterviewSlot] = useState("");
+  const [interviewBusy, setInterviewBusy] = useState(false);
+  const [interviewErr, setInterviewErr] = useState("");
   const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
   const [celebrate, setCelebrate] = useState(false); // 内定承諾のお祝い演出
   const svScrollRef = useRef(null);
@@ -236,13 +256,40 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     return !r.answer;
   };
   const mySurveys = surveys
+    .filter((s) => s.interview !== true) // 面談のご案内はアンケートとしては出さない
     .filter(inSurveyAudience)
     // 対象者：個別指定(targetUids)があれば優先、無ければ住所エリアで判定（イベントと同じ）
     .filter((s) => readOnly || (Array.isArray(s.targetUids) ? s.targetUids.includes(uid) : matchesAreas(student, s.areas, s.areaBasis)))
     .map((s) => ({ ...s, done: responseSet.has(s.id) }));
 
+  // ---- 面談の日程調整 ----
+  const myInterview = surveys
+    .filter((s) => s.interview === true)
+    .filter((s) => readOnly || !Array.isArray(s.targetUids) || s.targetUids.includes(uid))
+    .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))[0] || null;
+  const myBooking = myInterview && myInterview.bookings ? myInterview.bookings[uid] : null;
+  // 他の方が予約済みの枠は選べない
+  const takenSlotIds = myInterview && myInterview.bookings
+    ? Object.keys(myInterview.bookings).filter((u) => u !== uid).map((u) => myInterview.bookings[u].slotId)
+    : [];
+  const openInterview = () => { setInterviewErr(""); setInterviewSlot(""); setInterviewOpen(true); };
+  const submitInterview = async () => {
+    if (readOnly) return;
+    if (!interviewSlot) { setInterviewErr("ご希望の時間を選んでください。"); return; }
+    setInterviewBusy(true);
+    setInterviewErr("");
+    try {
+      await bookInterview({ id: myInterview.id, slotId: interviewSlot });
+      setInterviewOpen(false);
+    } catch (ex) {
+      setInterviewErr(ex.message || "予約に失敗しました。");
+    } finally {
+      setInterviewBusy(false);
+    }
+  };
+
   // モーダル表示中は背面をスクロール・操作できないようにする
-  useBodyScrollLock(!!(activeSurvey || activeArticle || showProfile || celebrate || menuOpen));
+  useBodyScrollLock(!!(activeSurvey || activeArticle || showProfile || celebrate || menuOpen || interviewOpen));
 
   const profileDone = !!(student.address && student.phone);
   // 管理者がステータスを「承諾」にすると、学生側の表示が切り替わる
@@ -487,6 +534,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
   if (!profileDone) alerts.push({ label: "基本情報が未登録", onTap: () => setShowProfile(true) });
   if (!lineLinked) alerts.push({ label: "LINE未連携", onTap: () => setTab("line") });
+  if (myInterview && !myBooking) alerts.push({ label: "面談日程が未定", onTap: openInterview });
 
   return (
     <div className="min-h-screen" style={{ background: PAPER, ...studentFontStyle }}>
@@ -591,6 +639,51 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               </section>
 
               <div className="px-6 mt-10 space-y-12">
+                {/* 面談の日程調整 */}
+                {myInterview && (
+                  <section className="ml-in">
+                    <EdHeader en="Interview" jp="面談のご案内" />
+                    <div className="bg-white p-6 ml-in" style={{ border: `1px solid ${HAIR}` }}>
+                      {myBooking ? (
+                        <>
+                          <span style={caps(9, ROSE, "0.18em")}>予約済み</span>
+                          <p className="jp-mincho font-bold mt-2" style={{ fontSize: 17 }}>{slotText(myBooking)}</p>
+                          {myInterview.zoomUrl ? (
+                            <div className="mt-4 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}` }}>
+                              <p className="text-xs font-bold" style={{ color: MUTE }}>ZOOM URL</p>
+                              <a href={myInterview.zoomUrl} target="_blank" rel="noopener noreferrer"
+                                className="text-xs break-all" style={{ color: ROSE, textDecoration: "underline" }}>
+                                {myInterview.zoomUrl}
+                              </a>
+                              {myInterview.zoomId && <p className="text-xs mt-1.5" style={{ color: INK }}>ミーティング ID: {myInterview.zoomId}</p>}
+                              {myInterview.zoomPass && <p className="text-xs" style={{ color: INK }}>パスコード: {myInterview.zoomPass}</p>}
+                            </div>
+                          ) : myInterview.place ? (
+                            <p className="text-xs mt-3" style={{ color: MUTE }}>場所：{myInterview.place}</p>
+                          ) : null}
+                          {myInterview.note && <p className="text-xs mt-3 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.note}</p>}
+                          <p className="text-xs mt-4" style={{ color: MUTE }}>
+                            ※私服で問題ございません。日程の変更が必要な場合は、質問箱またはLINEからご連絡ください。
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="jp-mincho font-bold" style={{ fontSize: 17 }}>{myInterview.title || "面談の日程調整"}</p>
+                          {myInterview.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.desc}</p>}
+                          <p className="text-xs mt-3" style={{ color: MUTE }}>
+                            候補の中からご都合のよい時間をお選びください（{(myInterview.slots || []).length}件）。
+                          </p>
+                          <button onClick={openInterview} disabled={readOnly}
+                            className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40"
+                            style={{ background: ROSE, color: IVORY }}>
+                            希望の時間を選ぶ
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </section>
+                )}
+
                 {/* ジャーニー */}
                 <section className="ml-in ml-in-1">
                   <EdHeader en="Journey" jp="入社までの道のり" />
@@ -1057,6 +1150,52 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <button disabled={readOnly || !profileForm.address || !profileForm.phone || savingProfile} onClick={saveProfile}
                   className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
                   {readOnly ? "プレビュー（保存不可）" : savingProfile ? "保存中…" : "登録する"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 面談日程の選択 */}
+          {interviewOpen && myInterview && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
+              <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
+                <div className="flex items-start justify-between mb-5">
+                  <div>
+                    <p style={caps(9, GOLD)}>Interview</p>
+                    <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{myInterview.title || "面談の日程調整"}</p>
+                    {myInterview.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.desc}</p>}
+                  </div>
+                  <button onClick={() => setInterviewOpen(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                </div>
+                <p className="text-sm font-bold mb-2">ご希望の時間を1つお選びください</p>
+                <div className="space-y-2">
+                  {(myInterview.slots || []).map((slot) => {
+                    const taken = takenSlotIds.includes(slot.id);
+                    const on = interviewSlot === slot.id;
+                    return (
+                      <button key={slot.id} disabled={taken} onClick={() => setInterviewSlot(slot.id)}
+                        className="w-full text-left px-4 py-3 text-sm bg-white flex items-center gap-2.5 disabled:opacity-45"
+                        style={on ? { border: `1px solid ${ROSE}`, color: ROSE, fontWeight: 700 } : { border: `1px solid ${HAIR}` }}>
+                        <span className="inline-flex items-center justify-center shrink-0"
+                          style={{ width: 16, height: 16, borderRadius: 999, border: `1.5px solid ${on ? ROSE : "#C9BFC3"}`, background: on ? ROSE : "#fff" }}>
+                          {on && <Check size={11} color="#fff" strokeWidth={3} />}
+                        </span>
+                        <span className="flex-1">{slotText(slot)}</span>
+                        {taken && <span className="text-xs shrink-0" style={{ color: MUTE }}>受付終了</span>}
+                      </button>
+                    );
+                  })}
+                  {(myInterview.slots || []).length === 0 && (
+                    <p className="text-xs" style={{ color: MUTE }}>候補の時間がまだ登録されていません。</p>
+                  )}
+                </div>
+                {interviewErr && <p className="text-xs font-bold mt-3" style={{ color: "#C0264B" }}>{interviewErr}</p>}
+                <p className="text-xs mt-3 leading-relaxed" style={{ color: MUTE }}>
+                  お選びいただくと予約が確定し、公式LINEに日時とZOOMのご案内をお送りします（連携済みの方）。この画面でもいつでもご確認いただけます。
+                </p>
+                <button disabled={readOnly || interviewBusy || !interviewSlot} onClick={submitInterview}
+                  className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                  {readOnly ? "プレビュー（予約不可）" : interviewBusy ? "予約中…" : "この時間で予約する"}
                 </button>
               </div>
             </div>

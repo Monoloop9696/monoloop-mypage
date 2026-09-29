@@ -10,6 +10,7 @@ import { downloadCsv } from "../lib/csv";
 import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
 import { pastDeadline, deadlineText } from "../lib/deadline";
+import { slotText } from "./StudentApp";
 import { fileToCompressedDataURL, dataUrlToThumb } from "../lib/image";
 import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answerQuestion, deleteBroadcast, getLineQuota } from "../lib/api";
 import {
@@ -50,6 +51,11 @@ const MEETING_SECTIONS = [
   { key: "noteParent", label: "ご両親などからの質問" },
   { key: "noteOther", label: "その他" },
 ];
+// 面談の日程調整。学生が読めるのは surveys なのでそこに interview:true で保存する
+const EMPTY_INTERVIEW = {
+  title: "面談の日程調整", desc: "", uids: [], slots: [],
+  zoomUrl: "", zoomId: "", zoomPass: "", place: "", note: "",
+};
 const EMPTY_MEETING = {
   uid: "", date: "", time: "", interviewer: "", kind: "個別面談", next: "",
   noteUniv: "", noteJob: "", noteWorry: "", noteParent: "", noteOther: "",
@@ -436,6 +442,14 @@ function AdminBody({
   const [meetDelId, setMeetDelId] = useState(null);
   const [meetView, setMeetView] = useState("recent"); // recent=日付順 / student=学生別
   const [meetHistOpen, setMeetHistOpen] = useState(false); // スマホで過去の記録を開く
+  // 面談の日程調整
+  const [ivReqOpen, setIvReqOpen] = useState(false);
+  const [ivReqEditId, setIvReqEditId] = useState(null);
+  const [ivReq, setIvReq] = useState(EMPTY_INTERVIEW);
+  const [ivSlotDraft, setIvSlotDraft] = useState({ date: "", start: "", end: "" });
+  const [ivReqBusy, setIvReqBusy] = useState(false);
+  const [ivReqErr, setIvReqErr] = useState("");
+  const [ivReqDelId, setIvReqDelId] = useState(null);
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
   const [showIvMgr, setShowIvMgr] = useState(false); // 担当者の管理パネル
   const [ivEditId, setIvEditId] = useState(null);
@@ -540,7 +554,8 @@ function AdminBody({
     .filter((e) => (e.grad || 2027) === selectedYear && e.published)
     .sort((a, b) => (a.dateStr || "").localeCompare(b.dateStr || ""));
   const yearDrafts = events.filter((e) => (e.grad || 2027) === selectedYear && !e.published);
-  const yearSurveys = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published !== false);
+  // 面談の日程調整も surveys に入っているが、アンケートとしては扱わない
+  const yearSurveys = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published !== false && s.interview !== true);
   const yearSurveyDrafts = surveys.filter((s) => (s.grad || 2027) === selectedYear && s.published === false);
 
   // ---- 学生ごとの進捗 ----
@@ -1295,6 +1310,73 @@ function AdminBody({
     try { await deleteMeeting(id); setMeetDelId(null); }
     catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
   };
+  // ---- 面談の日程調整 ----
+  const interviewReqs = surveys
+    .filter((s) => s.interview === true && (s.grad || 2027) === selectedYear)
+    .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+  const openIvReq = (r) => {
+    setIvReqErr("");
+    setIvSlotDraft({ date: "", start: "", end: "" });
+    if (r) {
+      setIvReqEditId(r.id);
+      setIvReq({
+        title: r.title || "面談の日程調整", desc: r.desc || "",
+        uids: Array.isArray(r.targetUids) ? [...r.targetUids] : [],
+        slots: Array.isArray(r.slots) ? r.slots.map((s) => ({ ...s })) : [],
+        zoomUrl: r.zoomUrl || "", zoomId: r.zoomId || "", zoomPass: r.zoomPass || "",
+        place: r.place || "", note: r.note || "",
+      });
+    } else {
+      setIvReqEditId(null);
+      setIvReq({ ...EMPTY_INTERVIEW, slots: [] });
+    }
+    setIvReqOpen(true);
+  };
+  const closeIvReq = () => { setIvReqOpen(false); setIvReqEditId(null); setIvReq(EMPTY_INTERVIEW); setIvReqErr(""); };
+  const toggleIvUid = (id) => setIvReq((p) => ({ ...p, uids: p.uids.includes(id) ? p.uids.filter((x) => x !== id) : [...p.uids, id] }));
+  const addIvSlot = () => {
+    const { date, start, end } = ivSlotDraft;
+    if (!date || !start || !end) { setIvReqErr("候補日時は「日付・開始・終了」をすべて入力してください。"); return; }
+    if (start >= end) { setIvReqErr("終了時刻は開始時刻より後にしてください。"); return; }
+    setIvReqErr("");
+    setIvReq((p) => ({ ...p, slots: [...p.slots, { id: `s_${Math.random().toString(36).slice(2, 9)}`, date, start, end }] }));
+    setIvSlotDraft({ date, start: "", end: "" });
+  };
+  const removeIvSlot = (id) => setIvReq((p) => ({ ...p, slots: p.slots.filter((s) => s.id !== id) }));
+  const saveIvReq = async () => {
+    if (!ivReq.uids.length) { setIvReqErr("対象の内定者を選んでください。"); return; }
+    if (!ivReq.slots.length) { setIvReqErr("候補日時を1つ以上追加してください。"); return; }
+    setIvReqBusy(true);
+    try {
+      const data = {
+        interview: true,
+        title: (ivReq.title || "面談の日程調整").trim(),
+        desc: (ivReq.desc || "").trim(),
+        targetUids: [...ivReq.uids],
+        slots: ivReq.slots
+          .map((s) => ({ id: s.id, date: s.date, start: s.start, end: s.end }))
+          .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)),
+        zoomUrl: (ivReq.zoomUrl || "").trim(),
+        zoomId: (ivReq.zoomId || "").trim(),
+        zoomPass: (ivReq.zoomPass || "").trim(),
+        place: (ivReq.place || "").trim(),
+        note: (ivReq.note || "").trim(),
+        grad: selectedYear,
+        published: true,
+        // 通常のアンケート集計に混ざらないように空にしておく
+        questions: [], sections: [], audience: { type: "all" }, areas: [], areaBasis: "either",
+      };
+      if (ivReqEditId) await updateSurvey(ivReqEditId, data);
+      else await addSurvey(data);
+      closeIvReq();
+    } catch (ex) { setIvReqErr(`保存に失敗しました：${ex.message}`); }
+    finally { setIvReqBusy(false); }
+  };
+  const deleteIvReq = async (id) => {
+    try { await deleteSurveyCascade(id); setIvReqDelId(null); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+  };
+
   // ---- パルス調査 ----
   const pulseRounds = surveys
     .filter((s) => s.pulse === true && (s.grad || 2027) === selectedYear)
@@ -1686,7 +1768,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen)
   );
 
   const tabs = [
@@ -3169,6 +3251,70 @@ function AdminBody({
             )}
           </div>
 
+          <div className="mb-4">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <p className="text-xs font-bold text-gray-500">面談の日程調整</p>
+              <button onClick={() => openIvReq(null)}
+                className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: BRAND }}>
+                ＋ 日程を依頼する
+              </button>
+            </div>
+            {interviewReqs.length === 0 ? (
+              <p className="text-xs text-gray-400">まだ依頼はありません。候補日時を登録して学生に選んでもらえます。</p>
+            ) : (
+              <div className="space-y-2">
+                {interviewReqs.map((r) => {
+                  const targets = (r.targetUids || []).map((id) => students.find((x) => x.id === id)).filter(Boolean);
+                  const bookings = r.bookings || {};
+                  const bookedN = targets.filter((st) => bookings[st.id]).length;
+                  return (
+                    <div key={r.id} className="bg-white border border-gray-200 rounded-xl p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold truncate">{r.title || "面談の日程調整"}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            候補 {(r.slots || []).length}件・対象 {targets.length}名・
+                            <span style={{ color: bookedN === targets.length ? "#1E874B" : "#B45309" }}>予約済み {bookedN}名</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {ivReqDelId === r.id ? (
+                            <>
+                              <button onClick={() => deleteIvReq(r.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                              <button onClick={() => setIvReqDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => openIvReq(r)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                              <button onClick={() => setIvReqDelId(r.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 divide-y divide-gray-100">
+                        {targets.map((st) => {
+                          const b = bookings[st.id];
+                          return (
+                            <div key={st.id} className="py-1.5 flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold truncate">{st.name}</span>
+                              {b ? (
+                                <span className="text-xs shrink-0" style={{ color: "#1E874B" }}>{slotText(b)}</span>
+                              ) : (
+                                <span className="text-xs shrink-0" style={{ color: "#B45309" }}>未予約</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {targets.length === 0 && <p className="text-xs text-gray-400 py-1.5">対象の内定者が見つかりません（削除された可能性があります）。</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs font-bold text-gray-500 mb-2">面談の記録</p>
           <div className="flex gap-1.5 mb-3">
             {[["recent", "日付順"], ["student", "内定者別"]].map(([v, label]) => (
               <button key={v} onClick={() => setMeetView(v)}
@@ -3996,6 +4142,124 @@ function AdminBody({
           </div>
         );
       })()}
+
+      {/* 面談の日程調整ドロワー */}
+      {ivReqOpen && (
+        <div className="fixed inset-0 z-[65] flex justify-end">
+          <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeIvReq} />
+          <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-3xl" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+            <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+              <div className="min-w-0">
+                <p className="text-xs font-bold" style={{ color: BRAND }}>{ivReqEditId ? "✎ 日程調整を編集" : "面談の日程を依頼"}</p>
+                <p className="text-base font-bold truncate">{ivReq.title || "面談の日程調整"}</p>
+              </div>
+              <button onClick={closeIvReq} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className={pc ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"}>
+              <div className={pc ? "w-1/2 overflow-y-auto px-5 py-4 space-y-3 border-r border-gray-200" : "px-5 py-4 space-y-3"}>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">タイトル</p>
+                  <input value={ivReq.title} onChange={(e) => setIvReq({ ...ivReq, title: e.target.value })}
+                    placeholder="面談の日程調整" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">学生へのメッセージ<span className="font-normal text-gray-400 ml-1">（任意）</span></p>
+                  <textarea value={ivReq.desc} onChange={(e) => setIvReq({ ...ivReq, desc: e.target.value })} rows={3}
+                    placeholder="例）近況をおうかがいしたく、30分ほどお時間をいただけますと幸いです。"
+                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm leading-relaxed" />
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">候補日時<span className="text-red-500 ml-0.5">*</span></p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <input type="date" value={ivSlotDraft.date} onChange={(e) => setIvSlotDraft({ ...ivSlotDraft, date: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs" />
+                    <input type="time" value={ivSlotDraft.start} onChange={(e) => setIvSlotDraft({ ...ivSlotDraft, start: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs" />
+                    <input type="time" value={ivSlotDraft.end} onChange={(e) => setIvSlotDraft({ ...ivSlotDraft, end: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs" />
+                  </div>
+                  <button onClick={addIvSlot}
+                    className="w-full mt-1.5 py-1.5 rounded-lg text-xs font-bold border border-dashed"
+                    style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                    ＋ 候補に追加
+                  </button>
+                  <div className="mt-2 space-y-1">
+                    {ivReq.slots.length === 0 && <p className="text-[11px] text-gray-400">まだ候補がありません。日付と時間を入れて「候補に追加」を押してください。</p>}
+                    {ivReq.slots.map((s) => (
+                      <div key={s.id} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style={{ background: "#F6F7F9" }}>
+                        <span className="text-xs flex-1 truncate">{slotText(s)}</span>
+                        <button onClick={() => removeIvSlot(s.id)} aria-label="削除" className="shrink-0 text-gray-400 p-0.5"><X size={13} /></button>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">1つの枠につき1名まで予約できます（先に選ばれた枠は他の学生には「受付終了」と表示されます）。</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">ZOOM URL</p>
+                  <input value={ivReq.zoomUrl} onChange={(e) => setIvReq({ ...ivReq, zoomUrl: e.target.value })}
+                    placeholder="https://zoom.us/j/..." className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  <div className="grid grid-cols-2 gap-1.5 mt-1.5">
+                    <input value={ivReq.zoomId} onChange={(e) => setIvReq({ ...ivReq, zoomId: e.target.value })}
+                      placeholder="ミーティング ID" className="w-full border border-gray-300 rounded-lg p-2 text-xs" />
+                    <input value={ivReq.zoomPass} onChange={(e) => setIvReq({ ...ivReq, zoomPass: e.target.value })}
+                      placeholder="パスコード" className="w-full border border-gray-300 rounded-lg p-2 text-xs" />
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">ZOOMを使わない場合は空欄にして、下の「場所」を入力してください。</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">場所<span className="font-normal text-gray-400 ml-1">（ZOOM以外のとき）</span></p>
+                  <input value={ivReq.place} onChange={(e) => setIvReq({ ...ivReq, place: e.target.value })}
+                    placeholder="例）本社オフィス 3F 会議室" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">LINEに添える一言<span className="font-normal text-gray-400 ml-1">（任意）</span></p>
+                  <input value={ivReq.note} onChange={(e) => setIvReq({ ...ivReq, note: e.target.value })}
+                    placeholder="例）当日は資料のご準備は不要です。" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                </div>
+              </div>
+
+              <div className={pc ? "w-1/2 overflow-y-auto px-5 py-4" : "px-5 pb-4"}>
+                <p className="text-xs font-bold text-gray-500 mb-1.5">対象の内定者<span className="text-red-500 ml-0.5">*</span>（{ivReq.uids.length}名）</p>
+                <div className="flex gap-1.5 mb-2">
+                  <button onClick={() => setIvReq({ ...ivReq, uids: activeStudents.map((s) => s.id) })}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>全員</button>
+                  <button onClick={() => setIvReq({ ...ivReq, uids: [] })}
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">解除</button>
+                </div>
+                <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
+                  {activeStudents.length === 0 && <p className="text-xs text-gray-400 p-3">対象になる内定者がいません。</p>}
+                  {activeStudents.map((st) => {
+                    const on = ivReq.uids.includes(st.id);
+                    return (
+                      <button key={st.id} onClick={() => toggleIvUid(st.id)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left">
+                        {on
+                          ? <CheckCircle2 size={17} style={{ color: BRAND }} className="shrink-0" />
+                          : <span className="inline-block shrink-0" style={{ width: 17, height: 17, borderRadius: 999, border: "1.5px solid #C9BFC3" }} />}
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-bold truncate" style={{ color: on ? INK : "#9CA3AF" }}>{st.name}</span>
+                          <span className="block text-xs text-gray-400 truncate">{st.univ || "大学未登録"}{st.lineUserId ? "" : "・LINE未連携"}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                  対象の学生のマイページ（ホーム）に案内が表示されます。予約が確定すると、その学生の公式LINEに日時とZOOMのご案内が自動送信されます（LINE未連携の方にはマイページ上での表示のみになります）。
+                </p>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+              {ivReqErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{ivReqErr}</p>}
+              <button onClick={saveIvReq} disabled={ivReqBusy}
+                className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+                {ivReqBusy ? "保存中…" : ivReqEditId ? "更新する" : "この内容で依頼する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 面談の記録ドロワー */}
       {meetOpen && (
