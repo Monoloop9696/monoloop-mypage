@@ -15,7 +15,7 @@ import {
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
   listenArticleImages, setRsvp, markArrived, submitResponse, updateStudent, surveyQuestions,
 } from "../lib/firestore";
-import { askQuestion, listQuestions, bookInterview } from "../lib/api";
+import { askQuestion, listQuestions, proposeInterviewSlots } from "../lib/api";
 import { matchesAreas } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
 import { pastDeadline } from "../lib/deadline";
@@ -162,8 +162,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [qErr, setQErr] = useState("");
   const [svAnswers, setSvAnswers] = useState({});
   const [svPath, setSvPath] = useState([]); // 現在までに進んだセクションid（先頭セクションを除く）
-  const [interviewOpen, setInterviewOpen] = useState(false); // 面談日程の選択モーダル
-  const [interviewSlot, setInterviewSlot] = useState("");
+  const [interviewOpen, setInterviewOpen] = useState(false); // 面談の候補日時を送るモーダル
+  const [ivSlots, setIvSlots] = useState([]); // 学生が挙げる候補
+  const [ivDraft, setIvDraft] = useState({ date: "", start: "", end: "" });
+  const [ivNote, setIvNote] = useState("");
   const [interviewBusy, setInterviewBusy] = useState(false);
   const [interviewErr, setInterviewErr] = useState("");
   const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
@@ -268,21 +270,37 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     .filter((s) => readOnly || !Array.isArray(s.targetUids) || s.targetUids.includes(uid))
     .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))[0] || null;
   const myBooking = myInterview && myInterview.bookings ? myInterview.bookings[uid] : null;
-  // 他の方が予約済みの枠は選べない
-  const takenSlotIds = myInterview && myInterview.bookings
-    ? Object.keys(myInterview.bookings).filter((u) => u !== uid).map((u) => myInterview.bookings[u].slotId)
-    : [];
-  const openInterview = () => { setInterviewErr(""); setInterviewSlot(""); setInterviewOpen(true); };
+  const myProposal = myInterview && myInterview.proposals ? myInterview.proposals[uid] : null;
+  const openInterview = () => {
+    setInterviewErr("");
+    setIvSlots(myProposal && Array.isArray(myProposal.slots) ? myProposal.slots.map((x) => ({ ...x })) : []);
+    setIvNote(myProposal ? (myProposal.note || "") : "");
+    setIvDraft({ date: "", start: "", end: "" });
+    setInterviewOpen(true);
+  };
+  const addIvSlot = () => {
+    const { date, start, end } = ivDraft;
+    if (!date || !start || !end) { setInterviewErr("日付・開始・終了をすべて選んでください。"); return; }
+    if (start >= end) { setInterviewErr("終了時刻は開始時刻より後にしてください。"); return; }
+    setInterviewErr("");
+    setIvSlots((p) => [...p, { id: `p_${Math.random().toString(36).slice(2, 9)}`, date, start, end }]);
+    setIvDraft({ date, start: "", end: "" });
+  };
+  const removeIvSlot = (id) => setIvSlots((p) => p.filter((x) => x.id !== id));
   const submitInterview = async () => {
     if (readOnly) return;
-    if (!interviewSlot) { setInterviewErr("ご希望の時間を選んでください。"); return; }
+    if (!ivSlots.length) { setInterviewErr("候補の日時を1つ以上ご登録ください。"); return; }
     setInterviewBusy(true);
     setInterviewErr("");
     try {
-      await bookInterview({ id: myInterview.id, slotId: interviewSlot });
+      await proposeInterviewSlots({
+        id: myInterview.id,
+        slots: ivSlots.map((x) => ({ date: x.date, start: x.start, end: x.end })),
+        note: ivNote,
+      });
       setInterviewOpen(false);
     } catch (ex) {
-      setInterviewErr(ex.message || "予約に失敗しました。");
+      setInterviewErr(ex.message || "送信に失敗しました。");
     } finally {
       setInterviewBusy(false);
     }
@@ -534,7 +552,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
   if (!profileDone) alerts.push({ label: "基本情報が未登録", onTap: () => setShowProfile(true) });
   if (!lineLinked) alerts.push({ label: "LINE未連携", onTap: () => setTab("line") });
-  if (myInterview && !myBooking) alerts.push({ label: "面談日程が未定", onTap: openInterview });
+  if (myInterview && !myBooking && !myProposal) alerts.push({ label: "面談の希望日時が未提出", onTap: openInterview });
 
   return (
     <div className="min-h-screen" style={{ background: PAPER, ...studentFontStyle }}>
@@ -670,14 +688,41 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         <>
                           <p className="jp-mincho font-bold" style={{ fontSize: 17 }}>{myInterview.title || "面談の日程調整"}</p>
                           {myInterview.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.desc}</p>}
-                          <p className="text-xs mt-3" style={{ color: MUTE }}>
-                            候補の中からご都合のよい時間をお選びください（{(myInterview.slots || []).length}件）。
-                          </p>
-                          <button onClick={openInterview} disabled={readOnly}
-                            className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40"
-                            style={{ background: ROSE, color: IVORY }}>
-                            希望の時間を選ぶ
-                          </button>
+                          {myInterview.dueDate && (
+                            <p className="text-xs mt-2 font-bold" style={{ color: GOLD }}>
+                              {Number(myInterview.dueDate.slice(5, 7))}/{Number(myInterview.dueDate.slice(8, 10))} までにご回答ください
+                            </p>
+                          )}
+                          {myProposal ? (
+                            <>
+                              <div className="mt-3 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}` }}>
+                                <p className="text-xs font-bold" style={{ color: MUTE }}>ご提出いただいた候補（{(myProposal.slots || []).length}件）</p>
+                                {(myProposal.slots || []).map((x) => (
+                                  <p key={x.id} className="text-xs mt-1" style={{ color: INK }}>・{slotText(x)}</p>
+                                ))}
+                                {myProposal.note && <p className="text-xs mt-2 whitespace-pre-wrap" style={{ color: MUTE }}>{myProposal.note}</p>}
+                              </div>
+                              <p className="text-xs mt-3" style={{ color: MUTE }}>
+                                担当者が日程を確定しましたら、公式LINEとこの画面でご案内します。
+                              </p>
+                              <button onClick={openInterview} disabled={readOnly}
+                                className="w-full mt-3 py-3 text-sm font-bold bg-white disabled:opacity-40"
+                                style={{ border: `1px solid ${ROSE}`, color: ROSE }}>
+                                候補を修正する
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-xs mt-3" style={{ color: MUTE }}>
+                                ご都合のよいお日にち・時間帯を、いくつかご登録ください。
+                              </p>
+                              <button onClick={openInterview} disabled={readOnly}
+                                className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40"
+                                style={{ background: ROSE, color: IVORY }}>
+                                希望の日時を登録する
+                              </button>
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -1155,47 +1200,55 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             </div>
           )}
 
-          {/* 面談日程の選択 */}
+          {/* 面談の候補日時を登録 */}
           {interviewOpen && myInterview && (
             <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
               <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                 <div className="flex items-start justify-between mb-5">
                   <div>
                     <p style={caps(9, GOLD)}>Interview</p>
-                    <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{myInterview.title || "面談の日程調整"}</p>
-                    {myInterview.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.desc}</p>}
+                    <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>ご希望の日時をご登録ください</p>
+                    <p className="text-xs mt-2 leading-relaxed" style={{ color: MUTE }}>
+                      ご都合のよいお日にち・時間帯を複数ご登録ください。いただいた候補から担当者が日程を確定します。
+                    </p>
                   </div>
                   <button onClick={() => setInterviewOpen(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
                 </div>
-                <p className="text-sm font-bold mb-2">ご希望の時間を1つお選びください</p>
-                <div className="space-y-2">
-                  {(myInterview.slots || []).map((slot) => {
-                    const taken = takenSlotIds.includes(slot.id);
-                    const on = interviewSlot === slot.id;
-                    return (
-                      <button key={slot.id} disabled={taken} onClick={() => setInterviewSlot(slot.id)}
-                        className="w-full text-left px-4 py-3 text-sm bg-white flex items-center gap-2.5 disabled:opacity-45"
-                        style={on ? { border: `1px solid ${ROSE}`, color: ROSE, fontWeight: 700 } : { border: `1px solid ${HAIR}` }}>
-                        <span className="inline-flex items-center justify-center shrink-0"
-                          style={{ width: 16, height: 16, borderRadius: 999, border: `1.5px solid ${on ? ROSE : "#C9BFC3"}`, background: on ? ROSE : "#fff" }}>
-                          {on && <Check size={11} color="#fff" strokeWidth={3} />}
-                        </span>
-                        <span className="flex-1">{slotText(slot)}</span>
-                        {taken && <span className="text-xs shrink-0" style={{ color: MUTE }}>受付終了</span>}
-                      </button>
-                    );
-                  })}
-                  {(myInterview.slots || []).length === 0 && (
-                    <p className="text-xs" style={{ color: MUTE }}>候補の時間がまだ登録されていません。</p>
-                  )}
+
+                <p className="text-sm font-bold mb-2">候補を追加</p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input type="date" value={ivDraft.date} onChange={(e) => setIvDraft({ ...ivDraft, date: e.target.value })}
+                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                  <input type="time" value={ivDraft.start} onChange={(e) => setIvDraft({ ...ivDraft, start: e.target.value })}
+                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                  <input type="time" value={ivDraft.end} onChange={(e) => setIvDraft({ ...ivDraft, end: e.target.value })}
+                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
                 </div>
+                <button onClick={addIvSlot}
+                  className="w-full mt-2 py-2.5 text-sm font-bold bg-white"
+                  style={{ border: `1px dashed ${ROSE}`, color: ROSE }}>
+                  ＋ この時間を候補に追加
+                </button>
+
+                <div className="mt-4 space-y-1.5">
+                  {ivSlots.length === 0 && <p className="text-xs" style={{ color: MUTE }}>まだ候補がありません。上の欄から追加してください。</p>}
+                  {ivSlots.map((x) => (
+                    <div key={x.id} className="flex items-center gap-2 px-3 py-2.5 bg-white" style={{ border: `1px solid ${HAIR}` }}>
+                      <span className="text-sm flex-1">{slotText(x)}</span>
+                      <button onClick={() => removeIvSlot(x.id)} aria-label="削除" className="shrink-0"><X size={15} style={{ color: MAUVE }} /></button>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-sm font-bold mt-5 mb-2">担当者へのご連絡（任意）</p>
+                <textarea value={ivNote} onChange={(e) => setIvNote(e.target.value)} rows={3}
+                  placeholder="例）平日は18時以降ですと助かります。"
+                  className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+
                 {interviewErr && <p className="text-xs font-bold mt-3" style={{ color: "#C0264B" }}>{interviewErr}</p>}
-                <p className="text-xs mt-3 leading-relaxed" style={{ color: MUTE }}>
-                  お選びいただくと予約が確定し、公式LINEに日時とZOOMのご案内をお送りします（連携済みの方）。この画面でもいつでもご確認いただけます。
-                </p>
-                <button disabled={readOnly || interviewBusy || !interviewSlot} onClick={submitInterview}
+                <button disabled={readOnly || interviewBusy || ivSlots.length === 0} onClick={submitInterview}
                   className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
-                  {readOnly ? "プレビュー（予約不可）" : interviewBusy ? "予約中…" : "この時間で予約する"}
+                  {readOnly ? "プレビュー（送信不可）" : interviewBusy ? "送信中…" : `この${ivSlots.length}件を送る`}
                 </button>
               </div>
             </div>

@@ -48,9 +48,9 @@ export const syncRole = () => post("/api/set-role", {}, { authed: true });
 export const setStudentAccount = (payload) =>
   post("/api/student-account", payload, { authed: true });
 
-// 学生：面談の候補から1つ選んで予約（確定時に公式LINEへ案内を送信）
-export const bookInterview = (payload) =>
-  post("/api/questions", { action: "bookInterview", ...payload }, { authed: true });
+// 学生：面談の候補日時を提出する
+export const proposeInterviewSlots = (payload) =>
+  post("/api/questions", { action: "proposeSlots", ...payload }, { authed: true });
 
 // 管理者：学生の最終ログイン日時（Firebase Auth のメタデータ）
 export const studentLastLogin = (uids) =>

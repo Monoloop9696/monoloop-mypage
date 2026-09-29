@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
 
   try {
-    const { target, targetLabel, body, grad, lineOnly } = await readJson(req);
+    const { target, targetLabel, body, grad, lineOnly, uids: body_uids } = await readJson(req);
     const y = Number(grad);
     const text = String(body || "").trim();
     if (!text) return sendJson(res, 400, { error: "メッセージが空です。" });
@@ -35,7 +35,11 @@ export default async function handler(req, res) {
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
 
-    if (typeof target === "string" && target.startsWith("event:")) {
+    // uids 指定があるときは、その学生だけに送る（面談の日程調整など個別連絡用）
+    const onlyUids = Array.isArray(body_uids) && body_uids.length ? new Set(body_uids) : null;
+    if (onlyUids) {
+      recipients = recipients.filter((s) => onlyUids.has(s.id));
+    } else if (typeof target === "string" && target.startsWith("event:")) {
       // イベント参加状況で絞り込み： event:<eventId>:<group>（group = yes/arrived/no/none）
       const [, eventId, group] = target.split(":");
       const rsnap = await dbAdmin.collection("rsvps").where("eventId", "==", eventId).get();
