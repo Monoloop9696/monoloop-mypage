@@ -9,6 +9,21 @@ import { pushMessage } from "./_lib/line.js";
 //   { action: "answer" }         管理者：回答/公開/削除 { id, answer, isPublic, remove }
 //   { action: "proposeSlots" }   学生：面談の候補日時を提出 { id, slots[], note }
 
+function serialize(d) {
+  const q = d.data();
+  return {
+    id: d.id,
+    uid: q.uid,
+    name: q.name || "",
+    grad: q.grad || null,
+    text: q.text || "",
+    answer: q.answer || null,
+    public: q.public === true,
+    createdAt: q.createdAt?.toMillis ? q.createdAt.toMillis() : null,
+    answeredAt: q.answeredAt?.toMillis ? q.answeredAt.toMillis() : null,
+  };
+}
+
 export default async function handler(req, res) {
   if (!methodGuard(req, res)) return;
   const body = await readJson(req);
