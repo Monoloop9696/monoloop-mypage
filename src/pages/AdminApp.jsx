@@ -420,6 +420,7 @@ function AdminBody({
   const [docTargetUids, setDocTargetUids] = useState([]);
   const [arrivalDraft, setArrivalDraft] = useState({}); // eventId -> 到着ボタン文言の編集中の値
   const [optionVoters, setOptionVoters] = useState(null); // {qLabel, option, list:[student]} 選択肢の回答者モーダル
+  const [textAnswers, setTextAnswers] = useState(null); // {qLabel, items:[{name,univ,text}]} 自由記述の一覧モーダル
   const [attendEdit, setAttendEdit] = useState(null); // {e, st} 出欠編集モーダル
   const [attendAns, setAttendAns] = useState("出席");
   const [cancelReason, setCancelReason] = useState("");
@@ -1855,7 +1856,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen || ivConfirm)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen || ivConfirm || textAnswers)
   );
 
   const tabs = [
@@ -2622,22 +2623,46 @@ function AdminBody({
                       return <p className="text-[11px] font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
                     };
                     return (
-                      <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-4">
+                      <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-3">
+                        {/* 未回答は先に見たいので上に出す */}
+                        <div className="rounded-lg p-2.5" style={{ background: unanswered.length ? "#FFF7E6" : "#F1F8F3", border: `1px solid ${unanswered.length ? "#F5D08C" : "#CDE8D6"}` }}>
+                          <p className="text-xs font-bold mb-1" style={{ color: unanswered.length ? "#B45309" : "#1E874B" }}>
+                            {unanswered.length ? `未回答（${unanswered.length}名）` : "全員が回答済みです"}
+                          </p>
+                          {unanswered.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {unanswered.map((x) => (
+                                <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full bg-white" style={{ color: "#B45309" }}>{x.st.name}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className={pc ? "grid grid-cols-2 gap-x-3 gap-y-3 items-start" : "space-y-3"}>
                         {qs.map((q, qi) => {
                           if (q.type === "text") {
                             const texts = answered.filter((x) => (x.a[q.id] || "").toString().trim());
                             return (
-                              <div key={q.id}>
+                              <div key={q.id} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
                                 {secHead(qi)}
-                                <p className="text-xs font-bold text-gray-500 mb-2">Q{qi + 1}. {q.label}（自由記述）</p>
+                                <p className="text-xs font-bold text-gray-500 mb-2">Q{qi + 1}. {q.label}（自由記述・{texts.length}件）</p>
                                 {texts.length === 0 ? (
                                   <p className="text-xs text-gray-300">記述回答はまだありません</p>
-                                ) : texts.map((x) => (
-                                  <div key={x.st.id} className="bg-gray-50 rounded-lg p-3 mb-1.5">
-                                    <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap">{x.a[q.id]}</p>
-                                    <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
-                                  </div>
-                                ))}
+                                ) : (
+                                  <>
+                                    {texts.slice(0, 3).map((x) => (
+                                      <div key={x.st.id} className="bg-white rounded-lg p-2.5 mb-1.5" style={{ border: "1px solid #EEF1F4" }}>
+                                        <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap line-clamp-3">{x.a[q.id]}</p>
+                                        <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
+                                      </div>
+                                    ))}
+                                    <button onClick={() => setTextAnswers({
+                                      qLabel: `Q${qi + 1}. ${q.label}`,
+                                      items: texts.map((x) => ({ name: x.st.name, univ: x.st.univ, text: (x.a[q.id] || "").toString() })),
+                                    })} className="text-xs font-bold" style={{ color: "#5B8DEF" }}>
+                                      {texts.length > 3 ? `すべて読む（${texts.length}件）` : "大きく表示する"}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             );
                           }
@@ -2647,7 +2672,7 @@ function AdminBody({
                               .filter((v) => Number.isFinite(v) && v > 0);
                             const avg = vals.length ? vals.reduce((a1, b1) => a1 + b1, 0) / vals.length : null;
                             return (
-                              <div key={q.id}>
+                              <div key={q.id} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
                                 {secHead(qi)}
                                 <p className="text-xs font-bold text-gray-500 mb-2">
                                   Q{qi + 1}. {q.label}
@@ -2675,7 +2700,7 @@ function AdminBody({
                             );
                           }
                           return (
-                            <div key={q.id}>
+                            <div key={q.id} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
                               {secHead(qi)}
                               <p className="text-xs font-bold text-gray-500 mb-2">
                                 Q{qi + 1}. {q.label}<span className="font-normal text-gray-400 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
@@ -2703,14 +2728,6 @@ function AdminBody({
                             </div>
                           );
                         })}
-                        <div>
-                          <p className="text-xs font-bold text-gray-500 mb-1">未回答（{unanswered.length}名）</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {unanswered.length === 0 && <span className="text-xs text-gray-300">なし</span>}
-                            {unanswered.map((x) => (
-                              <span key={x.st.id} className="text-xs font-bold px-2 py-1 rounded-full" style={{ background: "#FFF7E6", color: "#B45309" }}>{x.st.name}</span>
-                            ))}
-                          </div>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
@@ -4955,6 +4972,30 @@ function AdminBody({
           </div>
         );
       })()}
+
+      {/* 自由記述の一覧モーダル */}
+      {textAnswers && (
+        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setTextAnswers(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+              <div className="min-w-0">
+                <p className="text-xs text-gray-400">自由記述の回答</p>
+                <p className="text-base font-bold mt-0.5 break-words">{textAnswers.qLabel}</p>
+                <p className="text-xs text-gray-400 mt-0.5">{textAnswers.items.length}件</p>
+              </div>
+              <button onClick={() => setTextAnswers(null)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 space-y-2">
+              {textAnswers.items.map((it, i) => (
+                <div key={i} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
+                  <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{it.text}</p>
+                  <p className="text-xs text-gray-400 mt-1.5">— {it.name}（{it.univ}）</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 選択肢の回答者モーダル */}
       {optionVoters && (
