@@ -469,6 +469,8 @@ function AdminBody({
   const [ivConfirm, setIvConfirm] = useState(null); // { reqId, uid }
   const [ivConfirmSlot, setIvConfirmSlot] = useState("");
   const [ivConfirmIv, setIvConfirmIv] = useState("");
+  const [ivConfirmStart, setIvConfirmStart] = useState(""); // 希望枠の中から選ぶ開始時刻
+  const [ivConfirmDur, setIvConfirmDur] = useState(30); // 面談の所要時間（分）
   const [ivConfirmBusy, setIvConfirmBusy] = useState(false);
   const [ivConfirmErr, setIvConfirmErr] = useState("");
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
@@ -1410,8 +1412,31 @@ function AdminBody({
   const openIvConfirm = (reqId, uid) => {
     setIvConfirmErr("");
     setIvConfirmSlot("");
+    setIvConfirmStart("");
+    setIvConfirmDur(30);
     setIvConfirmIv(interviewerOptions[0] ? interviewerOptions[0].name : "");
     setIvConfirm({ reqId, uid });
+  };
+  // "HH:MM" ⇄ 分
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null; };
+  const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+  // 学生の希望枠（例 10:30-18:30）の中で選べる開始時刻を15分刻みで列挙
+  const ivStartOptions = (win, dur) => {
+    const a = toMin(win && win.start); const b = toMin(win && win.end);
+    if (a == null || b == null) return [];
+    if (b - a <= dur) return [fromMin(a)]; // 希望枠が所要時間以下ならその枠をそのまま使う
+    const out = [];
+    for (let t = a; t + dur <= b; t += 15) out.push(fromMin(t));
+    return out;
+  };
+  // 実際に確定する時間（希望枠 × 開始時刻 × 所要時間）
+  const ivConfirmedSlot = (win) => {
+    if (!win) return null;
+    const a = toMin(win.start); const b = toMin(win.end);
+    const st = toMin(ivConfirmStart) ?? a;
+    if (a == null || b == null || st == null) return null;
+    const end = Math.min(st + ivConfirmDur, b);
+    return { id: win.id, date: win.date, start: fromMin(st), end: fromMin(end) };
   };
   const closeIvConfirm = () => { setIvConfirm(null); setIvConfirmErr(""); };
   // 確定時に学生の公式LINEへ送る文面
@@ -1438,8 +1463,12 @@ function AdminBody({
     if (!ivConfirm) return;
     const req = surveys.find((x) => x.id === ivConfirm.reqId);
     const prop = req && req.proposals ? req.proposals[ivConfirm.uid] : null;
-    const slot = prop && (prop.slots || []).find((x) => x.id === ivConfirmSlot);
+    const win = prop && (prop.slots || []).find((x) => x.id === ivConfirmSlot);
+    const slot = ivConfirmedSlot(win);
     if (!slot) { setIvConfirmErr("確定する日時を選んでください。"); return; }
+    if (toMin(slot.start) < toMin(win.start) || toMin(slot.end) > toMin(win.end) || toMin(slot.start) >= toMin(slot.end)) {
+      setIvConfirmErr("確定する時間が希望枠の範囲外です。"); return;
+    }
     const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
     if (!iv) { setIvConfirmErr("担当者を選んでください。"); return; }
     setIvConfirmBusy(true);
@@ -4289,8 +4318,10 @@ function AdminBody({
         const req = surveys.find((x) => x.id === ivConfirm.reqId);
         const st = students.find((x) => x.id === ivConfirm.uid);
         const prop = req && req.proposals ? req.proposals[ivConfirm.uid] : null;
-        const slot = prop ? (prop.slots || []).find((x) => x.id === ivConfirmSlot) : null;
+        const win = prop ? (prop.slots || []).find((x) => x.id === ivConfirmSlot) : null;
+        const slot = ivConfirmedSlot(win);
         const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
+        const startOpts = ivStartOptions(win, ivConfirmDur);
         return (
           <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={closeIvConfirm}>
             <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
@@ -4304,10 +4335,10 @@ function AdminBody({
               </div>
               <div className="overflow-y-auto px-5 py-4 space-y-4">
                 <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1.5">ご希望の候補から選ぶ</p>
+                  <p className="text-xs font-bold text-gray-500 mb-1.5">ご希望の枠から選ぶ</p>
                   <div className="space-y-1.5">
                     {(prop ? prop.slots || [] : []).map((x) => (
-                      <button key={x.id} onClick={() => setIvConfirmSlot(x.id)}
+                      <button key={x.id} onClick={() => { setIvConfirmSlot(x.id); setIvConfirmStart(x.start); }}
                         className="w-full text-left px-3 py-2.5 rounded-lg border text-sm"
                         style={ivConfirmSlot === x.id ? { borderColor: BRAND, color: BRAND, fontWeight: 700, background: BRAND_LIGHT } : { borderColor: "#D7DEDB", background: "#fff" }}>
                         {slotText(x)}
@@ -4315,6 +4346,34 @@ function AdminBody({
                     ))}
                     {(!prop || !(prop.slots || []).length) && <p className="text-xs text-gray-400">候補がまだ提出されていません。</p>}
                   </div>
+                  {win && (
+                    <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                      <p className="text-[11px] font-bold text-gray-500 mb-1.5">この枠の中で実施する時間</p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div>
+                          <p className="text-[11px] text-gray-400 mb-0.5">開始</p>
+                          <select value={ivConfirmStart} onChange={(e) => setIvConfirmStart(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
+                            {startOpts.map((t) => (<option key={t} value={t}>{t}</option>))}
+                          </select>
+                        </div>
+                        <div>
+                          <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
+                          <select value={ivConfirmDur} onChange={(e) => {
+                              const d = Number(e.target.value); setIvConfirmDur(d);
+                              const opts = ivStartOptions(win, d);
+                              if (!opts.includes(ivConfirmStart)) setIvConfirmStart(opts[0] || win.start);
+                            }}
+                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
+                            {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
+                          </select>
+                        </div>
+                      </div>
+                      {slot && (
+                        <p className="text-xs font-bold mt-2" style={{ color: BRAND }}>確定する時間：{slotText(slot)}</p>
+                      )}
+                    </div>
+                  )}
                   {prop && prop.note && (
                     <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
                       <p className="text-[11px] font-bold text-gray-500">本人からの連絡</p>
