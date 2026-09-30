@@ -476,8 +476,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const noOpenEvents = myEvents.length > 0 && myEvents.every((e) => e.rsvp != null || eventClosed(e));
   const noOpenSurveys = mySurveys.length > 0 && mySurveys.every((s) => s.done || surveyClosed(s));
   // ステップの状態： "done"=対応済み / "expired"=未対応のまま受付終了 / "pending"=これから
-  const stepState = (m) => {
-    if (m.type === "accept") return accepted ? "done" : "pending";
+  const stepStateBase = (m) => {
     const r = stepRef(m);
     if (r && r.item) {
       if (r.kind === "event") return r.item.rsvp != null ? "done" : (eventClosed(r.item) ? "expired" : "pending");
@@ -489,6 +488,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     if (m.type === "profile") return profileDone ? "done" : "pending";
     if (m.type === "event") return anyEventDone ? "done" : (noOpenEvents ? "expired" : "pending");
     return "pending";
+  };
+  // 内定承諾は固定ステップ。それ以外は、未対応でも管理画面で設定した期日を過ぎたら通過扱い（Now が止まらない）
+  const stepState = (m) => {
+    if (m.type === "accept") return accepted ? "done" : "pending";
+    const base = stepStateBase(m);
+    if (base === "pending" && m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date) && m.date < todayStr) return "expired";
+    return base;
   };
   const states = visibleJourney.map(stepState);
   // 期限切れのステップも「済み」として扱い、Now が止まらないようにする
@@ -758,7 +764,14 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                               )}
                               {state === "next" && <span style={caps(9, "#D3BFC6", "0.18em")}>Coming</span>}
                             </div>
-                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? "#B7A2AA" : MUTE }}>{m.desc}</p>
+                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? "#B7A2AA" : MUTE }}>
+                              {m.desc}
+                              {m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date) && (
+                                <span className="ml-1.5" style={{ color: state === "now" ? GOLD : "#B7A2AA" }}>
+                                  {Number(m.date.slice(5, 7))}/{Number(m.date.slice(8, 10))}まで
+                                </span>
+                              )}
+                            </p>
                             {tappable && m.cta && (
                               <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold"
                                 style={{ color: ROSE, borderBottom: `1px solid ${ROSE}`, paddingBottom: 2 }}>

@@ -70,7 +70,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - **面談記録**は `templates` コレクションに `_type:"meeting"`（{uid, name, grad, date, time, interviewer, kind, next, **noteUniv/noteJob/noteWorry/noteParent/noteOther**}）で保存。内容は5項目（大学の状況／就活の状況／不安な点／ご両親からの質問／その他）に分割。項目分け前の記録は `note` に入っており、編集時は「その他」へ読み込む（表示は meetingBody() が両形式を吸収）。**templates は管理者のみ read/write なので学生には見えない**（専用コレクションだとルール再デプロイが必要になるため）
 - 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要。内定者タブの「管理する」から**名称変更（該当学生の値も自動で書き換え）・削除・並び替え（手動▲▼／自動=あいうえお順・使用人数順）**が可能
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
-- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
+- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **date**(期日 YYYY-MM-DD。未対応でもこの日を過ぎたら Closed 扱いで通過し次が Now になる。内定/内定承諾の固定ステップは対象外)/**linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
 - `notices/{id}`: text, createdAt（全学年に表示）
 - `articles/{id}`: title, body, grad(null=全学年), published, **publishAt**(予約公開日時・未来なら学生側で非表示。表示制御はクライアント側), thumb, createdAt
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order

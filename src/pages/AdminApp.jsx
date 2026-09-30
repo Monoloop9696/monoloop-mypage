@@ -2824,6 +2824,15 @@ function AdminBody({
                       placeholder="ステップ名" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-bold" />
                     <input value={m.desc} onChange={(e) => updateJourneyLocal(m.id, { desc: e.target.value })} onBlur={persistJourney}
                       placeholder="説明（学生画面に表示）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-gray-400 shrink-0">期日</span>
+                      <input type="date" value={m.date || ""} onChange={(e) => updateJourneyAndSave(m.id, { date: e.target.value || "" })}
+                        className="border border-gray-300 rounded-lg px-2 py-1 text-xs" />
+                      {m.date && (
+                        <button onClick={() => updateJourneyAndSave(m.id, { date: "" })} className="text-[11px] font-bold text-gray-400">解除</button>
+                      )}
+                      <span className="text-[11px] text-gray-400 truncate">この日を過ぎると未対応でも通過し、次のステップが Now になります</span>
+                    </div>
                     <div className="flex gap-1.5">
                       <select value={linkKindOf(m)}
                         onChange={(e) => {
