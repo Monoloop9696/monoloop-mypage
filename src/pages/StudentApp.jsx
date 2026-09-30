@@ -445,7 +445,16 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     if (m.link === "survey") return { kind: "survey", item: mySurveys.find((s) => s.id === m.refId) || null };
     return null;
   };
-  // 1番目は「内定 / 内定承諾」の固定ステップ。ステータスに応じて文言が切り替わる
+  // 入社日（卒年度の joinDate。無ければ卒業年の4月1日）。この日をもって固定ステップが Closed になる
+  const joinDateObj = (() => {
+    const jd = student.joinDate;
+    const d = jd && jd.toDate ? jd.toDate() : (jd ? new Date(jd) : null);
+    if (d && !Number.isNaN(d.getTime())) return d;
+    return new Date(Number(grad) || new Date().getFullYear(), 3, 1);
+  })();
+  const joinStr = `${joinDateObj.getFullYear()}-${String(joinDateObj.getMonth() + 1).padStart(2, "0")}-${String(joinDateObj.getDate()).padStart(2, "0")}`;
+  const joinPassed = todayStr >= joinStr;
+  // 先頭は「内定 / 内定承諾」の固定ステップ。管理画面の入力に関係なく常に表示し、入社式まで Now のまま
   const acceptStep = {
     id: "__accept",
     type: "accept",
@@ -454,16 +463,24 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
       ? "ありがとうございます！これから一緒に頑張りましょう。"
       : "ご承諾のお返事をお待ちしております。",
   };
+  // 末尾は「入社式」の固定ステップ。入社日を過ぎたら Closed
+  const joinStep = {
+    id: "__join",
+    type: "join",
+    label: "入社式",
+    desc: `${joinDateObj.getFullYear()}年${joinDateObj.getMonth() + 1}月${joinDateObj.getDate()}日 — 新しい一歩を。`,
+  };
   const visibleJourney = [
     acceptStep,
     ...journey.filter((m) => {
-      // 管理画面側の「内定」「内定承諾」ステップは固定ステップと重複するので表示しない
+      // 管理画面側の「内定」「内定承諾」「入社式」ステップは固定ステップと重複するので表示しない
       const lb = (m.label || "").trim();
-      if (m.type === "accept" || lb === "内定" || lb === "内定承諾" || lb === "内定承諾済") return false;
+      if (m.type === "accept" || m.type === "join" || ["内定", "内定承諾", "内定承諾済", "入社式"].includes(lb)) return false;
       if (readOnly || !m.refId) return true;
       const r = stepRef(m);
       return !r || !!r.item; // 対象外・未公開・削除済みなら出さない
     }),
+    joinStep,
   ];
   // 「イベント/アンケート」の汎用ステップは、1件でも回答済みなら完了扱い
   // （新しいイベントが追加されても Now が前に戻らないようにするため）
@@ -489,17 +506,28 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     if (m.type === "event") return anyEventDone ? "done" : (noOpenEvents ? "expired" : "pending");
     return "pending";
   };
-  // 内定承諾は固定ステップ。それ以外は、未対応でも管理画面で設定した期日を過ぎたら通過扱い（Now が止まらない）
+  // 固定ステップ（内定/内定承諾・入社式）は入社日をもって Closed。
+  // それ以外は、イベント/アンケートの回答が無くても、管理画面で設定した期日を過ぎたら強制的に通過させる（Now が止まらない）
   const stepState = (m) => {
-    if (m.type === "accept") return accepted ? "done" : "pending";
+    if (m.type === "accept" || m.type === "join") return joinPassed ? "expired" : "pending";
     const base = stepStateBase(m);
-    if (base === "pending" && m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date) && m.date < todayStr) return "expired";
+    if (base !== "done" && m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date) && m.date < todayStr) return "expired";
     return base;
   };
   const states = visibleJourney.map(stepState);
-  // 期限切れのステップも「済み」として扱い、Now が止まらないようにする
-  const flags = states.map((x) => x !== "pending");
+  // Now を決めるときは固定ステップを飛ばす（内定/内定承諾は常に Now 表示、入社式は最後まで Coming）
+  const flags = states.map((x, i) => {
+    const t = visibleJourney[i].type;
+    if (t === "accept" || t === "join") return true;
+    return x !== "pending";
+  });
   const nowIdx = flags.findIndex((x) => !x);
+  // 表示上の状態
+  const displayState = (m, i) => {
+    if (m.type === "accept") return joinPassed ? "done" : "now";
+    if (m.type === "join") return joinPassed ? "done" : "next";
+    return flags[i] ? "done" : (i === nowIdx ? "now" : "next");
+  };
   const milestones = visibleJourney.map((m, i) => {
     let cta = null, onTap = null, isLink = false;
     if (m.link && !/^https?:\/\/$/i.test(m.link)) {
@@ -529,7 +557,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     }
     // 内定承諾ステップの表示名は status に合わせて自動で切り替える
     const label = m.type === "accept" ? (accepted ? "内定承諾" : "内定") : m.label;
-    return { ...m, label, cta, onTap, isLink, expired: states[i] === "expired" };
+    // 固定ステップ（内定/入社式）は入社日を過ぎたら Closed ではなく Done と表示する
+    return { ...m, label, cta, onTap, isLink, expired: states[i] === "expired" && m.type !== "accept" && m.type !== "join" };
   });
 
   const statusTag = (e) =>
@@ -740,7 +769,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   <EdHeader en="Journey" jp="入社までの道のり" />
                   <div>
                     {milestones.map((m, i) => {
-                      const state = flags[i] ? "done" : i === nowIdx ? "now" : "next";
+                      const state = displayState(m, i);
                       const tappable = !!m.onTap && (m.isLink || state === "now");
                       const inner = (
                         <div className="flex items-start gap-4 py-5"
@@ -764,14 +793,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                               )}
                               {state === "next" && <span style={caps(9, "#D3BFC6", "0.18em")}>Coming</span>}
                             </div>
-                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? "#B7A2AA" : MUTE }}>
-                              {m.desc}
-                              {m.date && /^\d{4}-\d{2}-\d{2}$/.test(m.date) && (
-                                <span className="ml-1.5" style={{ color: state === "now" ? GOLD : "#B7A2AA" }}>
-                                  {Number(m.date.slice(5, 7))}/{Number(m.date.slice(8, 10))}まで
-                                </span>
-                              )}
-                            </p>
+                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? "#B7A2AA" : MUTE }}>{m.desc}</p>
                             {tappable && m.cta && (
                               <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold"
                                 style={{ color: ROSE, borderBottom: `1px solid ${ROSE}`, paddingBottom: 2 }}>

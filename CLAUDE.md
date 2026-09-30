@@ -70,7 +70,7 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
 - **面談記録**は `templates` コレクションに `_type:"meeting"`（{uid, name, grad, date, time, interviewer, kind, next, **noteUniv/noteJob/noteWorry/noteParent/noteOther**}）で保存。内容は5項目（大学の状況／就活の状況／不安な点／ご両親からの質問／その他）に分割。項目分け前の記録は `note` に入っており、編集時は「その他」へ読み込む（表示は meetingBody() が両形式を吸収）。**templates は管理者のみ read/write なので学生には見えない**（専用コレクションだとルール再デプロイが必要になるため）
 - 流入経路（媒体・紹介会社）の選択肢は `templates` コレクションに `_type:"source"`（{name, order}）で保存＝ルール追加不要。内定者タブの「管理する」から**名称変更（該当学生の値も自動で書き換え）・削除・並び替え（手動▲▼／自動=あいうえお順・使用人数順）**が可能
 - アンケートのテンプレは `templates` コレクションに `_type:"surveyTemplate"`（{name, data:{title,time,questions}}・回答期限は保存しない）で保存＝ルール追加不要
-- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **date**(期日 YYYY-MM-DD。未対応でもこの日を過ぎたら Closed 扱いで通過し次が Now になる。内定/内定承諾の固定ステップは対象外)/**linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
+- `journeys/{grad}`: steps[]（id,label,desc,type, 任意で **date**(期日 YYYY-MM-DD。学生には表示しない。未対応でもこの日を過ぎたら Closed 扱いで強制的に通過し次が Now になる。固定ステップは対象外)/**linkType**(""/event/survey/line/profile/url)/link/**refId**(event/survey のときに対象を1件指定)/cta）※linkType が無い旧データは link の値から種別を推定。refId 指定のステップは**その対象者にだけ表示**され、回答すると完了扱い。**受付終了（イベント=closed/回答期限/開催日、アンケート=dueDate）を過ぎた未対応ステップは「Closed」として自動で通過**し Now が止まらない。汎用(event/survey・refIdなし)は1件でも回答済みなら完了＝イベント追加でNowが巻き戻らない
 - `notices/{id}`: text, createdAt（全学年に表示）
 - `articles/{id}`: title, body, grad(null=全学年), published, **publishAt**(予約公開日時・未来なら学生側で非表示。表示制御はクライアント側), thumb, createdAt
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order
@@ -142,7 +142,7 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 
 **学生（StudentApp）**:
 - ヘッダー(正式ロゴ)＋上部アラート(未対応タスク)。右上メニュー(≡)に **質問箱／LINE連携／プロフィール／ログアウト** を集約（下部ナビは HOME/EVENTS/SURVEY/NEWS の4つ）。
-- ホーム: ループちゃん(時間帯・誕生日・イベントで出し分け＋吹き出し)、**日付・時刻のライブ時計**、進捗バー、**内定承諾の演出**(status="承諾" になると Journey の accept ステップが「内定」→「内定承諾」に自動で変わり Done、ヘッダー下に「内定承諾済」バッジ、承諾後の初回ログインで全画面のお祝い＝紙吹雪＋ループちゃん。表示済みは localStorage `ml_accept_celebrated_<uid>` に記録し1回だけ。カウントダウンは出さない方針)、Journey(リンク可・**指定イベント/アンケートに紐づけると対象者にだけ表示＋タップでその1件を直接開く**)、直近イベント、お知らせ。
+- ホーム: ループちゃん(時間帯・誕生日・イベントで出し分け＋吹き出し)、**日付・時刻のライブ時計**、進捗バー、**Journey の固定ステップ**（先頭「内定/内定承諾」＝status で文言切替・管理画面の入力に関係なく常に表示し**入社日まで常に Now**、末尾「入社式」＝入社日(cohort の joinDate、無ければ卒業年4/1)まで Coming。入社日を過ぎると両方 Done。Now の計算からは除外するので他ステップの Now と同時に出る）、**内定承諾の演出**(status="承諾" になるとヘッダー下に「内定承諾済」バッジ、承諾後の初回ログインで全画面のお祝い＝紙吹雪＋ループちゃん。表示済みは localStorage `ml_accept_celebrated_<uid>` に記録し1回だけ。カウントダウンは出さない方針)、Journey(リンク可・**指定イベント/アンケートに紐づけると対象者にだけ表示＋タップでその1件を直接開く**)、直近イベント、お知らせ。
 - イベント: 出欠(出席/欠席)。**未回答/回答済み/受付終了に枠分け**(回答期限=deadlineDate 超過 or 管理者の手動終了で受付終了)。**到着受付**(出席者は開催日当日以降いつでも押下可、回答締切とは独立、管理者が最終終了するまで)。回答変更時「担当者に共有」表示。**対象エリア/個別対象**に該当する学生にだけ表示。
 - アンケート: **説明文(タイトル下)**・**動的設問(単一選択/複数選択/自由記述)**・**セクション分割＋回答による分岐**(1セクション1画面・次へ/戻る・通らなかったセクションの回答は保存しない)、未回答/回答済み/受付終了(dueDate)。**対象者限定**(全員 or 特定イベントの出席者/到着者)＋**対象エリア/個別対象**に該当する学生だけ表示。
 - NEWS(記事＋写真, インスタ風=写真上/文章下, 写真保存ボタン)。**質問箱**(投稿・自分のQ&A履歴・公開FAQ)。LINE連携。
