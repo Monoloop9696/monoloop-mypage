@@ -3,7 +3,7 @@ import {
   BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { SectionTitle } from "../components/common";
+import { SectionTitle, TimeSelect } from "../components/common";
 import { StudentInner } from "./StudentApp";
 import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
 import { downloadCsv } from "../lib/csv";
@@ -2036,8 +2036,7 @@ function AdminBody({
                   </div>
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">開始時間</p>
-                    <input type="time" value={ev.time} onChange={(e) => setEv({ ...ev, time: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    <TimeSelect value={ev.time} onChange={(v) => setEv({ ...ev, time: v })} allowEmpty={false} />
                   </div>
                 </div>
                 <div>
@@ -2055,9 +2054,7 @@ function AdminBody({
                   <div className="grid grid-cols-2 gap-2">
                     <input type="date" value={ev.deadlineDate} onChange={(e) => setEv({ ...ev, deadlineDate: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
-                    <input type="time" value={ev.deadlineTime} onChange={(e) => setEv({ ...ev, deadlineTime: e.target.value })}
-                      disabled={!ev.deadlineDate}
-                      className="w-full border border-gray-300 rounded-lg p-2.5 text-sm disabled:bg-gray-50" />
+                    <TimeSelect value={ev.deadlineTime} onChange={(v) => setEv({ ...ev, deadlineTime: v })} disabled={!ev.deadlineDate} />
                   </div>
                   <p className="text-[11px] text-gray-400 mt-1">
                     {ev.deadlineDate && ev.deadlineTime
@@ -2366,9 +2363,7 @@ function AdminBody({
                     <div className="grid grid-cols-2 gap-1.5">
                       <input type="date" value={sv.dueDate} onChange={(e) => setSv({ ...sv, dueDate: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
-                      <input type="time" value={sv.dueTime} onChange={(e) => setSv({ ...sv, dueTime: e.target.value })}
-                        disabled={!sv.dueDate}
-                        className="w-full border border-gray-300 rounded-lg p-2.5 text-sm disabled:bg-gray-50" />
+                      <TimeSelect value={sv.dueTime} onChange={(v) => setSv({ ...sv, dueTime: v })} disabled={!sv.dueDate} />
                     </div>
                     <p className="text-[11px] text-gray-400 mt-1">時刻は任意（空欄ならその日いっぱい）。</p>
                   </div>
@@ -4368,15 +4363,13 @@ function AdminBody({
                       <p className="text-[11px] font-bold text-gray-500 mb-1.5">この時間帯の中で実施する時間</p>
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <p className="text-[11px] text-gray-400 mb-0.5">開始時刻（{win.start}〜{win.end} の間で自由に指定）</p>
-                          <input type="time" value={ivConfirmStart} min={win.start} max={win.end}
-                            onChange={(e) => setIvConfirmStart(e.target.value)}
-                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white" />
+                          <p className="text-[11px] text-gray-400 mb-0.5">開始時刻（{win.start}〜{win.end} の間・5分刻み）</p>
+                          <TimeSelect value={ivConfirmStart} onChange={setIvConfirmStart} min={win.start} max={win.end} allowEmpty={false} />
                         </div>
                         <div>
                           <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
                           <select value={ivConfirmDur} onChange={(e) => setIvConfirmDur(Number(e.target.value))}
-                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
+                            className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                             {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
                           </select>
                         </div>
@@ -4566,8 +4559,7 @@ function AdminBody({
                 </div>
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">開始時刻</p>
-                  <input type="time" value={meetForm.time} onChange={(e) => setMeetForm({ ...meetForm, time: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                  <TimeSelect value={meetForm.time} onChange={(v) => setMeetForm({ ...meetForm, time: v })} />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">

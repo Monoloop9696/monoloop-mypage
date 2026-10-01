@@ -5,7 +5,7 @@ import {
   Menu, HelpCircle, User, Send,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { EdHeader, FullLoader } from "../components/common";
+import { EdHeader, FullLoader, TimeSelect } from "../components/common";
 import {
   PAPER, PINK, ROSE, ROSE_DEEP, IVORY, MAUVE, GOLD, HAIR, MUTE, INK, LINE_GREEN,
   studentFontStyle, caps,
@@ -1255,13 +1255,20 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <p className="text-xs mb-2 leading-relaxed" style={{ color: ROSE }}>
                   ※面談を<span className="font-bold">開始できる時刻</span>でお選びください（例：10:00〜18:00 と入力すると、その間のどこかで面談を開始します）。
                 </p>
-                <div className="grid grid-cols-3 gap-1.5">
-                  <input type="date" value={ivDraft.date} onChange={(e) => setIvDraft({ ...ivDraft, date: e.target.value })}
-                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
-                  <input type="time" value={ivDraft.start} onChange={(e) => setIvDraft({ ...ivDraft, start: e.target.value })}
-                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
-                  <input type="time" value={ivDraft.end} onChange={(e) => setIvDraft({ ...ivDraft, end: e.target.value })}
-                    className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                <p className="text-xs mb-1" style={{ color: MUTE }}>日付</p>
+                <input type="date" value={ivDraft.date} onChange={(e) => setIvDraft({ ...ivDraft, date: e.target.value })}
+                  className="w-full p-2.5 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: MUTE }}>開始できる時刻（から）</p>
+                    <TimeSelect value={ivDraft.start} onChange={(v) => setIvDraft({ ...ivDraft, start: v })}
+                      selectClassName="px-1.5 py-2.5 text-sm bg-white" selectStyle={{ border: `1px solid ${HAIR}` }} />
+                  </div>
+                  <div>
+                    <p className="text-xs mb-1" style={{ color: MUTE }}>（まで）</p>
+                    <TimeSelect value={ivDraft.end} onChange={(v) => setIvDraft({ ...ivDraft, end: v })}
+                      selectClassName="px-1.5 py-2.5 text-sm bg-white" selectStyle={{ border: `1px solid ${HAIR}` }} />
+                  </div>
                 </div>
                 <button onClick={addIvSlot}
                   className="w-full mt-2 py-2.5 text-sm font-bold bg-white"
