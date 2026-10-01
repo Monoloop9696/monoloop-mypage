@@ -59,9 +59,10 @@ function pickLoopChan(student, events) {
   return LOOPCHAN.latenight;
 }
 
-// 面談の候補日時「8/7(金) 16:30 - 17:00（30分）」
+// 面談の日時「8/7(金) 16:30 - 17:00」。withMins=true のときだけ末尾に（30分）を付ける
+// （学生が出す希望の時間帯には合計時間を出さない。確定した面談にだけ所要時間を出す）
 const WEEK_JP = ["日", "月", "火", "水", "木", "金", "土"];
-export function slotText(slot) {
+export function slotText(slot, withMins = false) {
   if (!slot || !slot.date) return "";
   const [y, m, d] = String(slot.date).split("-").map(Number);
   const dt = new Date(y, (m || 1) - 1, d || 1);
@@ -72,7 +73,7 @@ export function slotText(slot) {
   };
   const a = toMin(slot.start); const b = toMin(slot.end);
   const mins = a != null && b != null && b > a ? b - a : null;
-  return `${m}/${d}(${w}) ${slot.start} - ${slot.end}${mins ? `（${mins}分）` : ""}`;
+  return `${m}/${d}(${w}) ${slot.start} - ${slot.end}${withMins && mins ? `（${mins}分）` : ""}`;
 }
 
 // ホームの日付・時刻表示（毎秒更新）
@@ -700,7 +701,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       {myBooking ? (
                         <>
                           <span style={caps(9, ROSE, "0.18em")}>予約済み</span>
-                          <p className="jp-mincho font-bold mt-2" style={{ fontSize: 17 }}>{slotText(myBooking)}</p>
+                          <p className="jp-mincho font-bold mt-2" style={{ fontSize: 17 }}>{slotText(myBooking, true)}</p>
                           {myInterview.zoomUrl ? (
                             <div className="mt-4 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}` }}>
                               <p className="text-xs font-bold" style={{ color: MUTE }}>ZOOM URL</p>
@@ -1250,7 +1251,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   <button onClick={() => setInterviewOpen(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
                 </div>
 
-                <p className="text-sm font-bold mb-2">候補を追加</p>
+                <p className="text-sm font-bold mb-1">候補を追加</p>
+                <p className="text-xs mb-2 leading-relaxed" style={{ color: ROSE }}>
+                  ※面談を<span className="font-bold">開始できる時刻</span>でお選びください（例：10:00〜18:00 と入力すると、その間のどこかで面談を開始します）。
+                </p>
                 <div className="grid grid-cols-3 gap-1.5">
                   <input type="date" value={ivDraft.date} onChange={(e) => setIvDraft({ ...ivDraft, date: e.target.value })}
                     className="w-full p-2 text-xs bg-white" style={{ border: `1px solid ${HAIR}` }} />

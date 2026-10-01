@@ -629,6 +629,22 @@ function AdminBody({
     updateEvent(e.id, { arrivalLabel: (arrivalValue(e) || "").trim() });
     setArrivalDraft((p) => { const n = { ...p }; delete n[e.id]; return n; });
   };
+  // ---- 過去の記録を残すための対象者 ----
+  // 辞退・削除済みの学生はアカウントが無効になるが、出欠・回答のデータは残っている。
+  // 集計画面とCSVでは「在籍中の対象者」に加えて「その回に回答が残っている元・内定者」も表示する
+  const isFormer = (st) => !!st && (st.deleted === true || st.status === "辞退" || st.status === "承諾後辞退");
+  const formerStudents = yearStudents.filter((st) => st.status !== "テスト" && isFormer(st));
+  const eventRecordAudience = (e) => [
+    ...eventAudience(e),
+    ...formerStudents.filter((st) => rsvpOf(st, e) !== "未回答"),
+  ];
+  const surveyRecordAudience = (sv) => [
+    ...surveyAudience(sv),
+    ...formerStudents.filter((st) => !!respMap[`${sv.id}_${st.id}`]),
+  ];
+  // 表示用の氏名（元・内定者には印を付ける）
+  const recName = (st) => (isFormer(st) ? `${st.name}（${st.status === "辞退" || st.status === "承諾後辞退" ? "辞退" : "削除済"}）` : st.name);
+
   // 各イベント／アンケートの対象者（uidの集合）。タスク進捗と未対応タスクの判定に使う
   const taskTargets = {
     events: yearEvents.map((e) => ({ item: e, set: new Set(eventAudience(e).map((x) => x.id)) })),
@@ -1420,22 +1436,14 @@ function AdminBody({
   // "HH:MM" ⇄ 分
   const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null; };
   const fromMin = (n) => `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
-  // 学生の希望枠（例 10:30-18:30）の中で選べる開始時刻を15分刻みで列挙
-  const ivStartOptions = (win, dur) => {
-    const a = toMin(win && win.start); const b = toMin(win && win.end);
-    if (a == null || b == null) return [];
-    if (b - a <= dur) return [fromMin(a)]; // 希望枠が所要時間以下ならその枠をそのまま使う
-    const out = [];
-    for (let t = a; t + dur <= b; t += 15) out.push(fromMin(t));
-    return out;
-  };
-  // 実際に確定する時間（希望枠 × 開始時刻 × 所要時間）
+  // 実際に確定する時間（開始時刻 ＋ 所要時間）。
+  // 学生の希望は「開始できる時刻の範囲」なので、開始時刻はその範囲内で自由に選べる
   const ivConfirmedSlot = (win) => {
     if (!win) return null;
-    const a = toMin(win.start); const b = toMin(win.end);
+    const a = toMin(win.start);
     const st = toMin(ivConfirmStart) ?? a;
-    if (a == null || b == null || st == null) return null;
-    const end = Math.min(st + ivConfirmDur, b);
+    if (st == null) return null;
+    const end = Math.min(st + ivConfirmDur, 23 * 60 + 59);
     return { id: win.id, date: win.date, start: fromMin(st), end: fromMin(end) };
   };
   const closeIvConfirm = () => { setIvConfirm(null); setIvConfirmErr(""); };
@@ -1447,7 +1455,7 @@ function AdminBody({
       "※私服で問題ございません！",
       "",
       "【日時】",
-      slotText(slot),
+      slotText(slot, true),
       "",
     ];
     if (iv && iv.zoomUrl) {
@@ -1466,8 +1474,8 @@ function AdminBody({
     const win = prop && (prop.slots || []).find((x) => x.id === ivConfirmSlot);
     const slot = ivConfirmedSlot(win);
     if (!slot) { setIvConfirmErr("確定する日時を選んでください。"); return; }
-    if (toMin(slot.start) < toMin(win.start) || toMin(slot.end) > toMin(win.end) || toMin(slot.start) >= toMin(slot.end)) {
-      setIvConfirmErr("確定する時間が希望枠の範囲外です。"); return;
+    if (toMin(slot.start) < toMin(win.start) || toMin(slot.start) > toMin(win.end)) {
+      setIvConfirmErr(`開始時刻は学生の希望の範囲（${win.start}〜${win.end}）で選んでください。`); return;
     }
     const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
     if (!iv) { setIvConfirmErr("担当者を選んでください。"); return; }
@@ -1859,7 +1867,7 @@ function AdminBody({
 
   const exportAttendanceCsv = (e) => {
     const header = ["氏名", "大学", "ステータス", "出欠", "到着", "キャンセル理由"];
-    const rows = eventAudience(e).map((st) => {
+    const rows = eventRecordAudience(e).map((st) => {
       const r = rsvpOf(st, e);
       const arr = r === "出席" ? (arrivedOf(st, e) ? "到着済" : "未到着") : "-";
       return [st.name, st.univ, statusLabel(st), r, arr, r === "欠席" ? reasonOf(st, e) : ""];
@@ -1870,7 +1878,7 @@ function AdminBody({
   const exportSurveyCsv = (s) => {
     const qs = surveyQuestions(s);
     const header = ["氏名", "大学", "回答状況", ...qs.map((q, i) => `Q${i + 1}:${q.label}`)];
-    const rows = surveyAudience(s).map((st) => {
+    const rows = surveyRecordAudience(s).map((st) => {
       const a = answerOf(st, s);
       const cells = qs.map((q) => {
         if (!a) return "";
@@ -2172,7 +2180,7 @@ function AdminBody({
             )}
 
             {(showAllEvents ? yearEvents : yearEvents.slice(0, VISIBLE_ITEMS)).map((e) => {
-              const aud = eventAudience(e);
+              const aud = eventRecordAudience(e); // 辞退・削除済みでも回答が残っていれば含める
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: rsvpOf(st, e) }));
               const yes = list.filter((x) => x.r === "出席").length;
@@ -2232,7 +2240,7 @@ function AdminBody({
                                   <button key={x.st.id} onClick={() => { setAttendAns(x.r); setCancelReason(reasonOf(x.st, e)); setAttendEdit({ e, st: x.st }); }}
                                     className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}
                                     title={reason ? `キャンセル理由：${reason}` : "タップで変更"}>
-                                    {arr && <CheckCircle2 size={11} />}{x.st.name}
+                                    {arr && <CheckCircle2 size={11} />}{recName(x.st)}
                                     {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
                                     {reason && <span className="ml-0.5" style={{ fontSize: 10 }}>📝</span>}
                                   </button>
@@ -2603,7 +2611,7 @@ function AdminBody({
             )}
 
             {(showAllSurveys ? yearSurveys : yearSurveys.slice(0, VISIBLE_ITEMS)).map((s) => {
-              const aud = surveyAudience(s);
+              const aud = surveyRecordAudience(s); // 辞退・削除済みでも回答が残っていれば含める
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: answeredOf(st, s) }));
               const done = list.filter((x) => x.r === "回答済").length;
@@ -2681,12 +2689,12 @@ function AdminBody({
                                     {texts.slice(0, 3).map((x) => (
                                       <div key={x.st.id} className="bg-white rounded-lg p-2.5 mb-1.5" style={{ border: "1px solid #EEF1F4" }}>
                                         <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap line-clamp-3">{x.a[q.id]}</p>
-                                        <p className="text-xs text-gray-400 mt-1.5">— {x.st.name}（{x.st.univ}）</p>
+                                        <p className="text-xs text-gray-400 mt-1.5">— {recName(x.st)}（{x.st.univ}）</p>
                                       </div>
                                     ))}
                                     <button onClick={() => setTextAnswers({
                                       qLabel: `Q${qi + 1}. ${q.label}`,
-                                      items: texts.map((x) => ({ name: x.st.name, univ: x.st.univ, text: (x.a[q.id] || "").toString() })),
+                                      items: texts.map((x) => ({ name: recName(x.st), univ: x.st.univ, text: (x.a[q.id] || "").toString() })),
                                     })} className="text-xs font-bold" style={{ color: "#5B8DEF" }}>
                                       {texts.length > 3 ? `すべて読む（${texts.length}件）` : "大きく表示する"}
                                     </button>
@@ -3462,7 +3470,7 @@ function AdminBody({
                                 <span className="text-xs font-bold truncate">{st.name}</span>
                                 {b ? (
                                   <span className="text-xs shrink-0 font-bold" style={{ color: "#1E874B" }}>
-                                    確定 {slotText(b)}{b.interviewer ? `・${b.interviewer}` : ""}
+                                    確定 {slotText(b, true)}{b.interviewer ? `・${b.interviewer}` : ""}
                                   </span>
                                 ) : p ? (
                                   <button onClick={() => openIvConfirm(r.id, st.id)}
@@ -4330,7 +4338,7 @@ function AdminBody({
         const win = prop ? (prop.slots || []).find((x) => x.id === ivConfirmSlot) : null;
         const slot = ivConfirmedSlot(win);
         const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
-        const startOpts = ivStartOptions(win, ivConfirmDur);
+
         return (
           <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={closeIvConfirm}>
             <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
@@ -4357,29 +4365,24 @@ function AdminBody({
                   </div>
                   {win && (
                     <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <p className="text-[11px] font-bold text-gray-500 mb-1.5">この枠の中で実施する時間</p>
+                      <p className="text-[11px] font-bold text-gray-500 mb-1.5">この時間帯の中で実施する時間</p>
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <p className="text-[11px] text-gray-400 mb-0.5">開始</p>
-                          <select value={ivConfirmStart} onChange={(e) => setIvConfirmStart(e.target.value)}
-                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
-                            {startOpts.map((t) => (<option key={t} value={t}>{t}</option>))}
-                          </select>
+                          <p className="text-[11px] text-gray-400 mb-0.5">開始時刻（{win.start}〜{win.end} の間で自由に指定）</p>
+                          <input type="time" value={ivConfirmStart} min={win.start} max={win.end}
+                            onChange={(e) => setIvConfirmStart(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white" />
                         </div>
                         <div>
                           <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
-                          <select value={ivConfirmDur} onChange={(e) => {
-                              const d = Number(e.target.value); setIvConfirmDur(d);
-                              const opts = ivStartOptions(win, d);
-                              if (!opts.includes(ivConfirmStart)) setIvConfirmStart(opts[0] || win.start);
-                            }}
+                          <select value={ivConfirmDur} onChange={(e) => setIvConfirmDur(Number(e.target.value))}
                             className="w-full border border-gray-300 rounded-lg p-2 text-sm bg-white">
                             {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
                           </select>
                         </div>
                       </div>
                       {slot && (
-                        <p className="text-xs font-bold mt-2" style={{ color: BRAND }}>確定する時間：{slotText(slot)}</p>
+                        <p className="text-xs font-bold mt-2" style={{ color: BRAND }}>確定する時間：{slotText(slot, true)}</p>
                       )}
                     </div>
                   )}
