@@ -613,7 +613,7 @@ function AdminBody({
   };
   // 「関東・東海（現住所）」「個別選択 n名」などの表示テキスト（指定なしは null）
   const surveyAreaText = (s) => {
-    if (Array.isArray(s && s.targetUids)) return `個別選択 ${s.targetUids.length}名`;
+    if (Array.isArray(s && s.targetUids)) return `個別指定 ${s.targetUids.length}名（固定。以後に登録した学生は対象外）`;
     if (!s || !s.areas || !s.areas.length) return null;
     const b = s.areaBasis === "current" ? "現住所" : s.areaBasis === "home" ? "実家" : "どちらも";
     return `${s.areas.map(areaLabel).join("・")}（${b}）`;
@@ -825,7 +825,7 @@ function AdminBody({
     e.closed === true || (e.deadlineDate ? pastDeadline(e.deadlineDate, e.deadlineTime) : !!(e.dateStr && e.dateStr < adminTodayStr));
   const surveyIsClosed = (s) => pastDeadline(s.dueDate, s.dueTime);
   const eventAreaText = (e) => {
-    if (Array.isArray(e.targetUids)) return `個別選択 ${e.targetUids.length}名`;
+    if (Array.isArray(e.targetUids)) return `個別指定 ${e.targetUids.length}名（固定。以後に登録した学生は対象外）`;
     if (!e.areas || !e.areas.length) return null;
     const b = e.areaBasis === "current" ? "現住所" : e.areaBasis === "home" ? "実家" : "どちらも";
     return `${e.areas.map(areaLabel).join("・")}（${b}）`;
@@ -2127,7 +2127,7 @@ function AdminBody({
                       className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
                       対象者を確認・個別調整
                     </button>
-                    <span className="text-xs text-gray-500">対象 {formTargetCount}名{Array.isArray(ev.targetUids) ? "（個別調整あり）" : ""}</span>
+                    <span className="text-xs text-gray-500">対象 {formTargetCount}名{Array.isArray(ev.targetUids) ? "（個別指定＝以後に登録した学生は対象外）" : ""}</span>
                     {Array.isArray(ev.targetUids) && (
                       <button onClick={() => setEv({ ...ev, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
                     )}
@@ -2448,7 +2448,7 @@ function AdminBody({
                       className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
                       対象者を確認・個別調整
                     </button>
-                    <span className="text-xs text-gray-500">対象 {svFormTargetCount}名{Array.isArray(sv.targetUids) ? "（個別調整あり）" : ""}</span>
+                    <span className="text-xs text-gray-500">対象 {svFormTargetCount}名{Array.isArray(sv.targetUids) ? "（個別指定＝以後に登録した学生は対象外）" : ""}</span>
                     {Array.isArray(sv.targetUids) && (
                       <button onClick={() => setSv({ ...sv, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
                     )}
@@ -4957,7 +4957,18 @@ function AdminBody({
           : (isSv ? svFormAreaIds : formAreaIds);
         const selectedUids = isDoc ? docTargetUids : (Array.isArray(form.targetUids) ? form.targetUids : []);
         const setSelectedUids = isDoc ? setDocTargetUids : (next) => setForm((p) => ({ ...p, targetUids: next }));
-        const closeTargetModal = () => { setTargetModal(null); setDocTargetUids([]); };
+        const closeTargetModal = () => {
+          if (!isDoc) {
+            // 選択が「条件どおりの対象者」と同じなら個別指定にせず、条件（エリア／全員）のまま保存する。
+            // こうしないと、確認のために開いただけで対象者がその時点の名簿に固定され、
+            // あとから登録した学生に表示されなくなる。
+            const base = (form.areas && form.areas.length) ? areaIdsFn() : candidates.map((x) => x.id);
+            const cur = Array.isArray(form.targetUids) ? form.targetUids : [];
+            const same = base.length === cur.length && base.every((id) => cur.includes(id));
+            if (same) setForm((p) => ({ ...p, targetUids: null }));
+          }
+          setTargetModal(null); setDocTargetUids([]);
+        };
         const sel = new Set(selectedUids);
         const toggleUid = (id) => setSelectedUids(sel.has(id) ? selectedUids.filter((x) => x !== id) : [...selectedUids, id]);
         const saveDocTarget = async () => {
@@ -4999,7 +5010,7 @@ function AdminBody({
               </div>
               {isDoc && (
                 <p className="px-4 pt-2 text-[11px] text-gray-400 shrink-0">
-                  あとから登録した学生もこの一覧に出ます。チェックを入れた学生にだけ表示されます（保存すると個別指定になり、エリア条件より優先されます）。
+                  チェックを入れた学生にだけ表示されます。「この内容で保存」すると対象者が<span className="font-bold">この名簿に固定</span>され、以後に登録した学生には表示されません。全員やエリアで自動的に対象にしたい場合は、下の「個別指定を解除（条件どおりに戻す）」を使ってください。
                 </p>
               )}
               <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 shrink-0">
