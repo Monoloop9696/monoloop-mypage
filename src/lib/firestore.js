@@ -311,6 +311,10 @@ export async function loadAllRsvps() {
   const snap = await getDocs(collection(db, "rsvps"));
   return snap.docs.map((d) => d.data());
 }
+// 管理画面用：出欠をリアルタイム購読（学生が回答した瞬間に反映される）
+export function listenAllRsvps(cb) {
+  return onSnapshot(collection(db, "rsvps"), (snap) => cb(snap.docs.map((d) => d.data())));
+}
 
 // =====================================================================
 // responses/{surveyId}_{uid}
@@ -346,6 +350,10 @@ export async function loadBroadcasts() {
 export async function loadAllResponses() {
   const snap = await getDocs(collection(db, "responses"));
   return snap.docs.map((d) => d.data());
+}
+// 管理画面用：アンケート回答をリアルタイム購読
+export function listenAllResponses(cb) {
+  return onSnapshot(collection(db, "responses"), (snap) => cb(snap.docs.map((d) => d.data())));
 }
 
 // =====================================================================

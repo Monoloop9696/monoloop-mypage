@@ -171,6 +171,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [interviewErr, setInterviewErr] = useState("");
   const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
   const [celebrate, setCelebrate] = useState(false); // 内定承諾のお祝い演出
+  const [svBusy, setSvBusy] = useState(false); // アンケート送信中
+  const [svErr, setSvErr] = useState(""); // アンケート送信エラー
+  const [toast, setToast] = useState(""); // 画面上部の短い通知（送信完了など）
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2600); };
   const svScrollRef = useRef(null);
   const [profileForm, setProfileForm] = useState({
     zip: student.zip || "", address: student.address || "",
@@ -393,14 +397,18 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     }
     const prev = rsvpMap[id] ?? null;
     const changed = prev !== null && prev !== v; // 既回答からの変更
-    setRsvp(id, uid, v, changed);
+    setRsvp(id, uid, v, changed)
+      .then(() => showToast(v === "yes" ? "出席で回答しました" : "欠席で回答しました"))
+      .catch(() => showToast("送信できませんでした。通信状況をご確認のうえ、もう一度お試しください。"));
   };
   const doArrive = (id) => {
     if (readOnly) {
       setPreviewArrived((m) => ({ ...m, [id]: true }));
       return;
     }
-    markArrived(id, uid);
+    markArrived(id, uid)
+      .then(() => showToast("到着を受け付けました"))
+      .catch(() => showToast("送信できませんでした。通信状況をご確認のうえ、もう一度お試しください。"));
   };
 
   const submitSurvey = async () => {
@@ -418,10 +426,19 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
       );
       payload = Object.fromEntries(Object.entries(svAnswers).filter(([k]) => keep.has(k)));
     }
-    await submitResponse(activeSurvey.id, uid, payload);
-    setActiveSurvey(null);
-    setSvAnswers({});
-    setSvPath([]);
+    setSvBusy(true);
+    setSvErr("");
+    try {
+      await submitResponse(activeSurvey.id, uid, payload);
+      setActiveSurvey(null);
+      setSvAnswers({});
+      setSvPath([]);
+      showToast("回答を送信しました。ありがとうございます！");
+    } catch (ex) {
+      setSvErr("送信できませんでした。通信状況をご確認のうえ、もう一度「回答を送信する」を押してください。");
+    } finally {
+      setSvBusy(false);
+    }
   };
 
   const saveProfile = async () => {
@@ -634,6 +651,12 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
         </header>
 
         {/* 上部アラート（未対応タスク） */}
+        {toast && (
+          <div className="fixed left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-full text-xs font-bold shadow-lg"
+            style={{ top: 72, background: INK, color: "#fff", maxWidth: "90%" }}>
+            {toast}
+          </div>
+        )}
         {alerts.length > 0 && (
           <div className="px-4 py-2.5 flex items-center gap-2 overflow-x-auto"
             style={{ background: "#FFF3E0", borderBottom: `1px solid ${HAIR}` }}>
@@ -1447,15 +1470,16 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       );
                     })}
                   </div>
+                  {svErr && <p className="text-xs font-bold mt-4" style={{ color: "#C0264B" }}>{svErr}</p>}
                   <div className="flex gap-2 mt-6">
                     {hasSec && svPath.length > 0 && (
                       <button onClick={goBack} className="px-5 py-3.5 text-sm font-bold bg-white"
                         style={{ border: `1px solid ${HAIR}`, color: MAUVE }}>戻る</button>
                     )}
                     {isLastPage ? (
-                      <button disabled={readOnly || !valid} onClick={submitSurvey}
+                      <button disabled={readOnly || !valid || svBusy} onClick={submitSurvey}
                         className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
-                        {readOnly ? "プレビュー（送信不可）" : "回答を送信する"}
+                        {readOnly ? "プレビュー（送信不可）" : svBusy ? "送信中…" : "回答を送信する"}
                       </button>
                     ) : (
                       <button disabled={!valid} onClick={goNext}

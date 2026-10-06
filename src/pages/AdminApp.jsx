@@ -18,7 +18,7 @@ import {
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
   addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
   addSurveyTemplate, deleteSurveyTemplate,
-  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
+  updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, listenAllRsvps, listenAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
   addSourceOption, updateSourceOption, deleteSourceOption,
   addMeeting, updateMeeting, deleteMeeting,
@@ -144,7 +144,13 @@ export default function AdminApp() {
     setRsvps(r);
     setResponses(a);
   };
-  useEffect(() => { refreshAnswers(); }, []);
+  // 以前は読み取り回数を抑えるため一度だけ取得していたが、その後に届いた回答が
+  // 「回答状況を更新」を押すまで見えず、未回答と誤認される原因になっていたため常時購読に変更
+  useEffect(() => {
+    const u1 = listenAllRsvps(setRsvps);
+    const u2 = listenAllResponses(setResponses);
+    return () => { u1(); u2(); };
+  }, []);
 
   // cohorts が変わるたびに、全卒年度の Journey を読み込む
   useEffect(() => {
