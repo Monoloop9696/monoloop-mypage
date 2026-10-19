@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle, TimeSelect } from "../components/common";
@@ -16,7 +16,7 @@ import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answ
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
-  addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers,
+  addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers, removeInterviewTarget,
   addSurveyTemplate, deleteSurveyTemplate,
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, listenAllRsvps, listenAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
@@ -477,6 +477,12 @@ function AdminBody({
   const [ivConfirmIv, setIvConfirmIv] = useState("");
   const [ivConfirmStart, setIvConfirmStart] = useState(""); // 希望枠の中から選ぶ開始時刻
   const [ivConfirmDur, setIvConfirmDur] = useState(30); // 面談の所要時間（分）
+  const [ivManual, setIvManual] = useState(false); // 学生の候補を使わず、管理側で日時を直接指定する
+  const [ivManualDate, setIvManualDate] = useState("");
+  const [ivRemove, setIvRemove] = useState(null); // { reqId, uid } 面談者の削除確認
+  const [ivView, setIvView] = useState("list"); // list | calendar
+  const [ivCalMonth, setIvCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
+  const [ivCalDay, setIvCalDay] = useState(""); // カレンダーで選択中の日 YYYY-MM-DD
   const [ivConfirmBusy, setIvConfirmBusy] = useState(false);
   const [ivConfirmErr, setIvConfirmErr] = useState("");
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
@@ -1437,7 +1443,39 @@ function AdminBody({
     setIvConfirmStart("");
     setIvConfirmDur(30);
     setIvConfirmIv(interviewerOptions[0] ? interviewerOptions[0].name : "");
+    // 候補が未提出なら、最初から管理側で日時を指定するモードにする
+    const req = surveys.find((x) => x.id === reqId);
+    const hasProp = !!(req && req.proposals && req.proposals[uid] && (req.proposals[uid].slots || []).length);
+    setIvManual(!hasProp);
+    setIvManualDate("");
     setIvConfirm({ reqId, uid });
+  };
+  // 面談者を1人外す（候補・予約も消える）
+  const removeIvStudent = async () => {
+    if (!ivRemove) return;
+    const req = surveys.find((x) => x.id === ivRemove.reqId);
+    if (!req) { setIvRemove(null); return; }
+    const remaining = (req.targetUids || []).filter((x) => x !== ivRemove.uid);
+    try { await removeInterviewTarget(req.id, ivRemove.uid, remaining); }
+    catch (ex) { setBanner(`削除に失敗しました：${ex.message}`); }
+    setIvRemove(null);
+  };
+  // カレンダー用：確定済み・提出済み候補・面談記録を日付ごとにまとめる
+  const ivCalendarItems = () => {
+    const items = [];
+    for (const r of interviewReqs) {
+      for (const [uid, b] of Object.entries(r.bookings || {})) {
+        if (b && b.date) items.push({ kind: "booked", date: b.date, start: b.start, end: b.end, name: b.name || (students.find((x) => x.id === uid) || {}).name || "", sub: b.interviewer || "", reqId: r.id, uid });
+      }
+      for (const [uid, p] of Object.entries(r.proposals || {})) {
+        if ((r.bookings || {})[uid]) continue; // 確定済みは候補を出さない
+        for (const sl of p.slots || []) items.push({ kind: "proposal", date: sl.date, start: sl.start, end: sl.end, name: p.name || (students.find((x) => x.id === uid) || {}).name || "", sub: "候補", reqId: r.id, uid });
+      }
+    }
+    for (const m of yearMeetings) {
+      if (m.date) items.push({ kind: "record", date: m.date, start: m.time || "", end: "", name: m.name || "", sub: m.kind || "面談", meetingId: m.id });
+    }
+    return items.sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
   };
   // "HH:MM" ⇄ 分
   const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null; };
@@ -1477,11 +1515,19 @@ function AdminBody({
     if (!ivConfirm) return;
     const req = surveys.find((x) => x.id === ivConfirm.reqId);
     const prop = req && req.proposals ? req.proposals[ivConfirm.uid] : null;
-    const win = prop && (prop.slots || []).find((x) => x.id === ivConfirmSlot);
-    const slot = ivConfirmedSlot(win);
-    if (!slot) { setIvConfirmErr("確定する日時を選んでください。"); return; }
-    if (toMin(slot.start) < toMin(win.start) || toMin(slot.start) > toMin(win.end)) {
-      setIvConfirmErr(`開始時刻は学生の希望の範囲（${win.start}〜${win.end}）で選んでください。`); return;
+    let slot;
+    if (ivManual) {
+      // 管理側で日時を直接指定（候補が未提出の学生や、候補以外の日時にしたいとき）
+      if (!ivManualDate || !ivConfirmStart) { setIvConfirmErr("面談の日付と開始時刻を指定してください。"); return; }
+      const st0 = toMin(ivConfirmStart);
+      slot = { id: "manual", date: ivManualDate, start: ivConfirmStart, end: fromMin(Math.min(st0 + ivConfirmDur, 23 * 60 + 59)) };
+    } else {
+      const win = prop && (prop.slots || []).find((x) => x.id === ivConfirmSlot);
+      slot = ivConfirmedSlot(win);
+      if (!slot) { setIvConfirmErr("確定する日時を選んでください。"); return; }
+      if (toMin(slot.start) < toMin(win.start) || toMin(slot.start) > toMin(win.end)) {
+        setIvConfirmErr(`開始時刻は学生の希望の範囲（${win.start}〜${win.end}）で選んでください。`); return;
+      }
     }
     const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
     if (!iv) { setIvConfirmErr("担当者を選んでください。"); return; }
@@ -3422,12 +3468,110 @@ function AdminBody({
           <div className="mb-4">
             <div className="flex items-center justify-between gap-2 mb-2">
               <p className="text-xs font-bold text-gray-500">面談の日程調整</p>
-              <button onClick={() => openIvReq(null)}
-                className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: BRAND }}>
-                ＋ 日程を依頼する
-              </button>
+              <div className="flex items-center gap-1.5">
+                <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+                  {[["list", "一覧"], ["calendar", "カレンダー"]].map(([v, label]) => (
+                    <button key={v} onClick={() => setIvView(v)}
+                      className="text-[11px] font-bold px-2.5 py-1"
+                      style={ivView === v ? { background: BRAND, color: "#fff" } : { background: "#fff", color: "#6B7280" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => openIvReq(null)}
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: BRAND }}>
+                  ＋ 日程を依頼する
+                </button>
+              </div>
             </div>
-            {interviewReqs.length === 0 ? (
+            {ivView === "calendar" ? (() => {
+              const [cy, cm] = ivCalMonth.split("-").map(Number);
+              const first = new Date(cy, cm - 1, 1);
+              const daysInMonth = new Date(cy, cm, 0).getDate();
+              const lead = first.getDay();
+              const items = ivCalendarItems();
+              const byDay = {};
+              for (const it of items) (byDay[it.date] = byDay[it.date] || []).push(it);
+              const p2 = (n) => String(n).padStart(2, "0");
+              const dayKey = (d) => `${cy}-${p2(cm)}-${p2(d)}`;
+              const shift = (delta) => { const d = new Date(cy, cm - 1 + delta, 1); setIvCalMonth(`${d.getFullYear()}-${p2(d.getMonth() + 1)}`); setIvCalDay(""); };
+              const color = (k) => (k === "booked" ? { background: "#EAF7EE", color: "#1E874B" } : k === "proposal" ? { background: "#FFF7E6", color: "#B45309" } : { background: "#F3F4F6", color: "#6B7280" });
+              const cells = [];
+              for (let i = 0; i < lead; i++) cells.push(null);
+              for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+              while (cells.length % 7 !== 0) cells.push(null);
+              const sel = ivCalDay ? (byDay[ivCalDay] || []) : [];
+              return (
+                <div className="bg-white border border-gray-200 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <button onClick={() => shift(-1)} aria-label="前の月" className="p-1 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronLeft size={16} /></button>
+                    <p className="text-sm font-bold">{cy}年{cm}月</p>
+                    <button onClick={() => shift(1)} aria-label="次の月" className="p-1 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
+                  </div>
+                  <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">
+                    {["日", "月", "火", "水", "木", "金", "土"].map((w) => (<div key={w}>{w}</div>))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {cells.map((d, i) => {
+                      if (!d) return <div key={`e${i}`} />;
+                      const k = dayKey(d);
+                      const list = byDay[k] || [];
+                      const isToday = k === adminTodayStr;
+                      const active = ivCalDay === k;
+                      return (
+                        <button key={k} onClick={() => setIvCalDay(active ? "" : k)}
+                          className="text-left rounded-lg p-1 border align-top"
+                          style={{ minHeight: pc ? 72 : 52, borderColor: active ? BRAND : "#EEF1F4", background: active ? BRAND_LIGHT : "#fff" }}>
+                          <p className="text-[11px] font-bold" style={{ color: isToday ? BRAND : "#6B7280" }}>{d}</p>
+                          {list.slice(0, pc ? 3 : 2).map((it, j) => (
+                            <p key={j} className="text-[10px] font-bold truncate rounded px-1 mt-0.5" style={color(it.kind)}>
+                              {it.start ? `${it.start} ` : ""}{it.name}
+                            </p>
+                          ))}
+                          {list.length > (pc ? 3 : 2) && <p className="text-[10px] text-gray-400 mt-0.5">+{list.length - (pc ? 3 : 2)}</p>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
+                    <span className="px-1.5 py-0.5 rounded" style={color("booked")}>確定した面談</span>
+                    <span className="px-1.5 py-0.5 rounded" style={color("proposal")}>学生の希望（未確定）</span>
+                    <span className="px-1.5 py-0.5 rounded" style={color("record")}>面談の記録</span>
+                  </div>
+                  {ivCalDay && (
+                    <div className="mt-3 border-t border-gray-100 pt-2">
+                      <p className="text-xs font-bold text-gray-500 mb-1.5">
+                        {Number(ivCalDay.slice(5, 7))}/{Number(ivCalDay.slice(8, 10))} の予定（{sel.length}件）
+                      </p>
+                      {sel.length === 0 && <p className="text-xs text-gray-400">この日の予定はありません。</p>}
+                      {sel.map((it, j) => (
+                        <div key={j} className="flex items-center justify-between gap-2 py-1.5 border-b border-gray-100 last:border-b-0">
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold truncate">
+                              <span className="px-1.5 py-0.5 rounded mr-1.5" style={color(it.kind)}>
+                                {it.kind === "booked" ? "確定" : it.kind === "proposal" ? "希望" : "記録"}
+                              </span>
+                              {it.name}
+                            </p>
+                            <p className="text-[11px] text-gray-500">
+                              {it.start}{it.end ? ` - ${it.end}` : ""}{it.sub ? `・${it.sub}` : ""}
+                            </p>
+                          </div>
+                          {it.kind === "proposal" && (
+                            <button onClick={() => openIvConfirm(it.reqId, it.uid)}
+                              className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: BRAND }}>確定する</button>
+                          )}
+                          {it.kind === "record" && (
+                            <button onClick={() => { const m = allMeetings.find((x) => x.id === it.meetingId); if (m) openMeetForm(m); }}
+                              className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>開く</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })() : interviewReqs.length === 0 ? (
               <p className="text-xs text-gray-400">まだ依頼はありません。候補日時を登録して学生に選んでもらえます。</p>
             ) : (
               <div className="space-y-2">
@@ -3479,7 +3623,22 @@ function AdminBody({
                                     候補{(p.slots || []).length}件から確定する
                                   </button>
                                 ) : (
-                                  <span className="text-xs shrink-0" style={{ color: "#B45309" }}>候補の提出待ち</span>
+                                  <span className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-xs" style={{ color: "#B45309" }}>候補の提出待ち</span>
+                                    <button onClick={() => openIvConfirm(r.id, st.id)}
+                                      className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                                      日時を指定して確定
+                                    </button>
+                                  </span>
+                                )}
+                                {ivRemove && ivRemove.reqId === r.id && ivRemove.uid === st.id ? (
+                                  <span className="flex items-center gap-1 shrink-0">
+                                    <button onClick={removeIvStudent} className="text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>外す</button>
+                                    <button onClick={() => setIvRemove(null)} className="text-[11px] font-bold px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                                  </span>
+                                ) : (
+                                  <button onClick={() => setIvRemove({ reqId: r.id, uid: st.id })} aria-label={`${st.name}をこの日程調整から外す`}
+                                    className="shrink-0 text-gray-300 p-0.5"><X size={14} /></button>
                                 )}
                               </div>
                               {!b && p && (
@@ -4337,7 +4496,9 @@ function AdminBody({
         const st = students.find((x) => x.id === ivConfirm.uid);
         const prop = req && req.proposals ? req.proposals[ivConfirm.uid] : null;
         const win = prop ? (prop.slots || []).find((x) => x.id === ivConfirmSlot) : null;
-        const slot = ivConfirmedSlot(win);
+        const slot = ivManual
+          ? (ivManualDate && ivConfirmStart ? { id: "manual", date: ivManualDate, start: ivConfirmStart, end: fromMin(Math.min((toMin(ivConfirmStart) ?? 0) + ivConfirmDur, 23 * 60 + 59)) } : null)
+          : ivConfirmedSlot(win);
         const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
 
         return (
@@ -4352,6 +4513,40 @@ function AdminBody({
                 <button onClick={closeIvConfirm} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
               <div className="overflow-y-auto px-5 py-4 space-y-4">
+                <div className="flex gap-1.5">
+                  {[[false, "学生の希望から選ぶ"], [true, "こちらで日時を指定"]].map(([v, label]) => (
+                    <button key={String(v)} onClick={() => { setIvManual(v); setIvConfirmErr(""); }}
+                      className="flex-1 py-2 rounded-lg text-xs font-bold border"
+                      style={ivManual === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {ivManual ? (
+                  <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                    <p className="text-[11px] font-bold text-gray-500 mb-1.5">面談の日時を指定</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <p className="text-[11px] text-gray-400 mb-0.5">日付</p>
+                        <input type="date" value={ivManualDate} onChange={(e) => setIvManualDate(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white" />
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
+                        <select value={ivConfirmDur} onChange={(e) => setIvConfirmDur(Number(e.target.value))}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
+                          {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
+                        </select>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-gray-400 mt-1.5 mb-0.5">開始時刻</p>
+                    <TimeSelect value={ivConfirmStart} onChange={setIvConfirmStart} allowEmpty={false} />
+                    {prop && (prop.slots || []).length > 0 && (
+                      <p className="text-[11px] text-gray-400 mt-1.5">学生の希望：{(prop.slots || []).map((x) => slotText(x)).join("、")}</p>
+                    )}
+                    {slot && <p className="text-xs font-bold mt-2" style={{ color: BRAND }}>確定する時間：{slotText(slot, true)}</p>}
+                  </div>
+                ) : (
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1.5">ご希望の枠から選ぶ</p>
                   <div className="space-y-1.5">
@@ -4392,6 +4587,7 @@ function AdminBody({
                     </div>
                   )}
                 </div>
+                )}
 
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1.5">担当者</p>
@@ -4425,7 +4621,7 @@ function AdminBody({
                 {ivConfirmErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{ivConfirmErr}</p>}
               </div>
               <div className="p-3 border-t border-gray-100 shrink-0">
-                <button onClick={confirmIvBooking} disabled={ivConfirmBusy || !ivConfirmSlot || !ivConfirmIv}
+                <button onClick={confirmIvBooking} disabled={ivConfirmBusy || !slot || !ivConfirmIv}
                   className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
                   {ivConfirmBusy ? "確定中…" : "この日程で確定してLINEを送る"}
                 </button>

@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   Timestamp,
   writeBatch,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -164,6 +165,13 @@ export async function addSurvey(data) {
 }
 
 export const updateSurvey = (id, patch) => updateDoc(doc(db, "surveys", id), patch);
+// 面談の日程調整から1人を外す（対象者・提出した候補・確定した予約をまとめて消す）
+export const removeInterviewTarget = (id, uid, remainingUids) =>
+  updateDoc(doc(db, "surveys", id), {
+    targetUids: remainingUids,
+    [`proposals.${uid}`]: deleteField(),
+    [`bookings.${uid}`]: deleteField(),
+  });
 export const deleteSurvey = (id) => deleteDoc(doc(db, "surveys", id));
 
 // アンケートのテンプレート（回答期限以外を保存）。templates コレクションに _type:"surveyTemplate" で保存＝ルール追加不要
