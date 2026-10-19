@@ -16,7 +16,7 @@ import { setStudentAccount, studentLastLogin, lineBroadcast, listQuestions, answ
 import {
   listenAllStudents, listenAllEvents, listenAllSurveys, listenTemplates,
   loadJourney, saveJourney, addEvent, updateEvent, deleteEvent, deleteEventCascade,
-  addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers, removeInterviewTarget,
+  addSurvey, updateSurvey, deleteSurveyCascade, surveyQuestions, responseAnswers, removeInterviewTarget, setInterviewBooking,
   addSurveyTemplate, deleteSurveyTemplate,
   updateStudent, addTemplate, updateTemplate, deleteTemplate, loadAllRsvps, loadAllResponses, listenAllRsvps, listenAllResponses, markRsvpChangeSeen, setRsvpArrived, adminSetRsvp, deleteRsvp, loadBroadcasts,
   addTemplateCategory, updateTemplateCategory, deleteTemplateCategory,
@@ -1559,14 +1559,13 @@ function AdminBody({
     if (!iv) { setIvConfirmErr("担当者を選んでください。"); return; }
     setIvConfirmBusy(true);
     try {
-      await updateSurvey(ivConfirm.reqId, {
-        [`bookings.${ivConfirm.uid}`]: {
-          date: slot.date, start: slot.start, end: slot.end,
-          interviewer: iv.name,
-          zoomUrl: iv.zoomUrl || "", zoomId: iv.zoomId || "", zoomPass: iv.zoomPass || "",
-          confirmedAt: new Date().toISOString(),
-        },
-      });
+      // リスケのときは学生が出していた希望候補も消す（古い候補が残らないように）
+      await setInterviewBooking(ivConfirm.reqId, ivConfirm.uid, {
+        date: slot.date, start: slot.start, end: slot.end,
+        interviewer: iv.name,
+        zoomUrl: iv.zoomUrl || "", zoomId: iv.zoomId || "", zoomPass: iv.zoomPass || "",
+        confirmedAt: new Date().toISOString(),
+      }, ivResched);
       try {
         await lineBroadcast({
           target: "全員", targetLabel: ivResched ? "面談日程の変更" : "面談日程の確定", body: ivConfirmText(slot, iv, ivResched),
@@ -3629,8 +3628,10 @@ function AdminBody({
                                       <button onClick={() => openMeetForm(null, st.id, { date: b.date, time: b.start, interviewer: b.interviewer })}
                                         className="text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: BRAND }}>記録</button>
                                     )}
-                                    <button onClick={() => openIvConfirm(r.id, st.id, { reschedule: true })}
-                                      className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
+                                    {!bookingRecorded(st.id, b.date) && (
+                                      <button onClick={() => openIvConfirm(r.id, st.id, { reschedule: true })}
+                                        className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
+                                    )}
                                   </span>
                                 ) : p ? (
                                   <button onClick={() => openIvConfirm(r.id, st.id)}

@@ -165,6 +165,12 @@ export async function addSurvey(data) {
 }
 
 export const updateSurvey = (id, patch) => updateDoc(doc(db, "surveys", id), patch);
+// 面談の予約を保存。clearProposal=true なら学生が出した希望候補も消す（リスケ時）
+export const setInterviewBooking = (id, uid, booking, clearProposal = false) =>
+  updateDoc(doc(db, "surveys", id), {
+    [`bookings.${uid}`]: booking,
+    ...(clearProposal ? { [`proposals.${uid}`]: deleteField() } : {}),
+  });
 // 面談の日程調整から1人を外す（対象者・提出した候補・確定した予約をまとめて消す）
 export const removeInterviewTarget = (id, uid, remainingUids) =>
   updateDoc(doc(db, "surveys", id), {
