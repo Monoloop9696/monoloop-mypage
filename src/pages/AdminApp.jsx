@@ -486,6 +486,7 @@ function AdminBody({
   const [ivOpenReq, setIvOpenReq] = useState(null); // 展開中の日程調整カード（既定は折りたたみ）
   const [ivBookedView, setIvBookedView] = useState(null); // { reqId, uid } カレンダーで選んだ予定の詳細
   const [ivResched, setIvResched] = useState(false); // 確定モーダルを「リスケ（日程変更）」として開いている
+  const [ivSendLine, setIvSendLine] = useState(true); // 確定時に公式LINEで案内を送るか
   const [ivConfirmBusy, setIvConfirmBusy] = useState(false);
   const [ivConfirmErr, setIvConfirmErr] = useState("");
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
@@ -1452,6 +1453,7 @@ function AdminBody({
     setIvConfirmStart("");
     setIvConfirmDur(30);
     setIvResched(!!opts.reschedule);
+    setIvSendLine(true);
     if (opts.reschedule) {
       // リスケ：現在の予定を初期値にして「こちらで日時を指定」で開く
       const req0 = surveys.find((x) => x.id === reqId);
@@ -1566,13 +1568,15 @@ function AdminBody({
         zoomUrl: iv.zoomUrl || "", zoomId: iv.zoomId || "", zoomPass: iv.zoomPass || "",
         confirmedAt: new Date().toISOString(),
       }, ivResched);
-      try {
-        await lineBroadcast({
-          target: "全員", targetLabel: ivResched ? "面談日程の変更" : "面談日程の確定", body: ivConfirmText(slot, iv, ivResched),
-          grad: selectedYear, uids: [ivConfirm.uid],
-        });
-      } catch (ex) {
-        setBanner(`日程は確定しましたが、LINE送信に失敗しました：${ex.message}`);
+      if (ivSendLine) {
+        try {
+          await lineBroadcast({
+            target: "全員", targetLabel: ivResched ? "面談日程の変更" : "面談日程の確定", body: ivConfirmText(slot, iv, ivResched),
+            grad: selectedYear, uids: [ivConfirm.uid],
+          });
+        } catch (ex) {
+          setBanner(`日程は確定しましたが、LINE送信に失敗しました：${ex.message}`);
+        }
       }
       closeIvConfirm();
     } catch (ex) { setIvConfirmErr(`確定に失敗しました：${ex.message}`); }
@@ -4669,16 +4673,29 @@ function AdminBody({
 
                 {slot && iv && (
                   <div className="rounded-lg p-3" style={{ background: "#F1F8F3", border: "1px solid #CDE8D6" }}>
-                    <p className="text-[11px] font-bold mb-1" style={{ color: "#1E874B" }}>送信される文面</p>
+                    <p className="text-[11px] font-bold mb-1" style={{ color: "#1E874B" }}>{ivSendLine ? "送信される文面" : "（LINEは送信しません）文面の参考"}</p>
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{ivConfirmText(slot, iv, ivResched)}</p>
                   </div>
                 )}
+                <label className="flex items-start gap-2 text-xs text-gray-600 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
+                  <input type="checkbox" checked={ivSendLine} onChange={(e) => setIvSendLine(e.target.checked)} className="mt-0.5" />
+                  <span>
+                    確定後に<span className="font-bold" style={{ color: LINE_GREEN }}>公式LINE</span>で案内を送る
+                    <span className="block text-[11px] text-gray-400 mt-0.5">
+                      オフにすると送信せず、マイページの表示だけ更新します（すでに口頭やLINEで日程を伝えている場合など）。
+                    </span>
+                  </span>
+                </label>
                 {ivConfirmErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{ivConfirmErr}</p>}
               </div>
               <div className="p-3 border-t border-gray-100 shrink-0">
                 <button onClick={confirmIvBooking} disabled={ivConfirmBusy || !slot || !ivConfirmIv}
                   className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                  {ivConfirmBusy ? (ivResched ? "変更中…" : "確定中…") : ivResched ? "この日程に変更してLINEを送る" : "この日程で確定してLINEを送る"}
+                  {ivConfirmBusy
+                    ? (ivResched ? "変更中…" : "確定中…")
+                    : ivResched
+                    ? (ivSendLine ? "この日程に変更してLINEを送る" : "この日程に変更する（LINEは送らない）")
+                    : (ivSendLine ? "この日程で確定してLINEを送る" : "この日程で確定する（LINEは送らない）")}
                 </button>
               </div>
             </div>
