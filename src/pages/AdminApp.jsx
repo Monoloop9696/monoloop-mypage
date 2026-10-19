@@ -484,6 +484,8 @@ function AdminBody({
   const [ivCalMonth, setIvCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
   const [ivCalDay, setIvCalDay] = useState(""); // カレンダーで選択中の日 YYYY-MM-DD
   const [ivOpenReq, setIvOpenReq] = useState(null); // 展開中の日程調整カード（既定は折りたたみ）
+  const [ivBookedView, setIvBookedView] = useState(null); // { reqId, uid } カレンダーで選んだ予定の詳細
+  const [ivResched, setIvResched] = useState(false); // 確定モーダルを「リスケ（日程変更）」として開いている
   const [ivConfirmBusy, setIvConfirmBusy] = useState(false);
   const [ivConfirmErr, setIvConfirmErr] = useState("");
   const [newInterviewer, setNewInterviewer] = useState(""); // ドロワーからの担当者追加
@@ -1320,7 +1322,7 @@ function AdminBody({
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
   const meetingsOf = (uid) => allMeetings.filter((m) => m.uid === uid)
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const openMeetForm = (m, uid) => {
+  const openMeetForm = (m, uid, prefill) => {
     setMeetErr("");
     if (m) {
       setMeetEditId(m.id);
@@ -1334,10 +1336,16 @@ function AdminBody({
     } else {
       setMeetEditId(null);
       const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })();
-      setMeetForm({ ...EMPTY_MEETING, uid: uid || "", date: today });
+      setMeetForm({
+        ...EMPTY_MEETING, uid: uid || "", date: today,
+        // カレンダーや予定から開いたときは、確定した日時・担当者を自動で入れる
+        ...(prefill ? { date: prefill.date || today, time: prefill.time || "", interviewer: prefill.interviewer || "" } : {}),
+      });
     }
     setMeetOpen(true);
   };
+  // 確定した面談が実施済み（同じ学生・同じ日の面談記録がある）か
+  const bookingRecorded = (uid, date) => allMeetings.some((m) => m.uid === uid && m.date === date);
   const closeMeetForm = () => { setMeetOpen(false); setMeetEditId(null); setMeetForm(EMPTY_MEETING); setMeetErr(""); };
   const saveMeeting = async () => {
     if (!meetForm.uid) { setMeetErr("対象の内定者を選んでください。"); return; }
@@ -1438,11 +1446,24 @@ function AdminBody({
   };
 
   // ---- 日程の確定（候補と担当者を選ぶ） ----
-  const openIvConfirm = (reqId, uid) => {
+  const openIvConfirm = (reqId, uid, opts = {}) => {
     setIvConfirmErr("");
     setIvConfirmSlot("");
     setIvConfirmStart("");
     setIvConfirmDur(30);
+    setIvResched(!!opts.reschedule);
+    if (opts.reschedule) {
+      // リスケ：現在の予定を初期値にして「こちらで日時を指定」で開く
+      const req0 = surveys.find((x) => x.id === reqId);
+      const b = req0 && req0.bookings ? req0.bookings[uid] : null;
+      setIvManual(true);
+      setIvManualDate(b ? b.date : "");
+      setIvConfirmStart(b ? b.start : "");
+      setIvConfirmIv(b && b.interviewer ? b.interviewer : (interviewerOptions[0] ? interviewerOptions[0].name : ""));
+      setIvConfirm({ reqId, uid });
+      setIvBookedView(null);
+      return;
+    }
     setIvConfirmIv(interviewerOptions[0] ? interviewerOptions[0].name : "");
     // 候補が未提出なら、最初から管理側で日時を指定するモードにする
     const req = surveys.find((x) => x.id === reqId);
@@ -1466,12 +1487,14 @@ function AdminBody({
     const items = [];
     for (const r of interviewReqs) {
       for (const [uid, b] of Object.entries(r.bookings || {})) {
-        if (b && b.date) items.push({ kind: "booked", date: b.date, start: b.start, end: b.end, name: b.name || (students.find((x) => x.id === uid) || {}).name || "", sub: b.interviewer || "", reqId: r.id, uid });
+        if (!b || !b.date) continue;
+        if (bookingRecorded(uid, b.date)) continue; // 実施後に記録が付いたら「記録」の側だけ表示する
+        items.push({ kind: "booked", date: b.date, start: b.start, end: b.end, name: b.name || (students.find((x) => x.id === uid) || {}).name || "", sub: b.interviewer || "", reqId: r.id, uid });
       }
     }
     // 実施後の面談記録（面談タブで記録したもの）
     for (const m of yearMeetings) {
-      if (m.date) items.push({ kind: "record", date: m.date, start: m.time || "", end: "", name: m.name || "", sub: m.interviewer || "", meetingId: m.id });
+      if (m.date) items.push({ kind: "record", date: m.date, start: m.time || "", end: "", name: m.name || "", sub: m.interviewer || "", meetingId: m.id, uid: m.uid });
     }
     return items.sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
   };
@@ -1488,18 +1511,23 @@ function AdminBody({
     const end = Math.min(st + ivConfirmDur, 23 * 60 + 59);
     return { id: win.id, date: win.date, start: fromMin(st), end: fromMin(end) };
   };
-  const closeIvConfirm = () => { setIvConfirm(null); setIvConfirmErr(""); };
+  const closeIvConfirm = () => { setIvConfirm(null); setIvConfirmErr(""); setIvResched(false); };
   // 確定時に学生の公式LINEへ送る文面
-  const ivConfirmText = (slot, iv) => {
-    const lines = [
-      "ご連絡ありがとうございます！",
-      "それでは以下日程にて行いますのでよろしくお願いいたします😊",
-      "※私服で問題ございません！",
-      "",
-      "【日時】",
-      slotText(slot, true),
-      "",
-    ];
+  const ivConfirmText = (slot, iv, reschedule = false) => {
+    const lines = reschedule
+      ? [
+        "面談の日程を変更させていただきます。",
+        "お手数をおかけしますが、以下の日程でよろしくお願いいたします🙇‍♀️",
+        "※私服で問題ございません！",
+        "",
+      ]
+      : [
+        "ご連絡ありがとうございます！",
+        "それでは以下日程にて行いますのでよろしくお願いいたします😊",
+        "※私服で問題ございません！",
+        "",
+      ];
+    lines.push("【日時】", slotText(slot, true), "");
     if (iv && iv.zoomUrl) {
       lines.push("【ZOOMURL】", iv.zoomUrl);
       if (iv.zoomId) lines.push(`ミーティング ID: ${iv.zoomId}`);
@@ -1541,7 +1569,7 @@ function AdminBody({
       });
       try {
         await lineBroadcast({
-          target: "全員", targetLabel: "面談日程の確定", body: ivConfirmText(slot, iv),
+          target: "全員", targetLabel: ivResched ? "面談日程の変更" : "面談日程の確定", body: ivConfirmText(slot, iv, ivResched),
           grad: selectedYear, uids: [ivConfirm.uid],
         });
       } catch (ex) {
@@ -1943,7 +1971,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen || ivConfirm || textAnswers)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
   );
 
   const tabs = [
@@ -3498,7 +3526,10 @@ function AdminBody({
               for (let i = 0; i < lead; i++) cells.push(null);
               for (let d = 1; d <= daysInMonth; d++) cells.push(d);
               while (cells.length % 7 !== 0) cells.push(null);
-              const sel = ivCalDay ? (byDay[ivCalDay] || []) : [];
+              const onItem = (it) => {
+                if (it.kind === "record") { const m = allMeetings.find((x) => x.id === it.meetingId); if (m) openMeetForm(m); }
+                else setIvBookedView({ reqId: it.reqId, uid: it.uid });
+              };
               return (
                 <div className="bg-white border border-gray-200 rounded-xl p-3">
                   <div className="flex items-center justify-between mb-2">
@@ -3515,79 +3546,32 @@ function AdminBody({
                       const k = dayKey(d);
                       const list = byDay[k] || [];
                       const isToday = k === adminTodayStr;
-                      const active = ivCalDay === k;
+                      const expanded = ivCalDay === k;
+                      const limit = expanded ? list.length : (pc ? 3 : 2);
                       return (
-                        <button key={k} onClick={() => setIvCalDay(active ? "" : k)}
-                          className="text-left rounded-lg p-1 border align-top"
-                          style={{ minHeight: pc ? 72 : 52, borderColor: active ? BRAND : "#EEF1F4", background: active ? BRAND_LIGHT : "#fff" }}>
+                        <div key={k} className="rounded-lg p-1 border align-top"
+                          style={{ minHeight: pc ? 72 : 52, borderColor: isToday ? BRAND : "#EEF1F4", background: isToday ? BRAND_LIGHT : "#fff" }}>
                           <p className="text-[11px] font-bold" style={{ color: isToday ? BRAND : "#6B7280" }}>{d}</p>
-                          {list.slice(0, pc ? 3 : 2).map((it, j) => (
-                            <p key={j} className="text-[10px] font-bold truncate rounded px-1 mt-0.5" style={color(it.kind)}>
+                          {list.slice(0, limit).map((it, j) => (
+                            <button key={j} onClick={() => onItem(it)}
+                              className="block w-full text-left text-[10px] font-bold truncate rounded px-1 mt-0.5 hover:opacity-80"
+                              style={color(it.kind)}
+                              title={`${it.kind === "booked" ? "予定" : "記録"}：${it.name}${it.sub ? `／${it.sub}` : ""}`}>
                               {it.start ? `${it.start} ` : ""}{it.name}{it.sub ? `／${it.sub}` : ""}
-                            </p>
+                            </button>
                           ))}
-                          {list.length > (pc ? 3 : 2) && <p className="text-[10px] text-gray-400 mt-0.5">+{list.length - (pc ? 3 : 2)}</p>}
-                        </button>
+                          {list.length > limit && (
+                            <button onClick={() => setIvCalDay(k)} className="text-[10px] text-gray-400 mt-0.5">+{list.length - limit}件を表示</button>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
                   <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
                     <span className="px-1.5 py-0.5 rounded" style={color("booked")}>確定した面談（予定）</span>
                     <span className="px-1.5 py-0.5 rounded" style={color("record")}>実施後の面談記録</span>
-                    <span className="text-gray-400">表示は「時刻 面談者／担当者」。日付を押すと内容が見られます。</span>
+                    <span className="text-gray-400">表示は「時刻 面談者／担当者」。予定を押すと詳細、記録を押すと記録画面が開きます。実施後に記録を付けると予定は記録に置き換わります。</span>
                   </div>
-                  {ivCalDay && (
-                    <div className="mt-3 border-t border-gray-100 pt-2">
-                      <p className="text-xs font-bold text-gray-500 mb-1.5">
-                        {Number(ivCalDay.slice(5, 7))}/{Number(ivCalDay.slice(8, 10))} の予定（{sel.length}件）
-                      </p>
-                      {sel.length === 0 && <p className="text-xs text-gray-400">この日の予定はありません。</p>}
-                      {sel.map((it, j) => {
-                        const m = it.kind === "record" ? allMeetings.find((x) => x.id === it.meetingId) : null;
-                        const req = it.kind === "booked" ? interviewReqs.find((x) => x.id === it.reqId) : null;
-                        const bk = req && req.bookings ? req.bookings[it.uid] : null;
-                        return (
-                          <div key={j} className="py-2 border-b border-gray-100 last:border-b-0">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="text-xs font-bold truncate">
-                                  <span className="px-1.5 py-0.5 rounded mr-1.5" style={color(it.kind)}>{it.kind === "booked" ? "予定" : "記録"}</span>
-                                  {it.name}<span className="font-normal text-gray-500">／担当 {it.sub || "未設定"}</span>
-                                </p>
-                                <p className="text-[11px] text-gray-500">
-                                  {it.start}{it.end ? ` - ${it.end}` : ""}{m && m.kind ? `・${m.kind}` : ""}
-                                </p>
-                              </div>
-                              {it.kind === "booked" ? (
-                                <button onClick={() => openMeetForm(null, it.uid)}
-                                  className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>面談を記録</button>
-                              ) : (
-                                <button onClick={() => { if (m) openMeetForm(m); }}
-                                  className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
-                              )}
-                            </div>
-                            {bk && (bk.zoomUrl || bk.zoomId) && (
-                              <p className="text-[11px] text-gray-500 mt-1 break-all">
-                                {bk.zoomUrl}{bk.zoomId ? `　ID: ${bk.zoomId}` : ""}{bk.zoomPass ? `　パスコード: ${bk.zoomPass}` : ""}
-                              </p>
-                            )}
-                            {m && (
-                              <div className="mt-1.5 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                                {meetingBody(m).length === 0 && <p className="text-[11px] text-gray-400">内容は記入されていません。</p>}
-                                {meetingBody(m).map((b) => (
-                                  <div key={b.key} className="mb-1.5 last:mb-0">
-                                    <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
-                                    <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
-                                  </div>
-                                ))}
-                                {m.next && <p className="text-[11px] font-bold mt-1" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
                 </div>
               );
             })() : interviewReqs.length === 0 ? (
@@ -3637,8 +3621,16 @@ function AdminBody({
                               <div className="flex items-center gap-2">
                                 <span className="text-xs font-bold truncate flex-1 min-w-0">{st.name}</span>
                                 {b ? (
-                                  <span className="text-xs shrink-0 font-bold" style={{ color: "#1E874B" }}>
-                                    確定 {slotText(b, true)}{b.interviewer ? `・${b.interviewer}` : ""}
+                                  <span className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-xs font-bold" style={{ color: bookingRecorded(st.id, b.date) ? "#6B7280" : "#1E874B" }}>
+                                      {bookingRecorded(st.id, b.date) ? "実施済み" : "確定"} {slotText(b, true)}{b.interviewer ? `・${b.interviewer}` : ""}
+                                    </span>
+                                    {!bookingRecorded(st.id, b.date) && (
+                                      <button onClick={() => openMeetForm(null, st.id, { date: b.date, time: b.start, interviewer: b.interviewer })}
+                                        className="text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: BRAND }}>記録</button>
+                                    )}
+                                    <button onClick={() => openIvConfirm(r.id, st.id, { reschedule: true })}
+                                      className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
                                   </span>
                                 ) : p ? (
                                   <button onClick={() => openIvConfirm(r.id, st.id)}
@@ -4514,6 +4506,44 @@ function AdminBody({
         );
       })()}
 
+      {/* カレンダーで選んだ予定の詳細 */}
+      {ivBookedView && (() => {
+        const req = interviewReqs.find((x) => x.id === ivBookedView.reqId);
+        const b = req && req.bookings ? req.bookings[ivBookedView.uid] : null;
+        const st = students.find((x) => x.id === ivBookedView.uid);
+        if (!b) return null;
+        return (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6" onClick={() => setIvBookedView(null)}>
+            <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">面談の予定</p>
+                  <p className="text-lg font-bold mt-0.5 truncate">{(st && st.name) || b.name || "内定者"}</p>
+                </div>
+                <button onClick={() => setIvBookedView(null)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="p-5 pt-3 space-y-2 text-sm">
+                <p><span className="text-xs text-gray-500 mr-2">日時</span><span className="font-bold">{slotText(b, true)}</span></p>
+                <p><span className="text-xs text-gray-500 mr-2">担当</span>{b.interviewer || "未設定"}</p>
+                {b.zoomUrl && (
+                  <div className="rounded-lg p-2.5 text-xs" style={{ background: "#F6F7F9" }}>
+                    <p className="break-all">{b.zoomUrl}</p>
+                    {b.zoomId && <p className="mt-0.5">ミーティング ID: {b.zoomId}</p>}
+                    {b.zoomPass && <p>パスコード: {b.zoomPass}</p>}
+                  </div>
+                )}
+              </div>
+              <div className="p-3 pt-0 flex gap-2">
+                <button onClick={() => { setIvBookedView(null); openMeetForm(null, ivBookedView.uid, { date: b.date, time: b.start, interviewer: b.interviewer }); }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>面談を記録する</button>
+                <button onClick={() => openIvConfirm(ivBookedView.reqId, ivBookedView.uid, { reschedule: true })}
+                  className="px-4 py-2.5 rounded-xl text-sm font-bold border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 面談日程の確定 */}
       {ivConfirm && (() => {
         const req = surveys.find((x) => x.id === ivConfirm.reqId);
@@ -4531,7 +4561,7 @@ function AdminBody({
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">面談日程の確定</p>
+                  <p className="text-xs text-gray-400">{ivResched ? "面談日程の変更（リスケ）" : "面談日程の確定"}</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{st ? st.name : "内定者"}</p>
                 </div>
                 <button onClick={closeIvConfirm} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
@@ -4639,7 +4669,7 @@ function AdminBody({
                 {slot && iv && (
                   <div className="rounded-lg p-3" style={{ background: "#F1F8F3", border: "1px solid #CDE8D6" }}>
                     <p className="text-[11px] font-bold mb-1" style={{ color: "#1E874B" }}>送信される文面</p>
-                    <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{ivConfirmText(slot, iv)}</p>
+                    <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{ivConfirmText(slot, iv, ivResched)}</p>
                   </div>
                 )}
                 {ivConfirmErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{ivConfirmErr}</p>}
@@ -4647,7 +4677,7 @@ function AdminBody({
               <div className="p-3 border-t border-gray-100 shrink-0">
                 <button onClick={confirmIvBooking} disabled={ivConfirmBusy || !slot || !ivConfirmIv}
                   className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                  {ivConfirmBusy ? "確定中…" : "この日程で確定してLINEを送る"}
+                  {ivConfirmBusy ? (ivResched ? "変更中…" : "確定中…") : ivResched ? "この日程に変更してLINEを送る" : "この日程で確定してLINEを送る"}
                 </button>
               </div>
             </div>
