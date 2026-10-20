@@ -454,6 +454,12 @@ function AdminBody({
   const [srcBusy, setSrcBusy] = useState(false);
   const [srcDelId, setSrcDelId] = useState(null);
   const [showTargetPicker, setShowTargetPicker] = useState(false); // LINE配信の対象を選ぶモーダル
+  // LINE配信の個別選択（target === "pick" のとき有効）。pickView は選択画面の状態 {base:[student], label}
+  const [pickUids, setPickUids] = useState([]);
+  const [pickLabel, setPickLabel] = useState("個別選択");
+  const [pickView, setPickView] = useState(null);
+  const [pickSel, setPickSel] = useState(() => new Set());
+  const [pickSearch, setPickSearch] = useState("");
   // 面談記録
   const [meetOpen, setMeetOpen] = useState(false);
   const [meetEditId, setMeetEditId] = useState(null);
@@ -808,6 +814,8 @@ function AdminBody({
   };
   // 年度を切り替えたら編集中の内容は破棄
   useEffect(() => { setMultiEditOpen(false); setMultiDrafts({}); setMultiErr(""); setMultiDone(""); }, [selectedYear]);
+  // 年度を切り替えたらLINE配信の個別選択も解除（別年度の学生が送信先に残らないように）
+  useEffect(() => { setPickUids([]); setPickLabel("個別選択"); setPickView(null); setTarget((t) => (t === "pick" ? "全員" : t)); }, [selectedYear]);
 
   const filteredRetired = retiredList.filter((s) =>
     matchesSearch(s) && matchesArea(s) && (
@@ -829,6 +837,10 @@ function AdminBody({
   const targetEvent = isEventTarget ? yearEvents.find((e) => e.id === tEventId) : null;
   const isSurveyTarget = target.startsWith("survey:");
   const [, tSurveyId, tSGroup] = isSurveyTarget ? target.split(":") : [];
+  // 個別選択（学生を1人ずつ選んで送る）。送信時は uids を API に渡す
+  const isPickTarget = target === "pick";
+  const pickUidSet = new Set(pickUids);
+  const pickList = isPickTarget ? activeStudents.filter((s) => pickUidSet.has(s.id)) : [];
   const targetSurvey = isSurveyTarget ? yearSurveys.find((s) => s.id === tSurveyId) : null;
   const surveyGroupLabelOf = (g) => (g === "answered" ? "回答済み" : "未回答");
   // アンケートの対象者のうち、回答済み／未回答で絞る
@@ -849,7 +861,9 @@ function AdminBody({
     return `${e.areas.map(areaLabel).join("・")}（${b}）`;
   };
 
-  const targetCount = isEventTarget
+  const targetCount = isPickTarget
+    ? pickList.length
+    : isEventTarget
     ? (targetEvent ? activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup)).length : 0)
     : isSurveyTarget
     ? (targetSurvey ? surveyGroupList(targetSurvey, tSGroup).length : 0)
@@ -858,7 +872,9 @@ function AdminBody({
     : target === "内定承諾者" ? accepted
     : activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; }).length;
 
-  const targetLabel = isEventTarget
+  const targetLabel = isPickTarget
+    ? pickLabel
+    : isEventTarget
     ? `${targetEvent ? targetEvent.title : "イベント"}・${groupLabelOf(tGroup)}`
     : isSurveyTarget
     ? `${targetSurvey ? targetSurvey.title : "アンケート"}・${surveyGroupLabelOf(tSGroup)}`
@@ -866,6 +882,7 @@ function AdminBody({
 
   // この配信で使うLINE送信数（＝連携済みの宛先数）。無料枠の消費見込み
   const targetRecipientList = (() => {
+    if (isPickTarget) return pickList;
     if (isEventTarget) {
       if (!targetEvent) return [];
       return activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup));
@@ -1892,7 +1909,11 @@ function AdminBody({
     setSending(true);
     setBanner("");
     try {
-      const r = await lineBroadcast({ target, targetLabel, body: msg, grad: selectedYear });
+      if (isPickTarget && !pickList.length) throw new Error("送信先が選ばれていません。");
+      const r = await lineBroadcast({
+        target: isPickTarget ? "個別選択" : target, targetLabel, body: msg, grad: selectedYear,
+        ...(isPickTarget ? { uids: pickList.map((s) => s.id) } : {}),
+      });
       setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
       refreshBroadcasts();
       refreshQuota();
@@ -4277,6 +4298,14 @@ function AdminBody({
                 </span>
                 <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>変更</span>
               </button>
+              {isPickTarget && (
+                <div className="mt-2 rounded-lg p-2.5 text-xs" style={{ background: "#F4F7F6", color: INK }}>
+                  <span className="font-bold text-gray-500">送信先：</span>
+                  {pickList.length === 0
+                    ? <span className="text-gray-400">まだ選ばれていません。「変更」から選んでください。</span>
+                    : pickList.map((s) => s.name || "（名前なし）").join("、")}
+                </div>
+              )}
               <p className="text-xs text-gray-500 mt-1.5">
                 未連携者にはメールで自動送信されます。辞退者は配信対象から自動的に除外されます。
               </p>
@@ -5002,6 +5031,94 @@ function AdminBody({
         const chip = (active) => (active
           ? { background: BRAND, color: "#fff", borderColor: BRAND }
           : { borderColor: "#D7DEDB", color: INK, background: "#fff" });
+        // 個別選択の画面を開く（base＝選べる学生の母集団、label＝配信対象の表示名）
+        const openPick = (base, label) => {
+          const baseIds = new Set(base.map((s) => s.id));
+          // 同じ母集団で選び直すときは前回の選択を引き継ぐ
+          const keep = isPickTarget && pickLabel === label ? pickUids.filter((id) => baseIds.has(id)) : [];
+          setPickSel(new Set(keep));
+          setPickSearch("");
+          setPickView({ base, label });
+        };
+        const closePick = () => { setPickView(null); setPickSearch(""); };
+        const confirmPick = () => {
+          const ids = pickView.base.filter((s) => pickSel.has(s.id)).map((s) => s.id);
+          setPickUids(ids);
+          setPickLabel(pickView.label);
+          setTarget("pick");
+          closePick();
+          setShowTargetPicker(false);
+        };
+        const togglePick = (id) => setPickSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+        const q = pickSearch.trim().toLowerCase();
+        const pickRows = pickView
+          ? pickView.base.filter((s) => !q || [s.name, s.kana, s.univ, s.email].some((v) => (v || "").toLowerCase().includes(q)))
+          : [];
+        if (pickView) {
+          const allOn = pickRows.length > 0 && pickRows.every((s) => pickSel.has(s.id));
+          return (
+            <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+              onClick={closePick}>
+              <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
+                onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-400">送信先を個別に選ぶ</p>
+                    <p className="text-base font-bold mt-0.5 truncate">{pickView.label}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{pickSel.size}名を選択中（{pickView.base.length}名から）</p>
+                  </div>
+                  <button onClick={closePick} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                </div>
+                <div className="px-5 pt-3 pb-2 shrink-0 space-y-2">
+                  <input value={pickSearch} onChange={(e) => setPickSearch(e.target.value)} placeholder="名前・フリガナ・大学・メールで検索"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  <div className="flex items-center gap-3 text-xs">
+                    <button onClick={() => setPickSel((prev) => { const n = new Set(prev); pickRows.forEach((s) => (allOn ? n.delete(s.id) : n.add(s.id))); return n; })}
+                      className="font-bold" style={{ color: BRAND }}>
+                      {allOn ? "表示中をすべて外す" : "表示中をすべて選ぶ"}
+                    </button>
+                    {pickSel.size > 0 && (
+                      <button onClick={() => setPickSel(new Set())} className="text-gray-400">選択を解除</button>
+                    )}
+                  </div>
+                </div>
+                <div className="overflow-y-auto px-5 pb-3 flex-1">
+                  {pickView.base.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-4">選べる学生がいません。</p>
+                  ) : pickRows.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-4">検索に一致する学生がいません。</p>
+                  ) : (
+                    <div className="divide-y divide-gray-100">
+                      {pickRows.map((s) => {
+                        const on = pickSel.has(s.id);
+                        return (
+                          <label key={s.id} className="flex items-center gap-3 py-2.5 cursor-pointer">
+                            <input type="checkbox" checked={on} onChange={() => togglePick(s.id)} className="w-4 h-4 shrink-0" />
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-sm font-bold truncate">{s.name || "（名前なし）"}</span>
+                              <span className="block text-xs text-gray-400 truncate">{s.univ || "大学未登録"}</span>
+                            </span>
+                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                              style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                              {s.lineUserId ? "LINE" : "メール"}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="shrink-0 border-t border-gray-100 p-4 flex items-center gap-2">
+                  <button onClick={closePick} className="text-xs font-bold px-3 py-2.5 rounded-lg border border-gray-300 text-gray-600">戻る</button>
+                  <button onClick={confirmPick} disabled={pickSel.size === 0}
+                    className="flex-1 text-sm font-bold py-2.5 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>
+                    この{pickSel.size}名を送信先にする
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
         return (
           <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
             onClick={() => setShowTargetPicker(false)}>
@@ -5020,11 +5137,26 @@ function AdminBody({
                   <div className="flex flex-wrap gap-2">
                     {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
                       <button key={t} onClick={() => pick(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
-                        style={chip(!isEventTarget && !isSurveyTarget && target === t)}>
+                        style={chip(!isEventTarget && !isSurveyTarget && !isPickTarget && target === t)}>
                         {t}
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">学生を個別に選んで送る</p>
+                  <button onClick={() => openPick(activeStudents, "個別選択")}
+                    className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left"
+                    style={chip(isPickTarget && pickLabel === "個別選択")}>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold truncate">登録済みの学生から選ぶ</span>
+                      <span className="block text-xs mt-0.5" style={{ opacity: 0.75 }}>
+                        {isPickTarget && pickLabel === "個別選択" ? `${pickList.length}名を選択中・タップで選び直す` : `${activeStudents.length}名から1人ずつ選べます`}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-xs font-bold">選ぶ</span>
+                  </button>
                 </div>
 
                 <div>
@@ -5073,6 +5205,18 @@ function AdminBody({
                                 {surveyGroupLabelOf(g)} {surveyGroupList(sv, g).length}名
                               </button>
                             ))}
+                            {(() => {
+                              const label = `${sv.title}・回答済みから選択`;
+                              const on = isPickTarget && pickLabel === label;
+                              const answered = surveyGroupList(sv, "answered");
+                              return (
+                                <button onClick={() => openPick(answered, label)} disabled={answered.length === 0}
+                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                                  style={chip(on)}>
+                                  回答済みから選ぶ{on ? ` ${pickList.length}名` : ""}
+                                </button>
+                              );
+                            })()}
                           </div>
                         </div>
                       ))}
