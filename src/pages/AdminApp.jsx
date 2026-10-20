@@ -3587,37 +3587,94 @@ function AdminBody({
                   <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">
                     {["日", "月", "火", "水", "木", "金", "土"].map((w) => (<div key={w}>{w}</div>))}
                   </div>
+                  {/* 日付セル：押すとその日の予定・記録を下の一覧に表示（スマホは枠が狭いので点だけ、PCは3件まで文字で表示） */}
                   <div className="grid grid-cols-7 gap-1">
                     {cells.map((d, i) => {
                       if (!d) return <div key={`e${i}`} />;
                       const k = dayKey(d);
                       const list = byDay[k] || [];
                       const isToday = k === adminTodayStr;
-                      const expanded = ivCalDay === k;
-                      const limit = expanded ? list.length : (pc ? 3 : 2);
+                      const selected = ivCalDay === k;
+                      const limit = 3;
+                      const toggleDay = () => setIvCalDay(selected ? "" : k);
                       return (
-                        <div key={k} className="rounded-lg p-1 border align-top"
-                          style={{ minHeight: pc ? 72 : 52, borderColor: isToday ? BRAND : "#EEF1F4", background: isToday ? BRAND_LIGHT : "#fff" }}>
-                          <p className="text-[11px] font-bold" style={{ color: isToday ? BRAND : "#6B7280" }}>{d}</p>
-                          {list.slice(0, limit).map((it, j) => (
-                            <button key={j} onClick={() => onItem(it)}
-                              className="block w-full text-left text-[10px] font-bold truncate rounded px-1 mt-0.5 hover:opacity-80"
-                              style={color(it.kind)}
-                              title={`${it.kind === "booked" ? "予定" : "記録"}：${it.name}${it.sub ? `／${it.sub}` : ""}`}>
-                              {it.start ? `${it.start} ` : ""}{it.name}{it.sub ? `／${it.sub}` : ""}
-                            </button>
-                          ))}
-                          {list.length > limit && (
-                            <button onClick={() => setIvCalDay(k)} className="text-[10px] text-gray-400 mt-0.5">+{list.length - limit}件を表示</button>
+                        <div key={k} role="button" tabIndex={0} onClick={toggleDay}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleDay(); } }}
+                          className="rounded-lg p-1 border align-top cursor-pointer"
+                          style={{
+                            minHeight: pc ? 72 : 44,
+                            borderColor: selected || isToday ? BRAND : "#EEF1F4",
+                            boxShadow: selected ? `inset 0 0 0 1px ${BRAND}` : "none",
+                            background: selected || isToday ? BRAND_LIGHT : list.length ? "#fff" : "#FAFBFC",
+                          }}>
+                          <p className="text-[11px] font-bold" style={{ color: selected || isToday ? BRAND : "#6B7280" }}>{d}</p>
+                          {pc ? (
+                            <>
+                              {list.slice(0, limit).map((it, j) => (
+                                <button key={j} onClick={(e) => { e.stopPropagation(); onItem(it); }}
+                                  className="block w-full text-left text-[10px] font-bold truncate rounded px-1 mt-0.5 hover:opacity-80"
+                                  style={color(it.kind)}
+                                  title={`${it.kind === "booked" ? "予定" : "記録"}：${it.name}${it.sub ? `／${it.sub}` : ""}`}>
+                                  {it.start ? `${it.start} ` : ""}{it.name}{it.sub ? `／${it.sub}` : ""}
+                                </button>
+                              ))}
+                              {list.length > limit && <p className="text-[10px] text-gray-400 mt-0.5">+{list.length - limit}件</p>}
+                            </>
+                          ) : list.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-0.5 mt-1">
+                              {list.slice(0, 4).map((it, j) => (
+                                <span key={j} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: it.kind === "booked" ? "#1E874B" : "#9CA3AF" }} />
+                              ))}
+                              {list.length > 4 && <span className="text-[9px] text-gray-400 leading-none">+{list.length - 4}</span>}
+                            </div>
                           )}
                         </div>
                       );
                     })}
                   </div>
+
+                  {/* 選んだ日の詳細一覧（PC・スマホ共通） */}
+                  {ivCalDay && (() => {
+                    const list = byDay[ivCalDay] || [];
+                    const dd = new Date(`${ivCalDay}T00:00:00`);
+                    const wd = ["日", "月", "火", "水", "木", "金", "土"][dd.getDay()] || "";
+                    return (
+                      <div className="mt-3 rounded-xl border border-gray-200 p-3" style={{ background: "#FAFBFC" }}>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <p className="text-sm font-bold">
+                            {Number(ivCalDay.slice(5, 7))}月{Number(ivCalDay.slice(8, 10))}日（{wd}）
+                            <span className="ml-1.5 text-xs font-normal text-gray-500">{list.length}件</span>
+                          </p>
+                          <button onClick={() => setIvCalDay("")} className="text-xs text-gray-400">閉じる</button>
+                        </div>
+                        {list.length === 0 ? (
+                          <p className="text-xs text-gray-400">この日の予定・記録はありません。</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {list.map((it, j) => (
+                              <button key={j} onClick={() => onItem(it)}
+                                className="w-full flex items-center gap-2.5 bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-left hover:shadow-sm">
+                                <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded" style={color(it.kind)}>{it.kind === "booked" ? "予定" : "記録"}</span>
+                                <span className="shrink-0 text-sm font-bold tabular-nums" style={{ minWidth: 44 }}>{it.start || "--:--"}</span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-sm font-bold truncate">{it.name || "（名前なし）"}</span>
+                                  <span className="block text-[11px] text-gray-500 truncate">
+                                    {it.sub ? `担当 ${it.sub}` : "担当 未設定"}{it.kind === "booked" && it.end ? `・${it.start}〜${it.end}` : ""}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>{it.kind === "booked" ? "詳細 ›" : "記録を開く ›"}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
                     <span className="px-1.5 py-0.5 rounded" style={color("booked")}>確定した面談（予定）</span>
                     <span className="px-1.5 py-0.5 rounded" style={color("record")}>実施後の面談記録</span>
-                    <span className="text-gray-400">表示は「時刻 面談者／担当者」。予定を押すと詳細、記録を押すと記録画面が開きます。実施後に記録を付けると予定は記録に置き換わります。</span>
+                    <span className="text-gray-400">日付を押すと、その日の予定・記録を下に一覧表示します。予定を押すと詳細、記録を押すと記録画面が開きます。実施後に記録を付けると予定は記録に置き換わります。</span>
                   </div>
                 </div>
               );
@@ -4594,8 +4651,13 @@ function AdminBody({
                 <p><span className="text-xs text-gray-500 mr-2">担当</span>{b.interviewer || "未設定"}</p>
                 {b.zoomUrl && (
                   <div className="rounded-lg p-2.5 text-xs" style={{ background: "#F6F7F9" }}>
-                    <p className="break-all">{b.zoomUrl}</p>
-                    {b.zoomId && <p className="mt-0.5">ミーティング ID: {b.zoomId}</p>}
+                    <a href={b.zoomUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-bold px-3 py-2 rounded-lg text-white"
+                      style={{ background: "#2D8CFF" }}>
+                      ZOOMを開く ↗
+                    </a>
+                    <a href={b.zoomUrl} target="_blank" rel="noopener noreferrer" className="block mt-1.5 break-all underline" style={{ color: "#2D8CFF" }}>{b.zoomUrl}</a>
+                    {b.zoomId && <p className="mt-1">ミーティング ID: {b.zoomId}</p>}
                     {b.zoomPass && <p>パスコード: {b.zoomPass}</p>}
                   </div>
                 )}
@@ -4647,10 +4709,10 @@ function AdminBody({
                   <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
                     <p className="text-[11px] font-bold text-gray-500 mb-1.5">面談の日時を指定</p>
                     <div className="grid grid-cols-2 gap-1.5">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-[11px] text-gray-400 mb-0.5">日付</p>
                         <input type="date" value={ivManualDate} onChange={(e) => setIvManualDate(e.target.value)}
-                          className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white" />
+                          className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white" style={{ maxWidth: "100%" }} />
                       </div>
                       <div>
                         <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
@@ -4726,7 +4788,7 @@ function AdminBody({
                   )}
                   {iv && iv.zoomUrl && (
                     <div className="mt-1.5 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <p className="text-[11px] text-gray-500 break-all">{iv.zoomUrl}</p>
+                      <a href={iv.zoomUrl} target="_blank" rel="noopener noreferrer" className="block text-[11px] break-all underline" style={{ color: "#2D8CFF" }}>{iv.zoomUrl}</a>
                       {iv.zoomId && <p className="text-[11px] text-gray-500">ミーティング ID: {iv.zoomId}</p>}
                       {iv.zoomPass && <p className="text-[11px] text-gray-500">パスコード: {iv.zoomPass}</p>}
                     </div>
@@ -4887,13 +4949,14 @@ function AdminBody({
                   {activeStudents.map((st) => (<option key={st.id} value={st.id}>{st.name}（{st.univ || "大学未登録"}）</option>))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
+              {/* スマホでは date 入力が縮まず時刻と重なるため縦に並べる。PCは2列（min-w-0 ではみ出し防止） */}
+              <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-3"}>
+                <div className="min-w-0">
                   <p className="text-xs font-bold text-gray-500 mb-1">面談日<span className="text-red-500 ml-0.5">*</span></p>
                   <input type="date" value={meetForm.date} onChange={(e) => setMeetForm({ ...meetForm, date: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" style={{ maxWidth: "100%" }} />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs font-bold text-gray-500 mb-1">開始時刻</p>
                   <TimeSelect value={meetForm.time} onChange={(v) => setMeetForm({ ...meetForm, time: v })} />
                 </div>
