@@ -512,6 +512,7 @@ function AdminBody({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, students.length]);
   const [listFilter, setListFilter] = useState("all");
+  const [areaFilter, setAreaFilter] = useState("all"); // 現住所のエリア（地方区分）で絞る。"unknown"=判定不可
   const [searchQuery, setSearchQuery] = useState("");
   const [dragIndex, setDragIndex] = useState(null);
   const [expandedEvent, setExpandedEvent] = useState(null);
@@ -729,7 +730,14 @@ function AdminBody({
       return String(va).localeCompare(String(vb), "ja") * dir;
     });
   };
-  const filteredActive = sortStudents(activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesSearch(s)));
+  // 現住所のエリア（都道府県→地方区分）で絞る。住所に都道府県が無い学生は「判定不可」にまとまる
+  const matchesArea = (s) => {
+    if (areaFilter === "all") return true;
+    const k = addressArea(s.address);
+    return areaFilter === "unknown" ? !k : k === areaFilter;
+  };
+  const areaCount = (key) => activeList.filter((s) => (key === "unknown" ? !addressArea(s.address) : addressArea(s.address) === key)).length;
+  const filteredActive = sortStudents(activeList.filter((s) => (listFilter === "all" || s.status === listFilter) && matchesArea(s) && matchesSearch(s)));
   // ---- まとめて編集（学生ごとに個別入力して一括保存） ----
   // 編集できる項目は個別の「編集」画面と同じ
   const multiFieldsOf = (st) => ({
@@ -802,13 +810,13 @@ function AdminBody({
   useEffect(() => { setMultiEditOpen(false); setMultiDrafts({}); setMultiErr(""); setMultiDone(""); }, [selectedYear]);
 
   const filteredRetired = retiredList.filter((s) =>
-    matchesSearch(s) && (
+    matchesSearch(s) && matchesArea(s) && (
       listFilter === "all" ? true
       : listFilter === "削除済" ? s.deleted
       : s.status === listFilter
     )
   );
-  const filteredTest = testList.filter(matchesSearch);
+  const filteredTest = testList.filter((s) => matchesArea(s) && matchesSearch(s));
   const showActiveSection = ["all", "内定", "承諾"].includes(listFilter);
   const showTestSection = listFilter === "all" ? testList.length > 0 : listFilter === "テスト";
   const showRetiredSection =
@@ -3218,18 +3226,32 @@ function AdminBody({
             </div>
           </div>
 
-          <div className="mb-4">
-            <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（ステータス）</p>
-            <select value={listFilter} onChange={(e) => setListFilter(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-bold bg-white">
-              <option value="all">すべて</option>
-              <option value="内定">内定（承諾前）</option>
-              <option value="承諾">承諾済</option>
-              <option value="辞退">内定辞退</option>
-              <option value="承諾後辞退">承諾後辞退</option>
-              <option value="テスト">テスト</option>
-              <option value="削除済">削除済</option>
-            </select>
+          <div className={pc ? "grid grid-cols-2 gap-3 mb-4" : "space-y-3 mb-4"}>
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（ステータス）</p>
+              <select value={listFilter} onChange={(e) => setListFilter(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-bold bg-white">
+                <option value="all">すべて</option>
+                <option value="内定">内定（承諾前）</option>
+                <option value="承諾">承諾済</option>
+                <option value="辞退">内定辞退</option>
+                <option value="承諾後辞退">承諾後辞退</option>
+                <option value="テスト">テスト</option>
+                <option value="削除済">削除済</option>
+              </select>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-gray-500 mb-1.5">表示フィルター（現住所のエリア）</p>
+              <select value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm font-bold bg-white">
+                <option value="all">すべてのエリア</option>
+                {AREAS.map((a) => (<option key={a.key} value={a.key}>{a.label}（{areaCount(a.key)}名）</option>))}
+                <option value="unknown">判定できない住所（{areaCount("unknown")}名）</option>
+              </select>
+              {areaFilter !== "all" && (
+                <p className="text-[11px] text-gray-400 mt-1">現住所の先頭の都道府県名で判定しています。{areaFilter === "unknown" ? "住所に都道府県が入っていない学生です。「まとめて編集」で住所を整えると判定できます。" : ""}</p>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between mb-1">
