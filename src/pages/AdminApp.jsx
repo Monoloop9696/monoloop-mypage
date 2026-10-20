@@ -468,7 +468,8 @@ function AdminBody({
   const [meetErr, setMeetErr] = useState("");
   const [meetSearch, setMeetSearch] = useState("");
   const [meetDelId, setMeetDelId] = useState(null);
-  const [meetView, setMeetView] = useState("recent"); // recent=日付順 / student=学生別
+  const [meetView, setMeetView] = useState("student"); // student=内定者別（既定） / recent=日付順
+  const [meetHist, setMeetHist] = useState(null); // 内定者別で選んだ学生の面談履歴モーダル（student）
   const [meetHistOpen, setMeetHistOpen] = useState(false); // スマホで過去の記録を開く
   // 面談の日程調整
   const [ivReqOpen, setIvReqOpen] = useState(false);
@@ -2003,7 +2004,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || meetHist || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
   );
 
   const tabs = [
@@ -3727,7 +3728,7 @@ function AdminBody({
 
           <p className="text-xs font-bold text-gray-500 mb-2">面談の記録</p>
           <div className="flex gap-1.5 mb-3">
-            {[["recent", "日付順"], ["student", "内定者別"]].map(([v, label]) => (
+            {[["student", "内定者別"], ["recent", "日付順"]].map(([v, label]) => (
               <button key={v} onClick={() => setMeetView(v)}
                 className="flex-1 py-2 rounded-lg text-xs font-bold border"
                 style={meetView === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
@@ -3752,7 +3753,7 @@ function AdminBody({
             const hit = (m) => !q || [m.name, m.interviewer, m.note, m.kind].some((v) => (v || "").toLowerCase().includes(q));
             const list = yearMeetings.filter(hit);
             const MeetCard = (m) => (
-              <div key={m.id} className="bg-white border border-gray-200 rounded-xl p-3 mb-2">
+              <div key={m.id} className="bg-white border border-gray-200 rounded-xl p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-bold truncate">{m.name || "（削除された内定者）"}</p>
@@ -3786,46 +3787,56 @@ function AdminBody({
             if (meetView === "recent") {
               return list.length === 0
                 ? <p className="text-xs text-gray-400">面談の記録はまだありません。</p>
-                : <div>{list.map(MeetCard)}</div>;
+                : <div className={pc ? "grid grid-cols-2 gap-2.5 items-start" : "space-y-2"}>{list.map(MeetCard)}</div>;
             }
-            // 内定者別：未実施の学生も出す
+            // 内定者別：未実施の学生も出す。カードをタップすると過去の面談履歴をモーダルで表示
             const rows = activeStudents
               .filter((st) => !q || (st.name || "").toLowerCase().includes(q) || meetingsOf(st.id).some(hit))
               .map((st) => ({ st, ms: meetingsOf(st.id).filter((m) => (m.grad || selectedYear) === selectedYear) }));
+            const noMeet = rows.filter((r) => r.ms.length === 0).length;
             return (
-              <div className="space-y-2">
+              <div>
+                {rows.length > 0 && (
+                  <p className="text-[11px] text-gray-400 mb-2">
+                    {rows.length}名{noMeet ? `・未実施 ${noMeet}名` : ""}。カードをタップすると過去の面談履歴を表示します。
+                  </p>
+                )}
                 {rows.length === 0 && <p className="text-xs text-gray-400">該当する内定者がいません。</p>}
-                {rows.map(({ st, ms }) => (
-                  <div key={st.id} className="bg-white border border-gray-200 rounded-xl p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold truncate">{st.name}</p>
-                        <p className="text-xs text-gray-400">
-                          {ms.length ? `面談 ${ms.length}回・最終 ${ms[0].date}` : "面談の記録なし"}
-                        </p>
-                      </div>
-                      <button onClick={() => openMeetForm(null, st.id)}
-                        className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
-                        ＋ 記録
-                      </button>
-                    </div>
-                    {ms.slice(0, 2).map((m) => (
-                      <div key={m.id} className="mt-2 rounded-lg p-2" style={{ background: "#F6F7F9" }}>
+                <div className={pc ? "grid grid-cols-3 gap-2.5" : "space-y-2"}>
+                  {rows.map(({ st, ms }) => {
+                    const last = ms[0];
+                    return (
+                      <div key={st.id} role="button" tabIndex={0} onClick={() => setMeetHist(st)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setMeetHist(st); } }}
+                        className="bg-white border rounded-xl p-3.5 cursor-pointer hover:shadow-sm transition-shadow flex flex-col"
+                        style={{ borderColor: ms.length ? "#E5E7EB" : "#F5D08C", minHeight: pc ? 118 : undefined }}>
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
-                          <button onClick={() => openMeetForm(m)} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
-                        </div>
-                        {meetingBody(m).map((b) => (
-                          <div key={b.key} className="mt-1">
-                            <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
-                            <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold truncate">{st.name}</p>
+                            <p className="text-[11px] text-gray-400 truncate">{st.univ || "大学未登録"}</p>
                           </div>
-                        ))}
+                          <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                            style={ms.length ? { background: BRAND_LIGHT, color: BRAND } : { background: "#FFF3E0", color: "#B45309" }}>
+                            {ms.length ? `面談 ${ms.length}回` : "未実施"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-2 truncate">
+                          {last
+                            ? `最終 ${last.date}${last.time ? ` ${last.time}` : ""}・${last.kind || "面談"}${last.interviewer ? `・${last.interviewer}` : ""}`
+                            : "面談の記録なし"}
+                        </p>
+                        {last && last.next && <p className="text-[11px] font-bold mt-1 truncate" style={{ color: "#B45309" }}>次回：{last.next}</p>}
+                        <div className="flex items-center justify-between gap-2 mt-auto pt-2.5">
+                          <span className="text-[11px] font-bold" style={{ color: BRAND }}>履歴を見る ›</span>
+                          <button onClick={(e) => { e.stopPropagation(); openMeetForm(null, st.id); }}
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                            ＋ 記録
+                          </button>
+                        </div>
                       </div>
-                    ))}
-                    {ms.length > 2 && <p className="text-[11px] text-gray-400 mt-1">ほか{ms.length - 2}件（「日付順」で全件表示）</p>}
-                  </div>
-                ))}
+                    );
+                  })}
+                </div>
               </div>
             );
           })()}
@@ -5024,6 +5035,85 @@ function AdminBody({
           </div>
         </div>
       )}
+
+      {/* 面談履歴モーダル（内定者別でカードをタップ）。記録ドロワー(z-65)より下に置き、編集中も背面に残す */}
+      {meetHist && (() => {
+        const st = students.find((s) => s.id === meetHist.id) || meetHist;
+        const ms = meetingsOf(st.id);
+        return (
+          <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+            onClick={() => { setMeetHist(null); setMeetDelId(null); }}>
+            <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">面談履歴</p>
+                  <p className="text-base font-bold mt-0.5 truncate">{st.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {st.univ || "大学未登録"}・{ms.length ? `面談 ${ms.length}回` : "未実施"}
+                  </p>
+                </div>
+                <button onClick={() => { setMeetHist(null); setMeetDelId(null); }} aria-label="閉じる"
+                  className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="overflow-y-auto px-5 py-4 flex-1">
+                {ms.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-sm font-bold text-gray-500">面談の記録はまだありません。</p>
+                    <p className="text-xs text-gray-400 mt-1">下の「記録を追加」から初回の面談を記録できます。</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {ms.map((m, i) => (
+                      <div key={m.id} className="border border-gray-200 rounded-xl p-3.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold">
+                              {m.date}{m.time ? ` ${m.time}` : ""}
+                              {i === 0 && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>最新</span>}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">{m.kind || "面談"}{m.interviewer ? `・担当 ${m.interviewer}` : ""}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {meetDelId === m.id ? (
+                              <>
+                                <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                                <button onClick={() => setMeetDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                                <button onClick={() => setMeetDelId(m.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className={pc ? "grid grid-cols-2 gap-x-4 gap-y-2 mt-2" : "mt-1"}>
+                          {meetingBody(m).map((b) => (
+                            <div key={b.key} className={pc ? "" : "mt-2"}>
+                              <p className="text-[11px] font-bold" style={{ color: BRAND }}>{b.label}</p>
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {meetingBody(m).length === 0 && <p className="text-xs text-gray-400 mt-2">内容の記入はありません。</p>}
+                        {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 border-t border-gray-100 p-4 flex items-center gap-2">
+                <button onClick={() => { setMeetHist(null); setMeetDelId(null); }} className="text-xs font-bold px-3 py-2.5 rounded-lg border border-gray-300 text-gray-600">閉じる</button>
+                <button onClick={() => openMeetForm(null, st.id)}
+                  className="flex-1 text-sm font-bold py-2.5 rounded-lg text-white" style={{ background: BRAND }}>
+                  ＋ 記録を追加
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 配信対象を選ぶモーダル */}
       {showTargetPicker && (() => {
