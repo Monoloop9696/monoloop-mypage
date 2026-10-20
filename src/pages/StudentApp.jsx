@@ -36,9 +36,11 @@ const LOOPCHAN = {
   evening: { img: "/loopchan/loopchan-4.png", msg: "おつかれさま！ひと息ついてね。" },
   night: { img: "/loopchan/loopchan-6.png", msg: "今日もおつかれさま。ゆっくり休んでね。" },
   latenight: { img: "/loopchan/loopchan-7.png", msg: "まだ起きてるの？無理せず早めに休もう〜" },
+  // LINE未連携のあいだは時間帯の挨拶より優先して連携をお願いする（吹き出しタップでLINE連携へ）
+  line: { img: "/loopchan/loopchan-4.png", msg: "公式LINEと連携すると、イベント前日のリマインドが届くよ！まずは連携をお願い📱", goLine: true },
 };
 
-function pickLoopChan(student, events) {
+function pickLoopChan(student, events, lineLinked = true) {
   const now = new Date();
   const h = now.getHours();
   // 誕生日（student.birth = "YYYY-MM-DD"）
@@ -51,6 +53,8 @@ function pickLoopChan(student, events) {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const ev = (events || []).find((e) => e.dateStr === today);
   if (ev) return LOOPCHAN.event(ev.title);
+  // LINE未連携（誕生日・イベント当日より後、時間帯より前）
+  if (!lineLinked) return LOOPCHAN.line;
   // 時間帯
   if (h >= 5 && h < 10) return LOOPCHAN.morning;
   if (h >= 10 && h < 14) return LOOPCHAN.noon;
@@ -153,7 +157,15 @@ export default function StudentApp() {
 }
 
 export function StudentInner({ student, uid, grad, events, surveys, journey, myRsvps, myResponses, signOut, readOnly = false }) {
-  const [tab, setTab] = useState("home");
+  // 登録直後（Signup が ml_after_signup を立てる）は LINE連携タブを最初に開く
+  const [justSignedUp] = useState(() => {
+    if (readOnly) return false;
+    try {
+      if (localStorage.getItem("ml_after_signup")) { localStorage.removeItem("ml_after_signup"); return true; }
+    } catch { /* noop */ }
+    return false;
+  });
+  const [tab, setTab] = useState(justSignedUp ? "line" : "home");
   const [activeSurvey, setActiveSurvey] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -386,7 +398,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const totalCount = mySurveys.length + myEvents.length + 1;
 
   // ループちゃん（時間帯・誕生日・イベントでポーズ＆吹き出しを出し分け）
-  const loop = pickLoopChan(student, myEvents);
+  const loop = pickLoopChan(student, myEvents, lineLinked);
 
   const doRsvp = (id, v) => {
     if (readOnly) {
@@ -604,8 +616,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
   if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
   if (!profileDone) alerts.push({ label: "基本情報が未登録", onTap: () => setShowProfile(true) });
-  if (!lineLinked) alerts.push({ label: "LINE未連携", onTap: () => setTab("line") });
   if (myInterview && !myBooking && !myProposal) alerts.push({ label: "面談の希望日時が未提出", onTap: openInterview });
+  // LINE未連携は常に先頭・強調表示（連絡が届かなくなるため最優先で促す）
+  if (!lineLinked) alerts.unshift({ label: "LINE連携をお願いします", onTap: () => setTab("line"), strong: true });
 
   return (
     <div className="min-h-screen" style={{ background: PAPER, ...studentFontStyle }}>
@@ -666,7 +679,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             {alerts.map((a) => (
               <button key={a.label} onClick={a.onTap} disabled={readOnly}
                 className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full disabled:opacity-70"
-                style={{ background: "#fff", color: "#B45309", border: "1px solid #F5D08C" }}>
+                style={a.strong
+                  ? { background: LINE_GREEN, color: "#fff", border: `1px solid ${LINE_GREEN}` }
+                  : { background: "#fff", color: "#B45309", border: "1px solid #F5D08C" }}>
                 {a.label}
               </button>
             ))}
@@ -695,8 +710,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       style={{ width: 108, height: 108, objectFit: "contain" }} />
                     <div className="flex-1 mb-5">
                       <div className="bg-white px-4 py-3 shadow-sm"
-                        style={{ borderRadius: 18, borderBottomLeftRadius: 4 }}>
+                        role={loop.goLine && !readOnly ? "button" : undefined}
+                        onClick={loop.goLine && !readOnly ? () => setTab("line") : undefined}
+                        style={{ borderRadius: 18, borderBottomLeftRadius: 4, cursor: loop.goLine && !readOnly ? "pointer" : "default" }}>
                         <p className="text-sm font-bold leading-relaxed" style={{ color: ROSE_DEEP }}>{loop.msg}</p>
+                        {loop.goLine && (
+                          <p className="text-xs font-bold mt-1.5" style={{ color: LINE_GREEN }}>LINE連携へ →</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1129,6 +1149,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     </div>
                   ) : (
                     <>
+                      {justSignedUp && (
+                        <div className="mb-5 px-4 py-3 text-xs leading-relaxed"
+                          style={{ background: "#E7F9EE", border: `1px solid ${LINE_GREEN}`, color: "#05773A" }}>
+                          <p className="font-bold" style={{ fontSize: 13 }}>マイページの登録ありがとうございます！</p>
+                          <p className="mt-1">最後に公式LINEとの連携をお願いします。連携すると、イベントのリマインドや大切なお知らせをLINEでお届けできます。手順は登録完了メールにも記載しています。</p>
+                        </div>
+                      )}
                       <p className="jp-mincho font-bold" style={{ fontSize: 17 }}>大切なお知らせを、確実に。</p>
                       <p className="text-xs mt-2 leading-relaxed" style={{ color: MUTE }}>
                         公式LINEと連携すると、イベント前日のリマインドや限定のお知らせをLINEで受け取れます。

@@ -161,6 +161,8 @@ export default function Signup({ year }) {
         },
       });
       // 作成成功 → そのままログイン。以降は App のルーティングが学生画面へ
+      // 登録直後は LINE連携タブを最初に開く（StudentApp 側でこのフラグを消費）
+      try { localStorage.setItem("ml_after_signup", "1"); } catch { /* noop */ }
       await signInWithEmailAndPassword(auth, accountEmail, pw1);
       navigate("/", { replace: true });
     } catch (ex) {

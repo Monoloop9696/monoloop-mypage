@@ -1,5 +1,32 @@
 import { dbAdmin, authAdmin, FieldValue, Timestamp } from "./_lib/firebaseAdmin.js";
 import { readJson, sendJson, methodGuard } from "./_lib/util.js";
+import { sendEmail } from "./_lib/resend.js";
+
+const APP_URL = process.env.APP_URL || "https://monoloop-mypage.vercel.app";
+const LINE_ACCOUNT_NAME = "モノ・ループ 新卒採用公式アカウント";
+
+// 登録完了メール：LINE連携の手順（友だち追加URL＋本人の連携コード）を同封
+function welcomeMailText({ name, linkCode }) {
+  const addUrl = process.env.VITE_LINE_ADD_FRIEND_URL || "";
+  return (
+    `${name || ""}さん\n\n` +
+    `モノ・ループ内定者マイページの登録が完了しました。\n\n` +
+    `▼ マイページ\n${APP_URL}\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `【お願い】公式LINEとの連携\n` +
+    `━━━━━━━━━━━━━━━━━━━━\n` +
+    `イベントのリマインドや大切なお知らせは公式LINEでお届けします。\n` +
+    `必ず下記の手順で連携をお願いします（1分ほどで完了します）。\n\n` +
+    `1. 「${LINE_ACCOUNT_NAME}」を友だち追加\n` +
+    (addUrl ? `   ${addUrl}\n` : ``) +
+    `2. トーク画面に、あなたの連携コードを送信\n\n` +
+    `   連携コード：${linkCode}\n\n` +
+    `「LINE連携が完了しました」と返信が届けば完了です。\n` +
+    `連携コードはマイページのメニュー「LINE連携」からも確認できます。\n\n` +
+    `※ お心当たりのない場合はこのメールを破棄してください。\n\n` +
+    `モノ・ループ株式会社 採用担当`
+  );
+}
 
 const LINK_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 紛らわしい文字を除外
 
@@ -99,7 +126,20 @@ export default async function handler(req, res) {
     // 使用済み認証コードを削除
     await ref.delete();
 
-    return sendJson(res, 200, { ok: true, uid: userRecord.uid });
+    // 登録完了メール（LINE連携手順つき）。送信失敗しても登録自体は成功扱い
+    let mailSent = true;
+    try {
+      await sendEmail({
+        to: accountEmail,
+        subject: "【モノ・ループ】マイページ登録完了と公式LINE連携のお願い",
+        text: welcomeMailText({ name: profile.name, linkCode }),
+      });
+    } catch (e) {
+      mailSent = false;
+      console.error("welcome mail failed:", e && e.message);
+    }
+
+    return sendJson(res, 200, { ok: true, uid: userRecord.uid, mailSent });
   } catch (err) {
     return sendJson(res, 500, { error: "登録処理に失敗しました。時間をおいて再度お試しください。" });
   }
