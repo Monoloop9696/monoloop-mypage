@@ -427,6 +427,13 @@ export async function addMeeting(data) {
 export const updateMeeting = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteMeeting = (id) => deleteDoc(doc(db, "templates", id));
 
+// 特別選考ルートの特別コード。ドキュメントIDをコードから決めて重複を防ぐ（templates に _type:"specialCode"）
+// エントリー（_type:"specialEntry"）は公開APIが作成し、管理画面からは updateTemplate / deleteTemplate で更新・削除する
+export const setSpecialCode = (code, { label = "", expiresAt = "" } = {}) =>
+  setDoc(doc(db, "templates", `special_code_${code}`), {
+    _type: "specialCode", code, label, expiresAt, active: true, createdAt: serverTimestamp(),
+  });
+
 export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));

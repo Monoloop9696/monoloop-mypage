@@ -38,6 +38,10 @@ export const registerAccount = (payload) => post("/api/register", payload);
 // 公開：有効な卒年度一覧（/signup の年度チェック用。パスワードは含まれない）
 export const publicCohorts = () => post("/api/public-cohorts", {});
 
+// 公開：特別選考LP（/special）。関数数の上限対策で public-cohorts に action で集約
+export const specialVerify = (code) => post("/api/public-cohorts", { action: "specialVerify", code });
+export const specialEntry = (payload) => post("/api/public-cohorts", { action: "specialEntry", ...payload });
+
 // パスワード再設定メール（Resend経由。存在有無に関わらず ok を返す）
 export const resetPassword = (payload) => post("/api/reset-password", payload);
 

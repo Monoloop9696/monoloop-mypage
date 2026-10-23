@@ -6,6 +6,7 @@ import Signup from "./pages/Signup";
 import ResetPassword from "./pages/ResetPassword";
 import ResetConfirm from "./pages/ResetConfirm";
 import Privacy from "./pages/Privacy";
+import SpecialEntry from "./pages/SpecialEntry";
 import StudentApp from "./pages/StudentApp";
 import AdminApp from "./pages/AdminApp";
 
@@ -32,6 +33,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/privacy" element={<Privacy />} />
+      {/* 特別選考ルートのLP（公開・ログイン不要）。スカウトで配布した特別コードでエントリーする */}
+      <Route path="/special" element={<SpecialEntry />} />
       <Route path="/signup/:year" element={<SignupRoute />} />
       <Route
         path="/login"

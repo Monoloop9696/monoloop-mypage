@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket,
 } from "lucide-react";
+import SpecialAdmin from "../components/SpecialAdmin";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle, TimeSelect } from "../components/common";
 import { StudentInner } from "./StudentApp";
@@ -1326,7 +1327,7 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting" && t._type !== "interviewer");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting" && t._type !== "interviewer" && t._type !== "specialCode" && t._type !== "specialEntry");
   // ---- 面談の担当者マスタ ----
   const interviewerOptions = savedTemplates
     .filter((t) => t._type === "interviewer")
@@ -2013,9 +2014,12 @@ function AdminBody({
     { key: "meet", label: "面談", icon: CalendarDays },
     { key: "stats", label: "分析", icon: TrendingUp },
     { key: "news", label: "記事", icon: Newspaper },
+    { key: "special", label: "特別選考", icon: Ticket },
     { key: "qbox", label: "質問箱", icon: HelpCircle },
     { key: "line", label: "LINE配信", icon: Send },
   ];
+  // 特別選考LPからの未対応エントリー数（タブのバッジ用）
+  const specialNew = savedTemplates.filter((t) => t._type === "specialEntry" && (t.status || "未対応") === "未対応").length;
 
   return (
     <div className={pc ? "flex gap-5 px-5 py-4 items-start" : "pb-20"}>
@@ -2025,7 +2029,7 @@ function AdminBody({
             {tabs.map((t) => {
               const Icon = t.icon;
               const active = tab === t.key;
-              const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
+              const badge = t.key === "qbox" ? unansweredQ : t.key === "special" ? specialNew : 0;
               return (
                 <button key={t.key} onClick={() => setTab(t.key)}
                   className="w-full px-3.5 py-3 flex items-center gap-2.5 text-sm font-bold border-b border-gray-100 last:border-b-0"
@@ -4303,6 +4307,10 @@ function AdminBody({
         </div>
       )}
 
+      {tab === "special" && (
+        <SpecialAdmin savedTemplates={savedTemplates} pc={pc} setBanner={setBanner} />
+      )}
+
       {tab === "qbox" && (
         <div className={pc ? "space-y-3 pt-5" : "px-4 pt-4 space-y-3"}>
           <div className="flex items-center justify-between">
@@ -5928,7 +5936,7 @@ function AdminBody({
           {tabs.map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
-            const badge = t.key === "qbox" && unansweredQ > 0 ? unansweredQ : 0;
+            const badge = t.key === "qbox" ? unansweredQ : t.key === "special" ? specialNew : 0;
             return (
               <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
                 <div className="relative">

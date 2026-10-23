@@ -2,7 +2,7 @@
 
 このファイルは、プロジェクトの現状・構成・運用手順・残タスクをまとめた作業引き継ぎ用ドキュメントです。
 
-最終更新: 2026-10-20
+最終更新: 2026-10-23
 
 ---
 
@@ -43,14 +43,17 @@ src/
     csv.js               CSV出力
     image.js             画像圧縮（fileToCompressedDataURL / dataUrlToThumb / downloadDataUrl）
     deadline.js          pastDeadline / deadlineText（日付＋任意の時刻で締切判定・表示を共通化）
+    specialRoute.js      特別選考ルートの定義（SPECIAL_ROUTES / SPECIAL_STATUSES / コード正規化・状態判定 / specialUrl）
     scrollLock.js        useBodyScrollLock（モーダル/ドロワー表示中に背面を固定。iOS対策で position:fixed 方式・多重表示はカウントで管理）
+  components/SpecialAdmin.jsx  管理画面「特別選考」タブ（エントリー一覧・特別コード発行・スカウト文面）
   components/common.jsx  SectionTitle / EdHeader / FullLoader / **TimeSelect**（時・分の2プルダウン。5分刻み・min/max対応。時刻入力はすべてこれを使い、ブラウザ標準の type="time" は使わない）
   pages/
     Login / Signup（/signup/:year 動的・フリガナ/電話郵便ハイフン必須）/ ResetPassword / ResetConfirm（日本語再設定）
     Privacy / StudentApp（学生）/ AdminApp（管理）
+    SpecialEntry（/special 特別選考LP・公開・ログイン不要）
 api/                     ※Vercel Hobby は関数12個まで。現在11個（下記7参照）
   _lib/ firebaseAdmin.js（SA初期化・requireUser/requireAdmin）/ util.js / resend.js / line.js
-  send-code / register / set-role / student-account(退会/復元＋action=lastLogin で最終ログイン取得) / public-cohorts / reset-password /
+  send-code / register / set-role / student-account(退会/復元＋action=lastLogin で最終ログイン取得) / public-cohorts(公開: 年度一覧＋**action=specialVerify/specialEntry**=特別選考LP) / reset-password /
   line-webhook / line-broadcast / line-quota(送信枠) / broadcast-delete / questions(質問箱: action=ask/list/answer ＋ **action=bookInterview**=面談予約の確定とLINE送信。学生が呼べる認証済みAPIがここだけのため集約)
 firestore.rules          セキュリティルール（firebaserules REST APIでデプロイ）
 scripts/seed.mjs         cohorts/journeys 初期投入・admin クレーム付与
@@ -76,6 +79,11 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
   - `articles/{id}/images/{imgId}`: data(圧縮base64 dataURL), order
 - `templates/{id}`: LINE配信テンプレ。本体は {name, body, categoryId, order}、種別(カテゴリ)は同コレクション内の {_type:"category", name, order} ドキュメントとして保持（新コレクションを作らずルール追加デプロイを回避）
 - `broadcasts/{id}`: LINE/メール配信ログ。{target(表示名), body, grad, count, lineCount, mailCount, lineNames[]/mailNames[](宛先氏名), sentBy, sentAt}。管理者はread可・write不可（Admin SDK）。管理画面の「配信履歴」で表示・個別削除(`/api/broadcast-delete`)。
+- **特別選考ルート**（2026-10-23 追加・templates に保存＝ルール変更なし）:
+  - 特別コード `templates/special_code_<CODE>`: {_type:"specialCode", code, label(媒体・送信回のメモ), expiresAt(YYYY-MM-DD|""), active, createdAt}。管理画面から setSpecialCode で作成（IDがコードなので重複不可）。
+  - エントリー `templates/special_entry_<sha256(email)先頭24桁>`: {_type:"specialEntry", name, kana, univ, faculty, grad, email, phone, question, route(special/casual/talk), code, codeLabel, status(SPECIAL_STATUSES), memo, resubmitCount, createdAt, updatedAt, agreedAt}。**公開API（Admin SDK）だけが作成**。同じメールの再エントリーは同じドキュメントに上書き（status・memo・createdAt は保持、resubmitCount+1）。
+  - ルートの id・名前・案内文は `src/lib/specialRoute.js` と `api/public-cohorts.js` の SPECIAL_ROUTES の**両方**にある（片方だけ直すとズレる）。
+  - templates を一覧で使う箇所（LINE配信テンプレの realTemplates）では specialCode / specialEntry を除外している。新しい _type を足すときも同様に除外が必要。
 - `authCodes/{email}`(サーバー専用)
 - `questions/{id}`: 質問箱。{uid, name, grad, text, answer, answeredAt, answeredBy, public, createdAt}。**クライアントは直接触らず、必ず serverless API `/api/questions`（body.action=ask/list/answer）経由**（関数上限対策で1関数に集約）。Admin SDK で読み書きするため Firestore ルール追加が不要。回答時は質問者の公式LINEへ通知（連携時）。
 
@@ -169,6 +177,12 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - LINE一括配信: 対象は**モーダルで選択**（各選択肢に人数表示）。ステータス別／**イベント参加状況(出席者/到着者/欠席者/未回答者)**／**アンケート回答状況(未回答/回答済み)**／**個別選択（2026-10-20）**＝「登録済みの学生から選ぶ」と各アンケートの「回答済みから選ぶ」で、検索つきチェックリストから1人ずつ送信先を選べる（`target="pick"`・`pickUids/pickLabel`。送信時は既存の `uids` 指定で `/api/line-broadcast` に渡す＝API変更なし。配信対象カードに送信先の氏名を表示。年度切替で解除）。対象の判定は `/api/line-broadcast` 側にも同じロジックがある（片方だけ直すとズレる）。**{name}差し込み**(個別push)。**今月の送信数(無料枠200/月・毎月リセット)表示＋超過ガード**。**配信履歴**(本文・宛先氏名・日時・件数、折りたたみ＋ページング、**個別削除**)。テンプレ管理(種別カテゴリ・並び替え・削除)。※Managerの「メッセージ配信」履歴には出ない旨の注記あり。
 - 学生画面プレビュー(操作可・DB非保存)。
 
+**特別選考ルート（2026-10-23）**:
+- 公開LP `/special?code=XXXX`（SpecialEntry.jsx）: **最初の画面でお名前＋特別コードを確認**（招待状を開く）→ LP本文は「あなた」の部分を**入力した名前（〇〇さん）に差し替えて表示**（招待メッセージ → 特典 → **ルート選択（特別選考／カジュアル面談／社員座談会）**）→ フリガナ・大学・卒業年度・メール等 → 完了。`?code=` でコード欄が埋まる。確認済みの名前・コードは sessionStorage `ml_special_gate` に残し、同じタブの再読み込みでは入口を飛ばす（コードは毎回再確認）。卒業年度の選択肢は受付中の cohorts から作る。ボット対策の隠し入力欄（website）あり。
+- `/api/public-cohorts` action=specialVerify（コードの有無・期限・停止を判定。媒体メモは返さない）/ specialEntry（再検証→保存→本人へ受付メール・ADMIN_EMAILS へ通知メール。メール失敗でも保存は成功扱い）。**関数数は11のまま**。
+- 管理「特別選考」タブ（SpecialAdmin.jsx・未対応件数をタブにバッジ表示）: 集計（総数・未対応・ルート別）／エントリー一覧（検索・ルート/状況/コードで絞り込み・対応状況の変更・対応メモ・削除・CSV）／特別コードの発行（コード・経路メモ・有効期限）・停止/再開・削除・URLコピー・LPを開く・コード別件数／選んだコードを入れたスカウト文面のコピー。
+- プライバシーポリシーに「特別選考エントリーページ」と「採用選考とそれに関するご連絡」の利用目的を追記。
+
 **LINE Webhook**: 友だち追加(follow)時・その他メッセージへの自動返信は廃止し、**連携完了時のみ**「連携が完了しました」を送信。
 
 **基盤**: cohorts(卒年度動的化)・Security Rules全面・Resendドメイン認証・LINE(Webhook active)・Vercel本番+GitHub自動デプロイ・游ゴシック統一・配色リブランド・color-scheme:light。**新規コレクション追加を避けてルール再デプロイを回避**(questions=API経由/アンケートテンプレ・種別=templates内 _type)。
@@ -189,6 +203,9 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - 面談のスマホ対応（10/20）: 記録ドロワーの面談日・開始時刻をスマホでは縦並びに（date入力が縮まず重なっていた）／カレンダーは日付を押すと下に一覧（PC・スマホ共通）／ZOOM URL をリンク化
 
 ### 運用で確認・実施してほしいこと（ユーザー側）
+- [ ] **特別選考ルートの確認（2026-10-23 追加分）**: ①管理「特別選考」でテスト用コードを発行 ②「LPを開く」から自分のメールでエントリー ③受付メール・管理者通知メールが届く ④一覧に出て状況・メモが変えられる、を確認。確認後テストのエントリー・コードは削除。
+- [ ] **特別選考LPの文言の確定**: ルートの中身（所要時間・ステップ・案内文）、「なぜあなたに届いたのか」、FAQ は仮の文面。実際の選考フローに合わせて `src/lib/specialRoute.js`（＋ api/public-cohorts.js の案内文）と SpecialEntry.jsx を直す。
+- [ ] **媒体の規約確認**: スカウト本文に外部URLを載せてよいか、媒体ごとに確認する。
 - [ ] **固定されたままの対象者を解除**: 「10/1 内定式」「【27卒】店舗インターンについて」「内定者小規模懇親会―東海―」は作成時点の名簿で targetUids が固定されている。概況のカード→「対象者を調整」→「個別指定を解除（条件どおりに戻す）」で後から登録した学生にも表示される（2026-10-06 時点で未実施なら要対応）。
 - [ ] **面談カレンダー・確定モーダルの目視確認**（管理者ログインが必要なため Claude 側で未確認）。
 - [ ] 質問箱・面談日程調整（依頼→候補提出→確定→LINE）の実学生での通しテスト。
@@ -201,6 +218,8 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - [ ] パルス調査の全体平均は在籍中の学生のみで計算（辞退者を含めた過去値にしたい場合は要対応）。
 - [ ] 記事の予約投稿は公開時刻の LINE 通知ができない（公開時刻に動くサーバー処理が無い）。必要なら Vercel Cron（Hobby は1日1回）か外部スケジューラ。
 - [ ] 予約記事は published:true で保存され表示制御はクライアント側（Firestore を直接読めば公開前でも内容は見える）。厳密にするならルール側で publishAt を見る。
+- [ ] 特別選考エントリー → 内定後に**マイページのアカウントへつなぐ導線**（例：エントリー一覧から /signup/<年度> の案内を送る）。現状は別管理。
+- [ ] 特別選考LPの**連投対策**は隠し入力欄＋コード必須のみ。悪用が見えたらコード単位・IP単位の回数制限を検討。
 - [ ] 独自ドメイン `mypage.monoloop.jp`（Vercel でドメイン追加＋ムームーDNSにCNAME）。
 - [ ] 写真の原本画質が必要なら Firebase Storage(Blaze) か Vercel Blob へ移行（現状は1MB/枚の圧縮）。
 - [ ] Vercel 関数は **11/12**。新API追加は既存に action で集約する。
