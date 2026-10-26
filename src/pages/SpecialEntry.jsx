@@ -19,16 +19,17 @@ const VERIFY_MSG = {
 };
 
 const PERKS = [
-  { k: "書類選考なし", title: "エントリーシートは不要です", body: "プロフィールはすでに拝見しています。書類を書く時間は、面談で話したいことを考える時間に使ってください。" },
-  { k: "人事と1対1", title: "最初の接点は個別面談", body: "大人数の説明会ではなく、採用担当と一対一で話すところから始まります。気になることは何でも聞いてください。" },
+  { k: "書類選考なし", title: "エントリーシートは不要です", body: "プロフィールはすでに拝見しています。書類を書く時間は、面接で話したいことを考える時間に使ってください。" },
+  { k: "会社を知ってから", title: "説明会・オープンカンパニーから始まります", body: "いきなり面接ではなく、会社の雰囲気や仕事を知る場から始めて、そのまま選考に進めます。" },
   { k: "ルートを選べる", title: "選考か、まず話すか", body: "すぐ選考に進むことも、社員と話してから決めることもできます。途中で別のルートに切り替えることもできます。" },
 ];
 
 const FAQ = [
   ["選ぶルートによって合否に差は出ますか？", "出ません。どのルートでも評価の基準は同じです。今の気持ちに一番近いものを選んでください。"],
-  ["カジュアル面談や座談会のあとに、選考へ進めますか？", "進めます。終わったあとに希望を伺い、そのまま特別選考ルートの日程を調整します。"],
+  ["特別選考ルート①と②の違いは何ですか？", "最初のステップが違います。①は会社説明会、②はオープンカンパニーから始まります。どちらも書類選考は免除で、①は一次・二次・最終の3回、②は一次・最終の2回の面接です。"],
+  ["カジュアル面談のあとに、選考へ進めますか？", "進めます。終わったあとに希望を伺い、そのまま特別選考ルート①または②の日程を調整します。"],
   ["コードの有効期限が切れてしまいました。", "スカウトを受け取った媒体のメッセージから、採用担当へご連絡ください。"],
-  ["服装や持ち物の指定はありますか？", "オンラインで実施するため服装は自由です。履歴書などの書類も必要ありません。"],
+  ["カジュアル面談での服装や持ち物の指定はありますか？", "オンラインで実施するため服装は自由です。履歴書などの書類も必要ありません。"],
 ];
 
 export default function SpecialEntry() {
@@ -169,7 +170,7 @@ export default function SpecialEntry() {
       <div className="min-h-screen flex flex-col" style={{ background: `linear-gradient(160deg, ${ROSE} 0%, ${ROSE_DEEP} 100%)`, ...studentFontStyle }}>
         <header className="px-5 py-3.5 flex items-center gap-2.5" style={{ background: "#fff" }}>
           <img src="/logo.png" alt="モノ・ループ" style={{ height: 22, width: "auto" }} />
-          <span className="text-xs font-bold" style={{ color: MUTE }}>新卒採用</span>
+          <span className="text-xs font-bold" style={{ color: MUTE }}>モノ・ループ株式会社</span>
         </header>
         <main className="flex-1 flex items-center justify-center px-5 py-10">
           <div className="w-full ml-in" style={{ maxWidth: 400 }}>
@@ -217,7 +218,7 @@ export default function SpecialEntry() {
       {/* ヘッダー */}
       <header className="px-5 py-3.5 flex items-center gap-2.5" style={{ background: "#fff", borderBottom: `1px solid ${HAIR}` }}>
         <img src="/logo.png" alt="モノ・ループ" style={{ height: 22, width: "auto" }} />
-        <span className="text-xs font-bold" style={{ color: MUTE }}>新卒採用</span>
+        <span className="text-xs font-bold" style={{ color: MUTE }}>モノ・ループ株式会社</span>
       </header>
 
       {/* ヒーロー */}

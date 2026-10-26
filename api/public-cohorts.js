@@ -13,9 +13,9 @@ const APP_URL = process.env.APP_URL || "https://monoloop-mypage.vercel.app";
 
 // src/lib/specialRoute.js の SPECIAL_ROUTES と id・名前・案内文を揃えること
 const SPECIAL_ROUTES = {
-  special: { name: "特別選考ルート", next: "3営業日以内に、個別面談の日程についてメールでご連絡します。" },
+  special1: { name: "特別選考ルート①", next: "3営業日以内に、説明会の日程についてメールでご連絡します。" },
+  special2: { name: "特別選考ルート②", next: "3営業日以内に、オープンカンパニーの日程についてメールでご連絡します。" },
   casual: { name: "カジュアル面談ルート", next: "3営業日以内に、面談の日程についてメールでご連絡します。" },
-  talk: { name: "社員座談会ルート", next: "次回の座談会の日程と参加方法をメールでご連絡します。" },
 };
 
 const todayJst = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
