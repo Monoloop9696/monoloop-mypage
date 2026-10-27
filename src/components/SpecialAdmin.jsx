@@ -25,6 +25,12 @@ const STATUS_STYLE = {
   辞退: { background: "#F3F4F6", color: "#6B7280" },
   見送り: { background: "#F3F4F6", color: "#6B7280" },
 };
+// 日程の種別ごとの色（説明会＝青系、オープンカンパニー＝橙系）
+const KIND_STYLE = {
+  seminar: { background: "#EEF2FF", color: "#4338CA", border: "#C7D2FE", accent: "#4F46E5" },
+  oc: { background: "#FFF4E5", color: "#C2410C", border: "#FED7AA", accent: "#EA580C" },
+};
+const kindStyle = (k) => KIND_STYLE[k] || { background: "#F3F4F6", color: "#6B7280", border: "#E5E7EB", accent: "#6B7280" };
 const CODE_STATE = {
   on: { label: "受付中", style: { background: "#EAF7EE", color: "#1E874B" } },
   exp: { label: "期限切れ", style: { background: "#FFF7E6", color: "#B45309" } },
@@ -90,6 +96,8 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
   const [fSlot, setFSlot] = useState("");
   const [confirmDlg, setConfirmDlg] = useState(null); // { entry, slotId, sendMail } 日程確定の確認
   const [confirmBusy, setConfirmBusy] = useState(false);
+  const [view, setView] = useState("entries"); // 表示の切り替え: entries / slots / codes / scout
+  const [showPast, setShowPast] = useState(false); // 終了した日程を表示するか（既定は自動で隠す）
   const slotById = useMemo(() => new Map(slots.map((s) => [s.id, s])), [slots]);
   // 日程ごとの希望数・確定数
   const slotCounts = useMemo(() => {
@@ -218,8 +226,26 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
         ))}
       </div>
 
-      <div className={pc ? "grid grid-cols-[1.6fr_1fr] gap-5 items-start" : "space-y-5"}>
+      {/* 表示の切り替え（年度スイッチャーと同じ形。右側に寄せた3区画をやめて、1つずつ全幅で表示する） */}
+      <div className="flex gap-1.5 overflow-x-auto">
+        {[
+          ["entries", "エントリー", entries.length],
+          ["slots", "説明会・OCの日程", slots.filter((s) => (s.date || "") >= today).length],
+          ["codes", "特別コード", activeCodes.length],
+          ["scout", "スカウト文面", null],
+        ].map(([v, label, n]) => (
+          <button key={v} onClick={() => setView(v)}
+            className="shrink-0 px-3.5 py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5"
+            style={view === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
+            {label}
+            {n != null && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={view === v ? { background: "rgba(255,255,255,0.25)" } : { background: "#F3F4F6" }}>{n}</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-5">
         {/* エントリー一覧 */}
+        {view === "entries" && (
         <div className="space-y-3 min-w-0">
           <div className="flex items-center justify-between">
             <SectionTitle>特別選考エントリー</SectionTitle>
@@ -246,14 +272,14 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
             {slots.length > 0 && (
               <select value={fSlot} onChange={(e) => setFSlot(e.target.value)} className={sel} aria-label="日程で絞り込む">
                 <option value="">全日程</option>
-                {slots.map((s) => <option key={s.id} value={s.id}>{SLOT_KINDS[s.kind] || ""} {formatSlotLabel(s)}</option>)}
+                {slots.filter((s) => (s.date || "") >= today || s.id === fSlot).map((s) => <option key={s.id} value={s.id}>{SLOT_KINDS[s.kind] || ""} {formatSlotLabel(s)}</option>)}
               </select>
             )}
           </div>
 
           {entries.length === 0 ? (
             <p className="text-xs text-gray-400 bg-white border border-dashed border-gray-300 rounded-xl px-4 py-6 text-center">
-              まだエントリーはありません。右の「特別コード」でコードを発行し、スカウト文面に貼って送ってください。
+              まだエントリーはありません。「特別コード」でコードを発行し、「スカウト文面」をコピーして送ってください。
             </p>
           ) : list.length === 0 ? (
             <p className="text-xs text-gray-400">条件に合うエントリーはありません。</p>
@@ -289,7 +315,8 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                           <p className="text-[11px] text-gray-400">{kind ? `${SLOT_KINDS[kind]}の候補日程` : "候補日程"}</p>
                           <div className="flex flex-wrap gap-1.5 text-[11px]">
                             {(e.slotIds || []).map((id) => (
-                              <span key={id} className="px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-700">{slotLabelOf(id)}</span>
+                              <span key={id} className="px-2 py-0.5 rounded-full border"
+                                style={{ background: "#fff", borderColor: kindStyle(kind).border, color: kindStyle(kind).color }}>{slotLabelOf(id)}</span>
                             ))}
                             {e.otherDate && <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: "#FFF7E6", color: "#B45309" }}>別日で調整を希望</span>}
                             {!(e.slotIds || []).length && !e.otherDate && <span className="text-gray-400">候補なし（公開中の日程がありませんでした）</span>}
@@ -362,14 +389,15 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
             </div>
           )}
         </div>
+        )}
 
-        {/* 特別コード／スカウト文面 */}
-        <div className="space-y-5 min-w-0">
+        {/* 特別コード */}
+        {view === "codes" && (
           <div className="space-y-3">
             <SectionTitle>特別コード</SectionTitle>
             <p className="text-xs text-gray-500">媒体・送信回ごとにコードを分けると、どのスカウトから反応があったかを比べられます。</p>
             <form onSubmit={addCode} className={`${card} space-y-2.5`} noValidate>
-              <div className="grid grid-cols-2 gap-2">
+              <div className={pc ? "grid grid-cols-3 gap-2" : "grid grid-cols-2 gap-2"}>
                 <div className="min-w-0">
                   <label htmlFor="sc-code" className="text-xs font-bold text-gray-500">コード</label>
                   <input id="sc-code" value={nc.code} onChange={(e) => setNc({ ...nc, code: e.target.value.toUpperCase() })}
@@ -380,14 +408,14 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                   <input id="sc-exp" type="date" value={nc.expiresAt} onChange={(e) => setNc({ ...nc, expiresAt: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm min-w-0" style={{ maxWidth: "100%" }} />
                 </div>
-              </div>
-              <div>
-                <label htmlFor="sc-label" className="text-xs font-bold text-gray-500">経路メモ（媒体・送信回）</label>
-                <input id="sc-label" value={nc.label} onChange={(e) => setNc({ ...nc, label: e.target.value })}
-                  placeholder="OfferBox 11月第1回" className="w-full border border-gray-300 rounded-lg px-2.5 py-2 text-sm" />
+                <div className={pc ? "min-w-0" : "min-w-0 col-span-2"}>
+                  <label htmlFor="sc-label" className="text-xs font-bold text-gray-500">経路メモ（媒体・送信回）</label>
+                  <input id="sc-label" value={nc.label} onChange={(e) => setNc({ ...nc, label: e.target.value })}
+                    placeholder="OfferBox 11月第1回" className="w-full border border-gray-300 rounded-lg px-2.5 py-2 text-sm" />
+                </div>
               </div>
               {codeErr && <p className="text-xs" style={{ color: "#B91C1C" }}>{codeErr}</p>}
-              <button type="submit" disabled={busy} className="w-full text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50" style={{ background: BRAND }}>
+              <button type="submit" disabled={busy} className={`${pc ? "px-6" : "w-full"} text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50`} style={{ background: BRAND }}>
                 {busy ? "発行中…" : "コードを発行"}
               </button>
             </form>
@@ -395,12 +423,12 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
             {codes.length === 0 ? (
               <p className="text-xs text-gray-400">まだコードはありません。</p>
             ) : (
-              <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+              <div className={pc ? "grid grid-cols-2 gap-3" : "space-y-3"}>
                 {codes.map((c) => {
                   const s = CODE_STATE[specialCodeState(c)];
                   const n = countByCode[c.code] || 0;
                   return (
-                    <div key={c.id} className="px-3.5 py-3 space-y-1.5">
+                    <div key={c.id} className={`${card} space-y-1.5 min-w-0`}>
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-sm">{c.code}</span>
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={s.style}>{s.label}</span>
@@ -433,17 +461,20 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
               </div>
             )}
           </div>
+        )}
 
-          {/* 説明会・OCの日程 */}
+        {/* 説明会・OCの日程 */}
+        {view === "slots" && (
           <div className="space-y-3">
             <SectionTitle>説明会・オープンカンパニーの日程</SectionTitle>
-            <p className="text-xs text-gray-500">ここに登録した日程が、LP でルート①（説明会）／②（OC）を選んだ学生に候補として表示されます。残り人数は自動では減りません。確定したら手で減らしてください（0 で「満員」になり選べなくなります）。</p>
-            <form onSubmit={addSlot} className={`${card} space-y-2.5`} noValidate>
-              <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-2"}>
+            <p className="text-xs text-gray-500">ここに登録した日程が、LP でルート①（説明会）／②（OC）を選んだ学生に候補として表示されます。残り人数は自動では減りません。確定したら手で減らしてください（0 で「満員」になり選べなくなります）。終了した日程は自動で隠れます（LP にも出ません）。</p>
+            <form onSubmit={addSlot} className={`${card} space-y-2.5`} noValidate style={{ borderLeft: `4px solid ${kindStyle(ns.kind).accent}` }}>
+              <div className={pc ? "grid grid-cols-6 gap-2 items-end" : "space-y-2"}>
                 <div className="min-w-0">
                   <label htmlFor="ss-kind" className="text-xs font-bold text-gray-500">種別</label>
                   <select id="ss-kind" value={ns.kind} onChange={(e) => setNs({ ...ns, kind: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm bg-white">
+                    className="w-full border rounded-lg px-2 py-2 text-sm font-bold"
+                    style={{ background: kindStyle(ns.kind).background, color: kindStyle(ns.kind).color, borderColor: kindStyle(ns.kind).border }}>
                     {Object.entries(SLOT_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
@@ -472,64 +503,104 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                 </div>
               </div>
               {slotErr && <p className="text-xs" style={{ color: "#B91C1C" }}>{slotErr}</p>}
-              <button type="submit" disabled={busy} className="w-full text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50" style={{ background: BRAND }}>
-                {busy ? "追加中…" : "日程を追加"}
+              <button type="submit" disabled={busy} className={`${pc ? "px-6" : "w-full"} text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50`} style={{ background: kindStyle(ns.kind).accent }}>
+                {busy ? "追加中…" : `${SLOT_KINDS[ns.kind]}の日程を追加`}
               </button>
             </form>
 
-            {slots.length === 0 ? (
-              <p className="text-xs text-gray-400">まだ日程はありません。</p>
-            ) : (
-              <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-                {[...slots.filter((s) => (s.date || "") >= today), ...slots.filter((s) => (s.date || "") < today)].map((s) => {
-                  const past = (s.date || "") < today;
-                  const c = slotCounts[s.id] || { wish: 0, fixed: 0 };
-                  const full = isSlotFull(s);
-                  return (
-                    <div key={s.id} className="px-3.5 py-3 space-y-1.5" style={past ? { opacity: 0.55 } : {}}>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>{SLOT_KINDS[s.kind] || s.kind}</span>
-                        <span className="font-bold text-sm">{formatSlotLabel(s)}</span>
-                        {s.active === false && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">停止中</span>}
-                        {past && <span className="text-[11px] text-gray-400">終了</span>}
-                        <span className="ml-auto text-xs text-gray-500 tabular-nums">希望{c.wish}名・確定{c.fixed}名</span>
+            {/* 一覧：種別ごとに列を分け、今後の日程だけをカードで表示。終了分はトグルで表示 */}
+            {(() => {
+              const upcoming = slots.filter((s) => (s.date || "") >= today);
+              const past = slots.filter((s) => (s.date || "") < today);
+              const shown = showPast ? [...upcoming, ...past] : upcoming;
+              const SlotCard = (s) => {
+                const isPast = (s.date || "") < today;
+                const c = slotCounts[s.id] || { wish: 0, fixed: 0 };
+                const full = isSlotFull(s);
+                const ks = kindStyle(s.kind);
+                return (
+                  <div key={s.id} className="bg-white rounded-xl p-3 space-y-1.5 min-w-0"
+                    style={{ border: `1px solid ${ks.border}`, borderLeft: `4px solid ${ks.accent}`, opacity: isPast ? 0.55 : 1 }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-bold text-sm">{formatSlotLabel(s)}</p>
+                        {s.note && <p className="text-xs text-gray-500 truncate">{s.note}</p>}
                       </div>
-                      {s.note && <p className="text-xs text-gray-500 truncate">{s.note}</p>}
-                      <div className="flex flex-wrap items-center gap-3 text-xs">
-                        <label className="flex items-center gap-1.5 text-gray-500">
-                          残り
-                          <input type="number" min={0} step={1} key={`${s.id}:${s.remaining ?? ""}`} defaultValue={s.remaining ?? ""} placeholder="—"
-                            onBlur={(ev) => {
-                              const v = ev.target.value.trim();
-                              const n = v === "" ? null : Math.max(0, Math.floor(Number(v) || 0)); // 0以上の整数に丸める
-                              if (n !== (s.remaining ?? null)) safe(() => updateTemplate(s.id, { remaining: n }), "残り人数の更新に失敗しました");
-                              else ev.target.value = n === null ? "" : String(n);
-                            }}
-                            className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-xs text-right" aria-label="残り人数" />
-                          名
-                          {full && <span className="font-bold" style={{ color: "#DC2626" }}>満員</span>}
-                        </label>
-                        <button onClick={() => safe(() => updateTemplate(s.id, { active: s.active === false }), "日程の更新に失敗しました")} className="font-bold text-gray-500">
-                          {s.active === false ? "再開する" : "停止する"}
-                        </button>
-                        {confirmDel === s.id ? (
-                          <span className="ml-auto flex items-center gap-2">
-                            {c.wish > 0 && <span className="text-gray-500">{c.wish}件のエントリーが候補にしています。</span>}
-                            <button onClick={() => { setConfirmDel(null); safe(() => deleteTemplate(s.id), "削除に失敗しました"); }}
-                              className="px-2 py-0.5 rounded text-white font-bold" style={{ background: "#DC2626" }}>削除する</button>
-                            <button onClick={() => setConfirmDel(null)} className="text-gray-400">取消</button>
-                          </span>
-                        ) : (
-                          <button onClick={() => setConfirmDel(s.id)} className="ml-auto text-gray-300">削除</button>
-                        )}
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        {s.active === false && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">停止中</span>}
+                        {isPast && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">終了</span>}
+                        {full && !isPast && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "#FEE2E2", color: "#B91C1C" }}>満員</span>}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="tabular-nums" style={{ color: ks.color }}>希望 <b>{c.wish}</b>名・確定 <b>{c.fixed}</b>名</span>
+                      <label className="ml-auto flex items-center gap-1 text-gray-500">
+                        残り
+                        <input type="number" min={0} step={1} key={`${s.id}:${s.remaining ?? ""}`} defaultValue={s.remaining ?? ""} placeholder="—"
+                          onBlur={(ev) => {
+                            const v = ev.target.value.trim();
+                            const n = v === "" ? null : Math.max(0, Math.floor(Number(v) || 0)); // 0以上の整数に丸める
+                            if (n !== (s.remaining ?? null)) safe(() => updateTemplate(s.id, { remaining: n }), "残り人数の更新に失敗しました");
+                            else ev.target.value = n === null ? "" : String(n);
+                          }}
+                          className="w-14 border border-gray-300 rounded-lg px-1.5 py-1 text-xs text-right" aria-label="残り人数" />
+                        名
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] font-bold pt-0.5">
+                      <button onClick={() => safe(() => updateTemplate(s.id, { active: s.active === false }), "日程の更新に失敗しました")} className="text-gray-500">
+                        {s.active === false ? "再開する" : "停止する"}
+                      </button>
+                      {confirmDel === s.id ? (
+                        <span className="ml-auto flex items-center gap-2 font-normal">
+                          {(c.wish > 0 || c.fixed > 0) && <span className="text-gray-500">希望{c.wish}・確定{c.fixed}件あり</span>}
+                          <button onClick={() => { setConfirmDel(null); safe(() => deleteTemplate(s.id), "削除に失敗しました"); }}
+                            className="px-2 py-0.5 rounded text-white font-bold" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => setConfirmDel(null)} className="text-gray-400">取消</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setConfirmDel(s.id)} className="ml-auto text-gray-300 font-normal">削除</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              };
+              return (
+                <>
+                  {slots.length === 0 ? (
+                    <p className="text-xs text-gray-400">まだ日程はありません。</p>
+                  ) : (
+                    <div className={pc ? "grid grid-cols-2 gap-4 items-start" : "space-y-4"}>
+                      {Object.entries(SLOT_KINDS).map(([k, label]) => {
+                        const ks = kindStyle(k);
+                        const items = shown.filter((s) => s.kind === k);
+                        return (
+                          <div key={k} className="rounded-xl p-3 space-y-2" style={{ background: ks.background }}>
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-bold" style={{ color: ks.color }}>{label}</p>
+                              <span className="text-xs" style={{ color: ks.color }}>{upcoming.filter((s) => s.kind === k).length}件（今後）</span>
+                            </div>
+                            {items.length === 0
+                              ? <p className="text-xs text-gray-500 bg-white/60 rounded-lg px-3 py-3 text-center">今後の{label}の日程はありません。</p>
+                              : <div className="grid grid-cols-1 gap-2">{items.map(SlotCard)}</div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {past.length > 0 && (
+                    <button onClick={() => setShowPast((v) => !v)} className="text-xs font-bold" style={{ color: BRAND }}>
+                      {showPast ? "終了した日程を隠す" : `終了した日程を表示（${past.length}件）`}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
+        )}
 
+        {/* スカウト文面 */}
+        {view === "scout" && (
           <div className="space-y-3">
             <SectionTitle>スカウト文面の例</SectionTitle>
             {activeCodes.length === 0 ? (
@@ -552,7 +623,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
 
       {/* 日程確定の確認ダイアログ */}
