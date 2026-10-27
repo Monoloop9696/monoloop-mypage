@@ -84,3 +84,42 @@ export const specialCodeState = (c) => {
   if (c.expiresAt && c.expiresAt < todayJst()) return "exp";
   return "on";
 };
+
+// ---------------------------------------------------------------------
+// 説明会・オープンカンパニーの候補日程（templates/_type:"specialSlot"）
+//   LP・公開API・管理画面で同じ判定を使うため、ここに純粋ロジックをまとめる（API も import する）
+// ---------------------------------------------------------------------
+export const SLOT_KINDS = { seminar: "説明会", oc: "オープンカンパニー" };
+
+// ルート → 日程の種別。casual は日程の設問なし
+export const slotKindForRoute = (routeId) => (routeId === "special1" ? "seminar" : routeId === "special2" ? "oc" : null);
+
+export const weekdayJa = (dateStr) => ["日", "月", "火", "水", "木", "金", "土"][new Date(`${dateStr}T00:00:00`).getDay()] || "";
+
+// "10/15（水）14:00〜15:00"（end が空なら "10/15（水）14:00"）
+export const formatSlotLabel = (slot) => {
+  const d = String(slot.date || "");
+  const md = d.length >= 10 ? `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}（${weekdayJa(d)}）` : d;
+  return `${md}${slot.start || ""}${slot.end ? `〜${slot.end}` : ""}`;
+};
+
+// 残り人数が 0 のときだけ満員（null/undefined は人数を出さないだけで受付可）
+export const isSlotFull = (slot) => slot.remaining === 0;
+
+// 学生に見せる枠：受付中・種別一致・今日以降。日付→開始時刻の昇順。満員は含める（表示側で disabled）
+export const selectableSlots = (slots, { kind, today }) =>
+  (slots || [])
+    .filter((s) => s.active !== false && s.kind === kind && (s.date || "") >= today)
+    .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
+
+// エントリー時の候補の検証（LP と API で共通）
+export const validateSlotSelection = ({ routeId, slotIds, otherDate, slots, today }) => {
+  const kind = slotKindForRoute(routeId);
+  if (!kind) return { ok: true, slotIds: [] };
+  const open = selectableSlots(slots, { kind, today });
+  if (open.length === 0) return { ok: true, slotIds: [] }; // 公開枠なし＝設問を出さない
+  const allowed = new Set(open.filter((s) => !isSlotFull(s)).map((s) => s.id));
+  const picked = (Array.isArray(slotIds) ? slotIds : []).filter((id) => allowed.has(id));
+  if (picked.length === 0 && otherDate !== true) return { ok: false, error: "候補日程を選ぶか、別日での調整を希望してください。" };
+  return { ok: true, slotIds: picked };
+};
