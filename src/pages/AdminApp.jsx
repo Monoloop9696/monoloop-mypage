@@ -1348,6 +1348,8 @@ function AdminBody({
   const yearMeetings = allMeetings
     .filter((m) => (m.grad || 2027) === selectedYear)
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+  // 面談記録の「内定者」表示：氏名（大学名 学部）・流入経路
+  const studentMeetLabel = (st) => `${st.name}（${st.univ || "大学未登録"}）・${st.source || "流入経路 未登録"}`;
   const meetingsOf = (uid) => allMeetings.filter((m) => m.uid === uid)
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
   const openMeetForm = (m, uid, prefill) => {
@@ -4954,8 +4956,11 @@ function AdminBody({
                 <select value={meetForm.uid} onChange={(e) => setMeetForm({ ...meetForm, uid: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
                   <option value="">選択してください</option>
-                  {activeStudents.map((st) => (<option key={st.id} value={st.id}>{st.name}（{st.univ || "大学未登録"}）</option>))}
+                  {activeStudents.map((st) => (<option key={st.id} value={st.id}>{studentMeetLabel(st)}</option>))}
                 </select>
+                {(() => { const st = meetForm.uid ? students.find((x) => x.id === meetForm.uid) : null; return st ? (
+                  <p className="text-xs text-gray-500 mt-1">{studentMeetLabel(st)}</p>
+                ) : null; })()}
               </div>
               {/* スマホでは date 入力が縮まず時刻と重なるため縦に並べる。PCは2列（min-w-0 ではみ出し防止） */}
               <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-3"}>
@@ -5121,7 +5126,7 @@ function AdminBody({
                   <p className="text-xs text-gray-400">面談履歴</p>
                   <p className="text-base font-bold mt-0.5 truncate">{st.name}</p>
                   <p className="text-xs text-gray-500 mt-0.5 truncate">
-                    {st.univ || "大学未登録"}・{ms.length ? `面談 ${ms.length}回` : "未実施"}
+                    {st.univ || "大学未登録"}・{st.source || "流入経路 未登録"}・{ms.length ? `面談 ${ms.length}回` : "未実施"}
                   </p>
                 </div>
                 <button onClick={() => { setMeetHist(null); setMeetDelId(null); }} aria-label="閉じる"
