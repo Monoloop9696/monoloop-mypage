@@ -472,6 +472,8 @@ function AdminBody({
   const [meetView, setMeetView] = useState("student"); // student=内定者別（既定） / recent=日付順
   const [meetHist, setMeetHist] = useState(null); // 内定者別で選んだ学生の面談履歴モーダル（student）
   const [meetHistOpen, setMeetHistOpen] = useState(false); // スマホで過去の記録を開く
+  const [meetShots, setMeetShots] = useState([]); // 編集中の面談記録のスクリーンショット（圧縮済み dataURL）
+  const [shotView, setShotView] = useState(null); // スクリーンショットの拡大表示
   // 面談の日程調整
   const [ivReqOpen, setIvReqOpen] = useState(false);
   const [ivReqEditId, setIvReqEditId] = useState(null);
@@ -1363,7 +1365,9 @@ function AdminBody({
         // 項目分けする前の記録は「その他」に読み込む（内容が消えないように）
         noteOther: m.noteOther || (hasNew ? "" : (m.note || "")),
       });
+      setMeetShots(Array.isArray(m.shots) ? m.shots : []);
     } else {
+      setMeetShots([]);
       setMeetEditId(null);
       const today = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })();
       setMeetForm({
@@ -1376,7 +1380,32 @@ function AdminBody({
   };
   // 確定した面談が実施済み（同じ学生・同じ日の面談記録がある）か
   const bookingRecorded = (uid, date) => allMeetings.some((m) => m.uid === uid && m.date === date);
-  const closeMeetForm = () => { setMeetOpen(false); setMeetEditId(null); setMeetForm(EMPTY_MEETING); setMeetErr(""); };
+  const closeMeetForm = () => { setMeetOpen(false); setMeetEditId(null); setMeetForm(EMPTY_MEETING); setMeetErr(""); setMeetShots([]); };
+  // 面談記録のスクリーンショット（Zoom の顔など）。貼り付け／ドロップ／ファイル選択 → 長辺480px・70KB以下に圧縮して state に持つ
+  const MEET_SHOT_MAX = 2;
+  const addMeetShot = async (file) => {
+    if (!file || !file.type || !file.type.startsWith("image/")) return; // 画像以外（テキスト等）は何もしない
+    if (meetShots.length >= MEET_SHOT_MAX) { setMeetErr(`画像は最大${MEET_SHOT_MAX}枚までです。`); return; }
+    try {
+      const data = await fileToCompressedDataURL(file, { maxDim: 480, quality: 0.75, maxLen: 70000 });
+      setMeetShots((prev) => (prev.length >= MEET_SHOT_MAX ? prev : [...prev, data]));
+      setMeetErr("");
+    } catch (ex) { setMeetErr(ex.message || "画像を取り込めませんでした。"); }
+  };
+  // サムネイル列（記録の表示用）。タップで拡大
+  const MeetShots = ({ shots, size = 72 }) => {
+    if (!Array.isArray(shots) || shots.length === 0) return null;
+    return (
+      <div className="flex flex-wrap gap-1.5 mt-2">
+        {shots.map((src, i) => (
+          <button key={i} type="button" onClick={(e) => { e.stopPropagation(); setShotView(src); }} aria-label={`スクリーンショット ${i + 1} を拡大`}
+            className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50" style={{ width: size, height: size }}>
+            <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+          </button>
+        ))}
+      </div>
+    );
+  };
   const saveMeeting = async () => {
     if (!meetForm.uid) { setMeetErr("対象の内定者を選んでください。"); return; }
     if (!meetForm.date) { setMeetErr("面談日を入力してください。"); return; }
@@ -1393,6 +1422,7 @@ function AdminBody({
         kind: meetForm.kind || "個別面談",
         next: meetForm.next || "",
         note: "", // 項目分け前の内容は編集時に「その他」へ移しているので空にする
+        shots: meetShots,
         ...Object.fromEntries(MEETING_SECTIONS.map((s) => [s.key, (meetForm[s.key] || "").trim()])),
       };
       if (meetEditId) await updateMeeting(meetEditId, data);
@@ -2007,7 +2037,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || meetHist || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
   );
 
   const tabs = [
@@ -3844,6 +3874,7 @@ function AdminBody({
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                   </div>
                 ))}
+                <MeetShots shots={m.shots} />
                 {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
               </div>
             );
@@ -5024,6 +5055,45 @@ function AdminBody({
                 <input type="date" value={meetForm.next} onChange={(e) => setMeetForm({ ...meetForm, next: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
               </div>
+              <div>
+                <p className="text-xs font-bold text-gray-500 mb-1">学生の様子（スクリーンショット）<span className="font-normal text-gray-400 ml-1.5">{meetShots.length}/{MEET_SHOT_MAX}</span></p>
+                <div tabIndex={0} role="button"
+                  onPaste={(e) => {
+                    const item = [...(e.clipboardData?.items || [])].find((it) => it.type && it.type.startsWith("image/"));
+                    if (!item) return; // 画像以外の貼り付けは無視（エラーも出さない）
+                    e.preventDefault();
+                    addMeetShot(item.getAsFile());
+                  }}
+                  onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) addMeetShot(f); }}
+                  onDragOver={(e) => e.preventDefault()}
+                  className="rounded-lg px-3 py-4 text-center text-xs focus:outline-none"
+                  style={{ border: `2px dashed ${meetShots.length >= MEET_SHOT_MAX ? "#E5E7EB" : BRAND}`, color: "#6B7280", background: "#FAFBFC" }}>
+                  <p className="font-bold" style={{ color: meetShots.length >= MEET_SHOT_MAX ? "#9CA3AF" : BRAND }}>
+                    ここをクリックして Ctrl+V で貼り付け
+                  </p>
+                  <p className="mt-0.5">Windows で Win+Shift+S を押して Zoom の画面を撮り、そのまま貼り付けられます（ドラッグ＆ドロップも可）</p>
+                  <label className="inline-block mt-2 text-[11px] font-bold px-2.5 py-1 rounded-lg border cursor-pointer bg-white" style={{ borderColor: "#D7DEDB" }}>
+                    ファイルを選ぶ
+                    <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addMeetShot(f); }} />
+                  </label>
+                </div>
+                {meetShots.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {meetShots.map((src, i) => (
+                      <div key={i} className="relative">
+                        <button type="button" onClick={() => setShotView(src)} className="rounded-lg overflow-hidden border border-gray-200" style={{ width: 96, height: 96 }} aria-label="拡大">
+                          <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
+                        </button>
+                        <button type="button" onClick={() => setMeetShots((prev) => prev.filter((_, j) => j !== i))} aria-label="削除"
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow" style={{ background: "#DC2626" }}>
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">画像は縮小して保存します（1枚あたり数十KB）。学生には表示されません。</p>
+              </div>
               <p className="text-[11px] text-gray-400 leading-relaxed">
                 面談記録は管理者だけが閲覧できます（学生のマイページには表示されません）。
               </p>
@@ -5092,6 +5162,7 @@ function AdminBody({
                               <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                             </div>
                           ))}
+                          <MeetShots shots={m.shots} size={56} />
                           {m.next && <p className="text-xs font-bold mt-1.5" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
                         </div>
                       ))}
@@ -5173,6 +5244,7 @@ function AdminBody({
                           ))}
                         </div>
                         {meetingBody(m).length === 0 && <p className="text-xs text-gray-400 mt-2">内容の記入はありません。</p>}
+                        <MeetShots shots={m.shots} />
                         {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
                       </div>
                     ))}
@@ -5190,6 +5262,14 @@ function AdminBody({
           </div>
         );
       })()}
+
+      {/* 面談記録のスクリーンショットの拡大表示（最前面） */}
+      {shotView && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.75)" }} onClick={() => setShotView(null)}>
+          <button onClick={() => setShotView(null)} aria-label="閉じる" className="absolute top-4 right-4 p-2 rounded-full text-white" style={{ background: "rgba(255,255,255,0.15)" }}><X size={20} /></button>
+          <img src={shotView} alt="スクリーンショット" className="rounded-xl shadow-2xl" style={{ maxWidth: "92vw", maxHeight: "85vh", objectFit: "contain" }} onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
 
       {/* 配信対象を選ぶモーダル */}
       {showTargetPicker && (() => {
@@ -5881,6 +5961,7 @@ function AdminBody({
                                   <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                                 </div>
                               ))}
+                              <MeetShots shots={m.shots} size={56} />
                             </div>
                           ))}
                           {ms.length > 3 && <p className="text-[11px] text-gray-400">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}
