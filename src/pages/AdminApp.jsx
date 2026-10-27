@@ -1327,7 +1327,7 @@ function AdminBody({
   // ---- テンプレ（種別＝categoryId でグループ化。すべて Firestore 管理） ----
   // 種別(カテゴリ)は templates コレクション内の _type:"category" ドキュメント、それ以外が本体テンプレ
   const templateCategories = savedTemplates.filter((t) => t._type === "category");
-  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting" && t._type !== "interviewer" && t._type !== "specialCode" && t._type !== "specialEntry");
+  const realTemplates = savedTemplates.filter((t) => t._type !== "category" && t._type !== "surveyTemplate" && t._type !== "source" && t._type !== "meeting" && t._type !== "interviewer" && t._type !== "specialCode" && t._type !== "specialEntry" && t._type !== "specialSlot");
   // ---- 面談の担当者マスタ ----
   const interviewerOptions = savedTemplates
     .filter((t) => t._type === "interviewer")

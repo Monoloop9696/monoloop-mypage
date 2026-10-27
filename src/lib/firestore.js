@@ -434,6 +434,17 @@ export const setSpecialCode = (code, { label = "", expiresAt = "" } = {}) =>
     _type: "specialCode", code, label, expiresAt, active: true, createdAt: serverTimestamp(),
   });
 
+// 説明会／OCの候補日程（templates に _type:"specialSlot"）。更新・削除は updateTemplate / deleteTemplate
+// remaining は残り人数（人事が手入力。null＝人数を出さない、0＝満員）
+export async function addSpecialSlot({ kind, date, start, end = "", note = "", remaining = null }) {
+  const ref = await addDoc(collection(db, "templates"), {
+    _type: "specialSlot", kind, date, start, end, note,
+    remaining: remaining === null || remaining === "" ? null : Number(remaining),
+    active: true, createdAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+
 export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
