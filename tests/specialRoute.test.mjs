@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { slotKindForRoute, weekdayJa, formatSlotLabel, isSlotFull, selectableSlots, validateSlotSelection } from "../src/lib/specialRoute.js";
+import { slotKindForRoute, weekdayJa, formatSlotLabel, isSlotFull, selectableSlots, validateSlotSelection, allowedSlotIds } from "../src/lib/specialRoute.js";
 
 const S = (o) => ({ id: "x", kind: "seminar", date: "2026-11-05", start: "14:00", end: "15:00", remaining: null, active: true, ...o });
 
@@ -56,4 +56,9 @@ test("validateSlotSelection: casual と公開枠なしは常に ok", () => {
     validateSlotSelection({ routeId: "special1", slotIds: [], otherDate: false, slots: [], today: "2026-10-27" }),
     { ok: true, slotIds: [] }
   );
+});
+
+test("allowedSlotIds: 受付中・今日以降・満員でない枠の id だけ", () => {
+  const slots = [S({ id: "ok" }), S({ id: "full", remaining: 0 }), S({ id: "old", date: "2026-10-01" }), S({ id: "oc", kind: "oc" })];
+  assert.deepEqual([...allowedSlotIds(slots, { kind: "seminar", today: "2026-10-27" })], ["ok"]);
 });

@@ -498,8 +498,13 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                       <div className="flex flex-wrap items-center gap-3 text-xs">
                         <label className="flex items-center gap-1.5 text-gray-500">
                           残り
-                          <input type="number" min={0} defaultValue={s.remaining ?? ""} placeholder="—"
-                            onBlur={(ev) => { const v = ev.target.value; const n = v === "" ? null : Number(v); if (n !== (s.remaining ?? null)) safe(() => updateTemplate(s.id, { remaining: n }), "残り人数の更新に失敗しました"); }}
+                          <input type="number" min={0} step={1} key={`${s.id}:${s.remaining ?? ""}`} defaultValue={s.remaining ?? ""} placeholder="—"
+                            onBlur={(ev) => {
+                              const v = ev.target.value.trim();
+                              const n = v === "" ? null : Math.max(0, Math.floor(Number(v) || 0)); // 0以上の整数に丸める
+                              if (n !== (s.remaining ?? null)) safe(() => updateTemplate(s.id, { remaining: n }), "残り人数の更新に失敗しました");
+                              else ev.target.value = n === null ? "" : String(n);
+                            }}
                             className="w-16 border border-gray-300 rounded-lg px-2 py-1 text-xs text-right" aria-label="残り人数" />
                           名
                           {full && <span className="font-bold" style={{ color: "#DC2626" }}>満員</span>}

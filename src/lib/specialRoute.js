@@ -112,13 +112,17 @@ export const selectableSlots = (slots, { kind, today }) =>
     .filter((s) => s.active !== false && s.kind === kind && (s.date || "") >= today)
     .sort((a, b) => (a.date + (a.start || "")).localeCompare(b.date + (b.start || "")));
 
+// 学生が実際に選べる枠の id（受付中・今日以降・種別一致・満員でない）。LP の選び直しと API の検証で共用
+export const allowedSlotIds = (slots, { kind, today }) =>
+  new Set(selectableSlots(slots, { kind, today }).filter((s) => !isSlotFull(s)).map((s) => s.id));
+
 // エントリー時の候補の検証（LP と API で共通）
 export const validateSlotSelection = ({ routeId, slotIds, otherDate, slots, today }) => {
   const kind = slotKindForRoute(routeId);
   if (!kind) return { ok: true, slotIds: [] };
   const open = selectableSlots(slots, { kind, today });
   if (open.length === 0) return { ok: true, slotIds: [] }; // 公開枠なし＝設問を出さない
-  const allowed = new Set(open.filter((s) => !isSlotFull(s)).map((s) => s.id));
+  const allowed = allowedSlotIds(slots, { kind, today });
   const picked = (Array.isArray(slotIds) ? slotIds : []).filter((id) => allowed.has(id));
   if (picked.length === 0 && otherDate !== true) return { ok: false, error: "候補日程を選ぶか、別日での調整を希望してください。" };
   return { ok: true, slotIds: picked };

@@ -1392,8 +1392,8 @@ function AdminBody({
       setMeetErr("");
     } catch (ex) { setMeetErr(ex.message || "画像を取り込めませんでした。"); }
   };
-  // サムネイル列（記録の表示用）。タップで拡大
-  const MeetShots = ({ shots, size = 72 }) => {
+  // サムネイル列（記録の表示用）。タップで拡大。※コンポーネントではなく関数呼び出し（AdminBody の再レンダーで <img> が作り直されないように）
+  const meetShotsView = (shots, size = 72) => {
     if (!Array.isArray(shots) || shots.length === 0) return null;
     return (
       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -3874,7 +3874,7 @@ function AdminBody({
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                   </div>
                 ))}
-                <MeetShots shots={m.shots} />
+                {meetShotsView(m.shots)}
                 {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
               </div>
             );
@@ -5162,7 +5162,7 @@ function AdminBody({
                               <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                             </div>
                           ))}
-                          <MeetShots shots={m.shots} size={56} />
+                          {meetShotsView(m.shots, 56)}
                           {m.next && <p className="text-xs font-bold mt-1.5" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
                         </div>
                       ))}
@@ -5244,7 +5244,7 @@ function AdminBody({
                           ))}
                         </div>
                         {meetingBody(m).length === 0 && <p className="text-xs text-gray-400 mt-2">内容の記入はありません。</p>}
-                        <MeetShots shots={m.shots} />
+                        {meetShotsView(m.shots)}
                         {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
                       </div>
                     ))}
@@ -5961,7 +5961,7 @@ function AdminBody({
                                   <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                                 </div>
                               ))}
-                              <MeetShots shots={m.shots} size={56} />
+                              {meetShotsView(m.shots, 56)}
                             </div>
                           ))}
                           {ms.length > 3 && <p className="text-[11px] text-gray-400">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}

@@ -130,9 +130,12 @@ async function specialEntry(res, body) {
   };
   const noConfirm = { confirmedSlotId: null, confirmedAt: null, confirmMailAt: null };
   if (prev.exists) {
-    // 日程の種別が変わった（①⇄②、または casual になった）ら確定を解除。同じ種別なら保持
-    const kindChanged = slotKindForRoute(prev.data().route) !== kind;
-    await ref.set({ ...payload, ...(kindChanged ? noConfirm : {}), resubmitCount: (prev.data().resubmitCount || 0) + 1 }, { merge: true });
+    // 日程の種別が変わった（①⇄②、または casual になった）ら確定を解除。同じ種別なら保持。
+    // 確定を外すときは「日程調整済」のままだと対応漏れに見えないので「連絡済」に戻す
+    const pd = prev.data();
+    const kindChanged = slotKindForRoute(pd.route) !== kind;
+    const unconfirm = kindChanged && pd.confirmedSlotId ? { ...noConfirm, ...(pd.status === "日程調整済" ? { status: "連絡済" } : {}) } : {};
+    await ref.set({ ...payload, ...unconfirm, resubmitCount: (pd.resubmitCount || 0) + 1 }, { merge: true });
   } else {
     await ref.set({ ...payload, ...noConfirm, status: "未対応", memo: "", resubmitCount: 0, createdAt: FieldValue.serverTimestamp() });
   }
@@ -174,7 +177,8 @@ async function specialEntry(res, body) {
   const results = await Promise.allSettled(mails);
   results.forEach((x) => x.status === "rejected" && console.error("[special-entry] mail failed:", x.reason && x.reason.message));
 
-  return sendJson(res, 200, { ok: true, mailSent: results[0].status === "fulfilled" });
+  // slotIds は除外後のもの（LP の完了画面はこれを表示する）
+  return sendJson(res, 200, { ok: true, mailSent: results[0].status === "fulfilled", slotIds, otherDate });
 }
 
 // 【管理者のみ】日程の確定：{ entryId, slotId | null, sendMail }
@@ -205,7 +209,10 @@ async function specialConfirm(req, res, body) {
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (slotId && ["未対応", "連絡済"].includes(entry.status || "未対応")) patch.status = "日程調整済";
-  if (!slotId) patch.confirmMailAt = null;
+  if (!slotId) {
+    patch.confirmMailAt = null;
+    if (entry.status === "日程調整済") patch.status = "連絡済"; // 未確定に戻したら対応状況も戻す
+  }
   await eRef.set(patch, { merge: true });
 
   let mailSent = false;

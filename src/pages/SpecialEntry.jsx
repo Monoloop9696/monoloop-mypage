@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { publicCohorts, specialVerify, specialEntry, specialSlots } from "../lib/api";
-import { SPECIAL_ROUTES, normalizeSpecialCode, isValidSpecialCode, slotKindForRoute, formatSlotLabel, isSlotFull, SLOT_KINDS } from "../lib/specialRoute";
+import { SPECIAL_ROUTES, normalizeSpecialCode, isValidSpecialCode, slotKindForRoute, formatSlotLabel, isSlotFull, SLOT_KINDS, allowedSlotIds, todayJst } from "../lib/specialRoute";
 import { PAPER, PINK, ROSE, ROSE_DEEP, IVORY, GOLD, HAIR, MUTE, INK, studentFontStyle, caps } from "../theme";
 
 // =====================================================================
@@ -54,7 +54,27 @@ export default function SpecialEntry() {
   const [slotLoading, setSlotLoading] = useState(false);
   const [pickedSlots, setPickedSlots] = useState(() => new Set());
   const [otherDate, setOtherDate] = useState(false);
+  const [saved, setSaved] = useState(null); // 送信後にサーバーが受け付けた内容 { slotIds, otherDate }（完了画面用）
+  const slotReq = useRef(0); // 候補取得の連番（素早くルートを切り替えたとき古い応答で上書きしない）
   const slotKind = route ? slotKindForRoute(route.id) : null;
+
+  // 候補日程を取り直す。prune=true のときは、選択中の印を今選べる枠だけに絞る（満員・停止になった枠を外す）
+  const loadSlots = (kind, { prune = false } = {}) => {
+    const seq = ++slotReq.current;
+    setSlotLoading(true);
+    return specialSlots(kind)
+      .then(({ slots }) => {
+        if (seq !== slotReq.current) return;
+        const list = slots || [];
+        setSlotList(list);
+        if (prune) {
+          const ok = allowedSlotIds(list, { kind, today: todayJst() });
+          setPickedSlots((prev) => new Set([...prev].filter((id) => ok.has(id))));
+        }
+      })
+      .catch(() => { if (seq === slotReq.current) setSlotList([]); })
+      .finally(() => { if (seq === slotReq.current) setSlotLoading(false); });
+  };
 
   const entryRef = useRef(null);
   const firstInputRef = useRef(null);
@@ -99,15 +119,14 @@ export default function SpecialEntry() {
     // ルートに応じた候補日程を取り直す（選択はリセット）
     setPickedSlots(new Set());
     setOtherDate(false);
+    setSaved(null);
     const kind = slotKindForRoute(r.id);
     if (kind) {
-      setSlotLoading(true);
-      specialSlots(kind)
-        .then(({ slots }) => setSlotList(slots || []))
-        .catch(() => setSlotList([]))
-        .finally(() => setSlotLoading(false));
+      loadSlots(kind);
     } else {
+      slotReq.current += 1; // 進行中の取得があっても反映させない
       setSlotList([]);
+      setSlotLoading(false);
     }
     setTimeout(() => {
       entryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -152,18 +171,28 @@ export default function SpecialEntry() {
     if (!agree) return setErr("個人情報の取り扱いへの同意が必要です。");
     setBusy(true);
     try {
-      await specialEntry({
+      const r = await specialEntry({
         code: verified, route: route.id, name: name.trim(),
         kana: f.kana.trim(), univ: f.univ.trim(), faculty: f.faculty.trim(),
         grad: f.grad ? Number(f.grad) : null, email: f.email.trim(), phone: f.phone.trim(),
         question: f.question.trim(), agree: true, website,
         slotIds: slotKind ? [...pickedSlots] : [], otherDate: slotKind ? otherDate : false,
       });
+      // 完了画面はサーバーが実際に受け付けた候補（満員・停止で除外されたものは含まない）を表示する
+      setSaved({ slotIds: Array.isArray(r.slotIds) ? r.slotIds : [], otherDate: r.otherDate === true });
       setStep(3);
       setTimeout(() => entryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (ex) {
-      setErr(ex.message || "送信できませんでした。時間をおいて再度お試しください。");
-      if (ex.code === "not_found" || ex.code === "expired" || ex.code === "stopped") { backToGate(); }
+      if (ex.code === "not_found" || ex.code === "expired" || ex.code === "stopped") {
+        setErr(ex.message || "送信できませんでした。時間をおいて再度お試しください。");
+        backToGate();
+      } else if (slotKind && /候補日程/.test(ex.message || "")) {
+        // 送信中に枠が満員・停止になった（または画面を開いたあとに枠が追加された）。候補を取り直して選び直してもらう
+        setErr("選んだ日程が満員または受付終了になりました。候補を選び直すか、別日での調整を希望してください。");
+        loadSlots(slotKind, { prune: true });
+      } else {
+        setErr(ex.message || "送信できませんでした。時間をおいて再度お試しください。");
+      }
     } finally {
       setBusy(false);
     }
@@ -483,12 +512,12 @@ export default function SpecialEntry() {
                 <div className="text-center py-2">
                   <img src="/loopchan/loopchan-8.png" alt="" aria-hidden="true" className="mx-auto ml-float" style={{ width: 110 }} />
                   <p className="font-bold mt-3" style={{ fontSize: 20 }}>エントリーを受け付けました</p>
-                  {slotKind && (pickedSlots.size > 0 || otherDate) && (
+                  {slotKind && saved && (saved.slotIds.length > 0 || saved.otherDate) && (
                     <div className="text-left rounded-lg px-4 py-3 mt-3 text-sm" style={{ background: PAPER }}>
                       <p className="text-xs font-bold mb-1" style={{ color: MUTE }}>ご希望の候補日程</p>
                       <ul className="space-y-0.5">
-                        {slotList.filter((s) => pickedSlots.has(s.id)).map((s) => <li key={s.id}>・{formatSlotLabel(s)}</li>)}
-                        {otherDate && <li>・別日での調整を希望</li>}
+                        {slotList.filter((s) => saved.slotIds.includes(s.id)).map((s) => <li key={s.id}>・{formatSlotLabel(s)}</li>)}
+                        {saved.otherDate && <li>・別日での調整を希望</li>}
                       </ul>
                       <p className="text-xs mt-1.5" style={{ color: MUTE }}>日程は人事からご連絡します。</p>
                     </div>
