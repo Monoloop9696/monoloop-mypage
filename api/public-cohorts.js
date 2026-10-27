@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 import { dbAdmin, FieldValue } from "./_lib/firebaseAdmin.js";
-import { readJson, sendJson, methodGuard, adminEmails } from "./_lib/util.js";
+import { readJson, sendJson, methodGuard, adminEmails, requireAdmin } from "./_lib/util.js";
 import { sendEmail } from "./_lib/resend.js";
+import { SLOT_KINDS, slotKindForRoute, formatSlotLabel, selectableSlots, validateSlotSelection } from "../src/lib/specialRoute.js";
 
 // 公開エンドポイント（未ログインで呼べる）。Vercel の関数数上限（12）対策で action により分岐する。
 //   action なし        : /signup での年度有効性チェック。initialPassword は絶対に返さない（year と active のみ）。
 //   action=specialVerify: 特別選考LP（/special）の特別コード確認。コードの有無と状態だけ返す（媒体メモ等は返さない）。
+//   action=specialSlots : 特別選考LPに出す説明会／OCの候補日程（受付中・今日以降）。{ kind } → { slots }
 //   action=specialEntry : 特別選考LPのエントリー登録。templates に _type:"specialEntry" で保存し、本人と管理者へメール。
-// 特別コード・エントリーは templates（管理者のみ read/write）に置くので Firestore ルールの変更は不要。
+//   action=specialConfirm: 【管理者のみ】エントリーの日程を確定し、希望があれば本人へ確定メール。
+// 特別コード・エントリー・日程は templates（管理者のみ read/write）に置くので Firestore ルールの変更は不要。
+// 日程の判定ロジックは src/lib/specialRoute.js を LP・管理画面と共用する。
 
 const APP_URL = process.env.APP_URL || "https://monoloop-mypage.vercel.app";
 
@@ -51,6 +55,30 @@ async function specialVerify(res, body) {
   return sendJson(res, 200, { ok: true, code: r.code });
 }
 
+// 日程（_type:"specialSlot"）を全件取得
+async function loadSlots() {
+  const snap = await dbAdmin.collection("templates").where("_type", "==", "specialSlot").get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// 学生に見せる候補日程。公開するキーは最小限（id, date, start, end, note, remaining）
+async function specialSlots(res, body) {
+  const kind = SLOT_KINDS[body.kind] ? body.kind : null;
+  if (!kind) return sendJson(res, 200, { slots: [] });
+  const slots = selectableSlots(await loadSlots(), { kind, today: todayJst() })
+    .map((s) => ({ id: s.id, date: s.date, start: s.start || "", end: s.end || "", note: s.note || "", remaining: s.remaining ?? null }));
+  return sendJson(res, 200, { slots });
+}
+
+// メール用：候補日程のブロック（候補も別日希望も無ければ空文字）
+function slotBlockText(slotIds, otherDate, slots) {
+  const byId = new Map(slots.map((s) => [s.id, s]));
+  const lines = slotIds.map((id) => byId.get(id)).filter(Boolean).map((s) => `・${formatSlotLabel(s)}${s.note ? `（${s.note}）` : ""}`);
+  if (otherDate) lines.push("・別日での調整を希望");
+  if (!lines.length) return "";
+  return `▼ ご希望の候補日程\n${lines.join("\n")}\n日程は人事からご連絡します。\n\n`;
+}
+
 async function specialEntry(res, body) {
   // ボット対策：画面に出さない入力欄（website）に値が入っていたら、保存せず成功扱いで返す
   if (body.website) return sendJson(res, 200, { ok: true });
@@ -76,6 +104,15 @@ async function specialEntry(res, body) {
   if (f.phone && !/^\d{2,4}-\d{2,4}-\d{3,4}$/.test(f.phone)) return sendJson(res, 400, { error: "電話番号はハイフンつきで入力してください（例：090-1234-5678）。" });
   if (body.agree !== true) return sendJson(res, 400, { error: "個人情報の取り扱いへの同意が必要です。" });
 
+  // 候補日程（①＝説明会／②＝OC のみ）。LP を開いたあとに停止・満員になった枠は黙って除外し、
+  // 残り 0 件かつ別日希望なしならエラー。公開枠が無いときは設問を出していないので [] で受け付ける
+  const kind = slotKindForRoute(route);
+  const allSlots = kind ? await loadSlots() : [];
+  const sel = validateSlotSelection({ routeId: route, slotIds: body.slotIds, otherDate: body.otherDate === true, slots: allSlots, today: todayJst() });
+  if (!sel.ok) return sendJson(res, 400, { error: sel.error });
+  const slotIds = sel.slotIds;
+  const otherDate = kind ? body.otherDate === true : false;
+
   // 同じメールアドレスからの再エントリーは1件にまとめる（ルートや連絡先は最新に上書き、受付日時・対応状況は保持）
   const id = "special_entry_" + createHash("sha256").update(f.email).digest("hex").slice(0, 24);
   const ref = dbAdmin.collection("templates").doc(id);
@@ -86,14 +123,20 @@ async function specialEntry(res, body) {
     route,
     code: r.code,
     codeLabel: r.data.label || "",
+    slotIds,
+    otherDate,
     agreedAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   };
+  const noConfirm = { confirmedSlotId: null, confirmedAt: null, confirmMailAt: null };
   if (prev.exists) {
-    await ref.set({ ...payload, resubmitCount: (prev.data().resubmitCount || 0) + 1 }, { merge: true });
+    // 日程の種別が変わった（①⇄②、または casual になった）ら確定を解除。同じ種別なら保持
+    const kindChanged = slotKindForRoute(prev.data().route) !== kind;
+    await ref.set({ ...payload, ...(kindChanged ? noConfirm : {}), resubmitCount: (prev.data().resubmitCount || 0) + 1 }, { merge: true });
   } else {
-    await ref.set({ ...payload, status: "未対応", memo: "", resubmitCount: 0, createdAt: FieldValue.serverTimestamp() });
+    await ref.set({ ...payload, ...noConfirm, status: "未対応", memo: "", resubmitCount: 0, createdAt: FieldValue.serverTimestamp() });
   }
+  const slotBlock = slotBlockText(slotIds, otherDate, allSlots);
 
   // メールは失敗してもエントリー自体は成功扱い
   const routeName = SPECIAL_ROUTES[route].name;
@@ -106,6 +149,7 @@ async function specialEntry(res, body) {
         `モノ・ループ株式会社 新卒採用です。\n` +
         `特別選考ルートへのエントリーを受け付けました。ありがとうございます。\n\n` +
         `選択したルート：${routeName}\n\n` +
+        slotBlock +
         `${SPECIAL_ROUTES[route].next}\n` +
         `しばらく届かない場合は、迷惑メールフォルダもご確認ください。\n\n` +
         `※ お心当たりのない場合はこのメールを破棄してください。\n\n` +
@@ -122,6 +166,7 @@ async function specialEntry(res, body) {
           `特別選考LPから${prev.exists ? "再エントリー" : "エントリー"}がありました。\n\n` +
           `氏名：${f.name}（${f.kana}）\n大学：${f.univ}${f.faculty ? " " + f.faculty : ""}\n` +
           `ルート：${routeName}\nコード：${r.code}${r.data.label ? `（${r.data.label}）` : ""}\n\n` +
+          slotBlock +
           `管理画面の「特別選考」タブで確認・対応してください。\n${APP_URL}/admin`,
       })
     );
@@ -132,12 +177,72 @@ async function specialEntry(res, body) {
   return sendJson(res, 200, { ok: true, mailSent: results[0].status === "fulfilled" });
 }
 
+// 【管理者のみ】日程の確定：{ entryId, slotId | null, sendMail }
+//   slotId があれば確定（対応状況が未対応/連絡済なら「日程調整済」へ）、null なら未確定に戻す（メールは送らない）
+async function specialConfirm(req, res, body) {
+  const admin = await requireAdmin(req);
+  if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
+
+  const entryId = String(body.entryId || "");
+  const slotId = body.slotId ? String(body.slotId) : null;
+  const sendMail = body.sendMail === true && !!slotId;
+
+  const eRef = dbAdmin.collection("templates").doc(entryId);
+  const eSnap = entryId ? await eRef.get() : null;
+  if (!eSnap || !eSnap.exists || eSnap.data()._type !== "specialEntry") return sendJson(res, 404, { error: "エントリーが見つかりません。" });
+  const entry = eSnap.data();
+
+  let slot = null;
+  if (slotId) {
+    const sSnap = await dbAdmin.collection("templates").doc(slotId).get();
+    if (!sSnap.exists || sSnap.data()._type !== "specialSlot") return sendJson(res, 404, { error: "日程が見つかりません。" });
+    slot = { id: sSnap.id, ...sSnap.data() };
+  }
+
+  const patch = {
+    confirmedSlotId: slotId,
+    confirmedAt: slotId ? FieldValue.serverTimestamp() : null,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (slotId && ["未対応", "連絡済"].includes(entry.status || "未対応")) patch.status = "日程調整済";
+  if (!slotId) patch.confirmMailAt = null;
+  await eRef.set(patch, { merge: true });
+
+  let mailSent = false;
+  if (sendMail && slot) {
+    const kindName = SLOT_KINDS[slot.kind] || "面談";
+    const routeName = (SPECIAL_ROUTES[entry.route] || {}).name || "";
+    try {
+      await sendEmail({
+        to: entry.email,
+        subject: `【モノ・ループ】${kindName}の日程が確定しました`,
+        text:
+          `${entry.name || ""}さん\n\n` +
+          `モノ・ループ株式会社 新卒採用です。\n` +
+          `${kindName}の日程が確定しましたのでお知らせします。\n\n` +
+          (routeName ? `選択したルート：${routeName}\n` : "") +
+          `確定した日程：${formatSlotLabel(slot)}\n` +
+          (slot.note ? `${slot.note}\n` : "") +
+          `\n変更が必要な場合は、このメールに返信してください。\n\n` +
+          `モノ・ループ株式会社 採用担当`,
+      });
+      mailSent = true;
+      await eRef.set({ confirmMailAt: FieldValue.serverTimestamp() }, { merge: true });
+    } catch (e) {
+      console.error("[special-confirm] mail failed:", e && e.message);
+    }
+  }
+  return sendJson(res, 200, { ok: true, mailSent });
+}
+
 export default async function handler(req, res) {
   if (!methodGuard(req, res)) return;
   try {
     const body = await readJson(req);
     if (body.action === "specialVerify") return await specialVerify(res, body);
+    if (body.action === "specialSlots") return await specialSlots(res, body);
     if (body.action === "specialEntry") return await specialEntry(res, body);
+    if (body.action === "specialConfirm") return await specialConfirm(req, res, body);
     return await cohortsHandler(res);
   } catch (err) {
     console.error("[public-cohorts] error:", err && err.message);

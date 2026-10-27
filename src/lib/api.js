@@ -41,6 +41,10 @@ export const publicCohorts = () => post("/api/public-cohorts", {});
 // 公開：特別選考LP（/special）。関数数の上限対策で public-cohorts に action で集約
 export const specialVerify = (code) => post("/api/public-cohorts", { action: "specialVerify", code });
 export const specialEntry = (payload) => post("/api/public-cohorts", { action: "specialEntry", ...payload });
+// 公開：説明会／OCの候補日程（kind = "seminar" | "oc"）
+export const specialSlots = (kind) => post("/api/public-cohorts", { action: "specialSlots", kind });
+// 管理者：エントリーの日程を確定（{ entryId, slotId | null, sendMail }）。希望があれば本人へ確定メール
+export const specialConfirm = (payload) => post("/api/public-cohorts", { action: "specialConfirm", ...payload }, { authed: true });
 
 // パスワード再設定メール（Resend経由。存在有無に関わらず ok を返す）
 export const resetPassword = (payload) => post("/api/reset-password", payload);
