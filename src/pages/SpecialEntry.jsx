@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { publicCohorts, specialVerify, specialEntry } from "../lib/api";
-import { SPECIAL_ROUTES, normalizeSpecialCode, isValidSpecialCode } from "../lib/specialRoute";
+import { publicCohorts, specialVerify, specialEntry, specialSlots } from "../lib/api";
+import { SPECIAL_ROUTES, normalizeSpecialCode, isValidSpecialCode, slotKindForRoute, formatSlotLabel, isSlotFull, SLOT_KINDS } from "../lib/specialRoute";
 import { PAPER, PINK, ROSE, ROSE_DEEP, IVORY, GOLD, HAIR, MUTE, INK, studentFontStyle, caps } from "../theme";
 
 // =====================================================================
@@ -49,6 +49,12 @@ export default function SpecialEntry() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [years, setYears] = useState([]);
+  // 説明会／OCの候補日程（ルート①②のみ）。複数に印を付ける＋「別日で調整を希望」
+  const [slotList, setSlotList] = useState([]);
+  const [slotLoading, setSlotLoading] = useState(false);
+  const [pickedSlots, setPickedSlots] = useState(() => new Set());
+  const [otherDate, setOtherDate] = useState(false);
+  const slotKind = route ? slotKindForRoute(route.id) : null;
 
   const entryRef = useRef(null);
   const firstInputRef = useRef(null);
@@ -90,6 +96,19 @@ export default function SpecialEntry() {
     setRoute(r);
     setErr("");
     if (step === 3) setStep(2);
+    // ルートに応じた候補日程を取り直す（選択はリセット）
+    setPickedSlots(new Set());
+    setOtherDate(false);
+    const kind = slotKindForRoute(r.id);
+    if (kind) {
+      setSlotLoading(true);
+      specialSlots(kind)
+        .then(({ slots }) => setSlotList(slots || []))
+        .catch(() => setSlotList([]))
+        .finally(() => setSlotLoading(false));
+    } else {
+      setSlotList([]);
+    }
     setTimeout(() => {
       entryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       setTimeout(() => firstInputRef.current?.focus({ preventScroll: true }), 400);
@@ -124,6 +143,7 @@ export default function SpecialEntry() {
     e.preventDefault();
     setErr("");
     if (!route) return setErr("選考ルートを選んでください。");
+    if (slotKind && slotList.length > 0 && pickedSlots.size === 0 && !otherDate) return setErr("候補日程を選ぶか、別日での調整を希望してください。");
     if (!f.kana.trim()) return setErr("フリガナを入力してください。");
     if (!/^[ァ-ヶー\s　]+$/.test(f.kana.trim())) return setErr("フリガナは全角カタカナで入力してください。");
     if (!f.univ.trim()) return setErr("大学名を入力してください。");
@@ -137,6 +157,7 @@ export default function SpecialEntry() {
         kana: f.kana.trim(), univ: f.univ.trim(), faculty: f.faculty.trim(),
         grad: f.grad ? Number(f.grad) : null, email: f.email.trim(), phone: f.phone.trim(),
         question: f.question.trim(), agree: true, website,
+        slotIds: slotKind ? [...pickedSlots] : [], otherDate: slotKind ? otherDate : false,
       });
       setStep(3);
       setTimeout(() => entryRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -352,6 +373,47 @@ export default function SpecialEntry() {
                     <span className="text-xs font-bold px-2 rounded" style={{ border: `2px solid ${GOLD}`, color: GOLD }}>確認済</span>
                     <span>{name} 様　コード <b style={{ letterSpacing: "0.1em" }}>{verified}</b></span>
                   </div>
+                  {slotKind && (
+                    <div>
+                      <p className={label}>{SLOT_KINDS[slotKind]}の候補日程{slotList.length > 0 && req}</p>
+                      {slotLoading ? (
+                        <p className="text-sm" style={{ color: MUTE }}>日程を読み込んでいます…</p>
+                      ) : slotList.length === 0 ? (
+                        <p className="text-sm rounded-lg px-3 py-2.5" style={{ background: PAPER, color: MUTE }}>日程は人事からご連絡します。</p>
+                      ) : (
+                        <>
+                          <p className="text-xs mb-2" style={{ color: MUTE }}>都合のよい日程にすべて印を付けてください。</p>
+                          <div className="space-y-1.5">
+                            {slotList.map((s) => {
+                              const full = isSlotFull(s);
+                              const on = pickedSlots.has(s.id);
+                              return (
+                                <label key={s.id} className="flex items-start gap-2.5 rounded-lg px-3 py-2.5"
+                                  style={{ border: `1px solid ${on ? ROSE : HAIR}`, background: full ? "#F7F7F7" : on ? "#FCE3EF" : "#fff", opacity: full ? 0.6 : 1, cursor: full ? "not-allowed" : "pointer" }}>
+                                  <input type="checkbox" checked={on} disabled={full} className="mt-1" style={{ accentColor: ROSE }}
+                                    onChange={(e) => setPickedSlots((prev) => { const n = new Set(prev); if (e.target.checked) n.add(s.id); else n.delete(s.id); return n; })} />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block text-sm font-bold">{formatSlotLabel(s)}</span>
+                                    {s.note && <span className="block text-xs" style={{ color: MUTE }}>{s.note}</span>}
+                                  </span>
+                                  {full ? (
+                                    <span className="shrink-0 text-xs font-bold" style={{ color: "#B91C1C" }}>満員</span>
+                                  ) : s.remaining != null ? (
+                                    <span className="shrink-0 text-xs font-bold" style={{ color: ROSE }}>残り{s.remaining}名</span>
+                                  ) : null}
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <label className="flex items-start gap-2.5 mt-2 text-sm">
+                            <input type="checkbox" checked={otherDate} onChange={(e) => setOtherDate(e.target.checked)} className="mt-1" style={{ accentColor: ROSE }} />
+                            <span>候補の中に参加できる日がない（別日で調整を希望）</span>
+                          </label>
+                          {otherDate && <p className="text-xs mt-1 ml-6" style={{ color: MUTE }}>人事から別途ご連絡します。</p>}
+                        </>
+                      )}
+                    </div>
+                  )}
                   <div>
                     <label htmlFor="sp-kana" className={label}>フリガナ{req}</label>
                     <input id="sp-kana" ref={firstInputRef} value={f.kana} onChange={(e) => setF({ ...f, kana: e.target.value })}
@@ -421,6 +483,16 @@ export default function SpecialEntry() {
                 <div className="text-center py-2">
                   <img src="/loopchan/loopchan-8.png" alt="" aria-hidden="true" className="mx-auto ml-float" style={{ width: 110 }} />
                   <p className="font-bold mt-3" style={{ fontSize: 20 }}>エントリーを受け付けました</p>
+                  {slotKind && (pickedSlots.size > 0 || otherDate) && (
+                    <div className="text-left rounded-lg px-4 py-3 mt-3 text-sm" style={{ background: PAPER }}>
+                      <p className="text-xs font-bold mb-1" style={{ color: MUTE }}>ご希望の候補日程</p>
+                      <ul className="space-y-0.5">
+                        {slotList.filter((s) => pickedSlots.has(s.id)).map((s) => <li key={s.id}>・{formatSlotLabel(s)}</li>)}
+                        {otherDate && <li>・別日での調整を希望</li>}
+                      </ul>
+                      <p className="text-xs mt-1.5" style={{ color: MUTE }}>日程は人事からご連絡します。</p>
+                    </div>
+                  )}
                   <p className="text-sm mt-2 leading-relaxed" style={{ color: MUTE }}>
                     {route.next}<br />確認のメールを {f.email} にお送りしました。
                   </p>
