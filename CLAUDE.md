@@ -45,7 +45,9 @@ src/
     deadline.js          pastDeadline / deadlineText（日付＋任意の時刻で締切判定・表示を共通化）
     specialRoute.js      特別選考ルートの定義（SPECIAL_ROUTES / SPECIAL_STATUSES / コード正規化・状態判定 / specialUrl）
     scrollLock.js        useBodyScrollLock（モーダル/ドロワー表示中に背面を固定。iOS対策で position:fixed 方式・多重表示はカウントで管理）
+    annualPlan.js        年間計画の純粋ロジック（PLAN_START_MONTH=8 / PLAN_MONTHS=20 / PLAN_KINDS / PLAN_STATUS / cycleMonths / posInCycle / inCycle / layoutRows / shiftYear / planYears）。`tests/annualPlan.test.mjs` で検証
   components/SpecialAdmin.jsx  管理画面「特別選考」タブ（エントリー一覧・特別コード発行・スカウト文面）
+  components/AnnualPlan.jsx    管理画面「年間計画」タブ（年表・月リスト・活動ドロワー・前年度コピー・システム記録の自動レーン。AdminApp からは props を渡すだけ）
   components/common.jsx  SectionTitle / EdHeader / FullLoader / **TimeSelect**（時・分の2プルダウン。5分刻み・min/max対応。時刻入力はすべてこれを使い、ブラウザ標準の type="time" は使わない）
   pages/
     Login / Signup（/signup/:year 動的・フリガナ/電話郵便ハイフン必須）/ ResetPassword / ResetConfirm（日本語再設定）
@@ -84,7 +86,8 @@ public/ logo.png loop.svg loopchan/loopchan-1〜8.png
   - エントリー `templates/special_entry_<sha256(email)先頭24桁>`: {_type:"specialEntry", name, kana, univ, faculty, grad, email, phone, question, route(special1/special2/casual), code, codeLabel, status(SPECIAL_STATUSES), memo, resubmitCount, createdAt, updatedAt, agreedAt, **slotIds[]**(候補日程の id・①②のみ), **otherDate**(別日で調整を希望), **confirmedSlotId/confirmedAt/confirmMailAt**(人事が確定した日程・確定メール送信日時)}。**公開API（Admin SDK）だけが作成**。同じメールの再エントリーは同じドキュメントに上書き（status・memo・createdAt は保持、resubmitCount+1、slotIds/otherDate は最新で上書き、確定は日程の種別が変わったときだけ解除）。
   - 日程 `templates/{autoId}`（2026-10-27 追加）: {_type:"specialSlot", kind("seminar"=説明会→ルート①／"oc"=オープンカンパニー→ルート②), date(YYYY-MM-DD), start, end, note, **remaining**(残り人数・**人事が手入力**。null＝人数を出さない、0＝満員で学生は選べない。自動では減らない), active, createdAt}。LP には受付中・今日以降の枠だけ出す。判定ロジック（`slotKindForRoute / formatSlotLabel / selectableSlots / validateSlotSelection`）は `src/lib/specialRoute.js` にあり、**API も同じファイルを import** している（`tests/specialRoute.test.mjs`・`npm test`）。
   - ルートの id・名前・案内文は `src/lib/specialRoute.js` と `api/public-cohorts.js` の SPECIAL_ROUTES の**両方**にある（片方だけ直すとズレる）。
-  - templates を一覧で使う箇所（LINE配信テンプレの realTemplates）では specialCode / specialEntry を除外している。新しい _type を足すときも同様に除外が必要。
+  - 年間計画の活動 `templates/{autoId}`（2026-10-28 追加）: {_type:"planItem", grad(卒年度), kind(seminar/oc/select/follow/media/campus/other), title, start/end(YYYY-MM-DD・end≧start), status(plan=予定/done=実施済み/cancel=中止), owner, memo, createdAt, updatedAt}。管理者のみ。追加は `addPlanItem`、更新は `touchPlanItem`（updatedAt を付ける）、削除は `deleteTemplate`。API は使わない。
+  - templates を一覧で使う箇所（LINE配信テンプレの realTemplates）では specialCode / specialEntry / specialSlot / planItem を除外している。新しい _type を足すときも同様に除外が必要。
 - `authCodes/{email}`(サーバー専用)
 - `questions/{id}`: 質問箱。{uid, name, grad, text, answer, answeredAt, answeredBy, public, createdAt}。**クライアントは直接触らず、必ず serverless API `/api/questions`（body.action=ask/list/answer）経由**（関数上限対策で1関数に集約）。Admin SDK で読み書きするため Firestore ルール追加が不要。回答時は質問者の公式LINEへ通知（連携時）。
 
@@ -184,6 +187,7 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - 管理「特別選考」タブ（SpecialAdmin.jsx・未対応件数をタブにバッジ表示）: 集計（総数・未対応・ルート別）の下に**表示切替（エントリー／説明会・OCの日程／特別コード／スカウト文面。年度スイッチャーと同じ形・各1つずつ全幅表示。2026-10-28 に右カラム3区画の配置から変更）**。エントリー一覧（検索・ルート/状況/コード/日程で絞り込み・対応状況の変更・対応メモ・削除・CSV）／特別コードの発行（コード・経路メモ・有効期限。PCは2列カード）・停止/再開・削除・URLコピー・LPを開く・コード別件数／選んだコードを入れたスカウト文面のコピー。
 - **候補日程（2026-10-27）**: 管理タブの「説明会・オープンカンパニーの日程」で種別・日付・開始/終了・残り人数（手入力）・補足を登録（PCは1行フォーム）、停止/再開・削除、日程ごとに「希望N名・確定N名」。**種別で色分け**（説明会＝青系 `KIND_STYLE.seminar`、OC＝橙系 `KIND_STYLE.oc`。フォーム・一覧カード・エントリーの候補チップに適用）。一覧は**説明会／OC の2列**（PC）にカードで並び、**終了した日程（今日より前）は自動で隠れる**（「終了した日程を表示（N件）」で表示。削除は不要。LP・日程フィルターにも出ない）。LP ではルート①②を選ぶとフォーム先頭に候補がチェックボックスで並び（複数可。「残りN名」「満員」表示、満員は選べない）、一番下に「候補の中に参加できる日がない（別日で調整を希望）」。候補も別日希望も無ければ送信不可。公開中の枠が無いときは設問を出さず「日程は人事からご連絡します」。受付メール（本人・管理者）に候補を列挙。エントリーカードに候補チップ・別日希望・確定バッジ、「確定する日程」プルダウン（そのルートの種別の受付中の枠＋候補＋確定済み。候補は「（希望）」付きで先頭）→ 確認ダイアログ（「確定後に学生へメールで案内を送る」既定オン）→ `/api/public-cohorts action=specialConfirm`（管理者認証）で確定・対応状況を「日程調整済」に・確定メール送信（件名「【モノ・ループ】{説明会|オープンカンパニー}の日程が確定しました」）。**残り人数は自動で減らない**ので確定後に人事が減らす。
 - プライバシーポリシーに「特別選考エントリーページ」と「採用選考とそれに関するご連絡」の利用目的を追記。
+- **年間計画タブ**（2026-10-28。AnnualPlan.jsx。設計: `docs/superpowers/specs/2026-10-28-annual-plan-design.md`）: 卒年度ごとの年表。**期間は卒業年の2年前の8月1日〜卒業年の3月31日の20か月**（2028卒＝2026-08〜2028-03。`src/lib/annualPlan.js` の定数）。PCは横スクロールの年表（列＝暦月・88px、左にレーン名、今月の列は琥珀色、初期表示で今月が見える位置へスクロール）、スマホは月ごとの縦リスト（今月に枠と「今月」ラベル。切替は `pc` prop）。**活動カード**は人事が置く（種類7つ＝説明会/OC/選考/内定者フォロー/媒体・スカウト/学内・大学/その他で色分け。予定＝破線・白地、実施済み＝✓＋塗り、中止＝取り消し線）。「＋ 活動を追加」／カードを押すとドロワー（z-65。活動名・卒年度・種類・開始/終了日・担当者・状態3ボタン・メモ・削除は2段階確認）。同じレーンで日付が重なるカードは行を分けて重ならない（`layoutRows`）。**年表の期間外の日付のカードは出さず、見出しに「期間外 N件」**と出す（ドロワーにも注意書き）。凡例の種類を押すとそのレーンを隠す。**システムの記録**（既存データ・読み取りのみ）を灰色のレーンで下に出す: イベント(dateStr)・アンケート(dueDate か createdAt・パルスは「パルス調査：」付き)・記事(publishAt か createdAt・grad なしは全年度)・LINE配信(sentAt・配信対象名)・面談(月ごとの件数)・説明会/OC日程(全年度)。押すと共通の年度を揃えてそのタブへ移動。「システムの記録も表示」で一括非表示。**前年度を重ねて表示**（既定オン）で前年度の年表を下に描画（同じ月の列に揃う）。**前年度からコピー**: 前年度の中止以外の活動を、日付＋1年（2/29→2/28）・状態「予定」・メモ無しで追加（確認モーダル。重複判定はしない）。**年度の候補は「cohorts の年度 ∪ 活動がある年度 ∪ その最大＋1」**（内定者がまだいない次の年度の計画を先に立てられる）。このタブは独自の年度切替を持つので、AdminApp 共通の年度スイッチャー＋「学生画面」ボタンは `tab !== "plan"` で隠す。broadcasts は LINE タブと年間計画タブを開いたときに読み込む。
 
 **LINE Webhook**: 友だち追加(follow)時・その他メッセージへの自動返信は廃止し、**連携完了時のみ**「連携が完了しました」を送信。
 
@@ -204,6 +208,7 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - 面談の記録の見直し（10/20）: 内定者別を既定に（日付順は右）／内定者別はPC3列のカード表示／カードタップで面談履歴モーダル／日付順はPC2列（8章「面談タブ」参照）
 - 面談のスマホ対応（10/20）: 記録ドロワーの面談日・開始時刻をスマホでは縦並びに（date入力が縮まず重なっていた）／カレンダーは日付を押すと下に一覧（PC・スマホ共通）／ZOOM URL をリンク化
 - 特別選考タブのレイアウト見直し（10/28）: 表示切替（エントリー／日程／コード／文面）・日程の種別色分け・説明会/OC 2列カード・終了した日程の自動非表示
+- **年間計画タブ（10/28）**: 卒年度ごとの20か月の年表に活動カード（予定/実施済み/中止）とシステムの記録を並べる。前年度の重ね表示・前年度からコピー（8章「年間計画タブ」参照。設計 `docs/superpowers/specs/2026-10-28-annual-plan-design.md`、計画 `docs/superpowers/plans/2026-10-28-annual-plan.md`）
 - 特別選考LPの候補日程・面談記録のスクリーンショット・面談記録の流入経路表示（10/27。設計: `docs/superpowers/specs/2026-10-27-special-slots-screenshot-source-design.md`、計画: `docs/superpowers/plans/2026-10-27-special-slots-screenshot-source.md`）。`npm test`（Node 標準の node --test・追加パッケージなし）で日程ロジックを検証。
 
 ### 運用で確認・実施してほしいこと（ユーザー側）
@@ -212,6 +217,7 @@ npm run seed     # cohorts(2027/2028)・journeys・admin クレーム
 - [ ] **媒体の規約確認**: スカウト本文に外部URLを載せてよいか、媒体ごとに確認する。
 - [ ] 特別選考ルートの id を 10/26 に変更したため、それ以前のテストエントリー（route が special / talk）は管理画面で id のまま表示される。残っていれば削除する。
 - [ ] **候補日程の実機確認（2026-10-27 追加分）**: ①管理「特別選考」で説明会の日程を2件登録（1件は残り0）②LP でルート①を選び、候補が出て満員が選べないこと・候補も別日希望も無しで送信できないこと ③自分のメールでエントリー→受付メールに候補が載る ④管理画面で確定→確定メールが届き対応状況が「日程調整済」になる ⑤同じメールでルート②に再エントリー→確定が解除される（Claude 側はローカルで②まで確認済み。③〜⑤はメール送信を伴うため未確認）。
+- [ ] **年間計画タブの実機確認（2026-10-28 追加分）**: ①タブが出る（PC左メニュー・スマホ下部）②年度切替に「最大＋1」の年度が出る ③「＋ 活動を追加」→保存→年表にカードが出る→カードを押して「実施済み」に切替 ④「前年度からコピー」で件数どおり追加される ⑤スマホ表示で月リストになり「今月」に枠が付く ⑥灰色の記録（イベント・LINE配信など）を押すとそのタブに移る。（Claude 側はサンプルデータで画面単体の描画・ドロワー・スマホ表示を確認済み。Firestore 保存とタブ遷移は管理者ログインが要るため未確認）
 - [ ] **面談記録のスクリーンショットの実機確認**: Win+Shift+S で撮って貼る／テキストを貼っても何も起きない／3枚目でエラー／保存後に履歴モーダル・内定者詳細に出る（管理者ログインが必要なため Claude 側で未確認）。
 - **特別選考ルートを廃止するときの手順**（コードは1コミット e2f60c7 にまとまっているので戻しやすい）: ①管理「特別選考」で全コードを「停止」にし、配布済みコードの有効期限が切れるのを待つ（消すと `/special` はログイン画面へリダイレクト） ②同タブでエントリーとコードを削除（templates の `_type:"specialCode" / "specialEntry"`。残しても他機能に影響はない） ③`git revert e2f60c7` でコードを戻す（SpecialEntry.jsx / SpecialAdmin.jsx / specialRoute.js の削除と、App.jsx・AdminApp.jsx・api.js・firestore.js・public-cohorts.js・Privacy.jsx の小変更の取り消しが一括で行われる） ④ビルド確認 → 要約提示 → 承認後 push。ルール・環境変数・Vercel関数数は変えていないので、それらの作業は不要。
 - [ ] **固定されたままの対象者を解除**: 「10/1 内定式」「【27卒】店舗インターンについて」「内定者小規模懇親会―東海―」は作成時点の名簿で targetUids が固定されている。概況のカード→「対象者を調整」→「個別指定を解除（条件どおりに戻す）」で後から登録した学生にも表示される（2026-10-06 時点で未実施なら要対応）。
