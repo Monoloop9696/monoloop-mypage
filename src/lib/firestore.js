@@ -445,6 +445,16 @@ export async function addSpecialSlot({ kind, date, start, end = "", note = "", r
   return ref.id;
 }
 
+// 年間計画の活動カード（templates に _type:"planItem"）。更新は touchPlanItem、削除は deleteTemplate
+export async function addPlanItem({ grad, kind, title, start, end, status = "plan", owner = "", memo = "" }) {
+  const ref = await addDoc(collection(db, "templates"), {
+    _type: "planItem", grad: Number(grad), kind, title, start, end, status, owner, memo,
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+}
+export const touchPlanItem = (id, patch) => updateTemplate(id, { ...patch, updatedAt: serverTimestamp() });
+
 export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));
 export const deleteTemplateCategory = (id) => deleteDoc(doc(db, "templates", id));
