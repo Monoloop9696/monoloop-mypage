@@ -42,3 +42,11 @@ test("planYears: 最大+1 を含む、降順、重複なし", () => {
   assert.deepEqual(planYears({ cohorts: [{ year: 2027 }, { year: 2028 }], items: [{ grad: 2027 }] }), [2029, 2028, 2027]);
   assert.deepEqual(planYears({ cohorts: [], items: [] }), [new Date().getFullYear() + 2]);
 });
+
+test("defaultPlanDate: 今日が期間内ならそのまま、期間外なら期間の初日", async () => {
+  const { defaultPlanDate } = await import("../src/lib/annualPlan.js");
+  assert.equal(defaultPlanDate(2028, "2026-10-28"), "2026-10-28");
+  assert.equal(defaultPlanDate(2029, "2026-10-28"), "2027-08-01");
+  assert.equal(defaultPlanDate(2027, "2026-10-28"), "2026-10-28");
+  assert.equal(defaultPlanDate(2026, "2026-10-28"), "2024-08-01");
+});

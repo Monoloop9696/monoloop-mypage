@@ -94,3 +94,6 @@ export const planYears = ({ cohorts = [], items = [] } = {}) => {
   set.add(Math.max(...set) + 1);
   return [...set].sort((a, b) => b - a);
 };
+
+// 新しい活動の既定日: 今日が年表の期間内ならそのまま、期間外なら期間の初日（期間外のカードを作ってしまわないため）
+export const defaultPlanDate = (grad, todayStr) => (inCycle(grad, todayStr) ? todayStr : ymd(cycleStart(grad)));

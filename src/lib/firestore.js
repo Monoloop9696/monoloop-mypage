@@ -454,6 +454,20 @@ export async function addPlanItem({ grad, kind, title, start, end, status = "pla
   return ref.id;
 }
 export const touchPlanItem = (id, patch) => updateTemplate(id, { ...patch, updatedAt: serverTimestamp() });
+// 前年度からのコピー用。writeBatch で一括追加するので、途中で失敗して一部だけ残ることがない
+export async function addPlanItems(list) {
+  const batch = writeBatch(db);
+  list.forEach((item) => {
+    const ref = doc(collection(db, "templates"));
+    batch.set(ref, {
+      _type: "planItem", grad: Number(item.grad), kind: item.kind, title: item.title, start: item.start, end: item.end,
+      status: item.status || "plan", owner: item.owner || "", memo: item.memo || "",
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    });
+  });
+  await batch.commit();
+  return list.length;
+}
 
 export const updateSourceOption = (id, patch) => updateDoc(doc(db, "templates", id), patch);
 export const deleteSourceOption = (id) => deleteDoc(doc(db, "templates", id));

@@ -3,9 +3,9 @@ import { X, Copy, Plus } from "lucide-react";
 import { SectionTitle } from "./common";
 import { BRAND, BRAND_LIGHT } from "../theme";
 import { useBodyScrollLock } from "../lib/scrollLock";
-import { addPlanItem, touchPlanItem, deleteTemplate } from "../lib/firestore";
+import { addPlanItem, addPlanItems, touchPlanItem, deleteTemplate } from "../lib/firestore";
 import {
-  PLAN_MONTHS, PLAN_KINDS, PLAN_STATUS, ymd, cycleMonths, posInCycle, inCycle, layoutRows, shiftYear, planYears,
+  PLAN_MONTHS, PLAN_KINDS, PLAN_STATUS, ymd, cycleMonths, posInCycle, inCycle, layoutRows, shiftYear, planYears, defaultPlanDate,
 } from "../lib/annualPlan";
 
 // =====================================================================
@@ -96,8 +96,9 @@ const monthlyCounts = (rows, grad) => {
     .map((m) => ({ id: `cnt:${m.key}`, title: `${map.get(m.key)}件`, start: m.first, end: m.first, count: true }));
 };
 
-const emptyItem = (grad) => {
-  const t = ymd(new Date());
+// 既定日は今日。ただし今日がその年度の期間外（例: 次の年度）なら期間の初日にし、年表に出ないカードを作らせない
+const emptyItem = (grad, todayStr) => {
+  const t = defaultPlanDate(grad, todayStr);
   return { grad, kind: "other", title: "", start: t, end: t, status: "plan", owner: "", memo: "" };
 };
 
@@ -114,7 +115,10 @@ export default function AnnualPlan({
   const [drawer, setDrawer] = useState(null); // { item, confirmDel }  新規は item.id 無し
   const [copyDlg, setCopyDlg] = useState(null); // { from, to, count }
   const [busy, setBusy] = useState(false);
-  const scrollRef = useRef(null);
+  const [drawerErr, setDrawerErr] = useState(""); // ドロワー内に出す入力/保存エラー（共通バナーはドロワーの裏に隠れるため）
+  const [copyErr, setCopyErr] = useState("");
+  const [outsideOpen, setOutsideOpen] = useState(null); // 「期間外 N件」の一覧を開いている年度
+  const scrollRefs = useRef({}); // 年度ごとの横スクロール要素。前年度ボードと位置を揃える
 
   useBodyScrollLock(!!drawer || !!copyDlg);
 
@@ -133,12 +137,21 @@ export default function AnnualPlan({
 
   const goTab = (grad, tab) => { selectYear?.(grad); setTab?.(tab); };
 
+  const scrollEls = () => Object.values(scrollRefs.current).filter(Boolean);
   const scrollToToday = (smooth) => {
-    const el = scrollRef.current;
-    if (!el) return;
     const p = posInCycle(year, todayStr);
     const left = Number.isFinite(p) ? Math.max(0, p * COL - 220) : 0;
-    if (smooth) el.scrollTo({ left, behavior: "smooth" }); else el.scrollLeft = left;
+    scrollEls().forEach((el) => { if (smooth) el.scrollTo({ left, behavior: "smooth" }); else el.scrollLeft = left; });
+  };
+  // 片方のボードを横スクロールしたら、もう片方も同じ位置へ（同じ月の列が縦に揃うように）
+  const syncScroll = (src) => {
+    scrollEls().forEach((el) => { if (el !== src && Math.abs(el.scrollLeft - src.scrollLeft) > 1) el.scrollLeft = src.scrollLeft; });
+  };
+  const setScrollEl = (grad, el) => {
+    scrollRefs.current[grad] = el;
+    if (!el) return;
+    const other = scrollEls().find((o) => o !== el); // 後から出たボード（前年度の重ね表示をオンにした時など）は既存の位置に合わせる
+    if (other) el.scrollLeft = other.scrollLeft;
   };
   const jumpToday = () => {
     if (pc) scrollToToday(true);
@@ -149,16 +162,16 @@ export default function AnnualPlan({
   useEffect(() => { scrollToToday(false); }, [year, pc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- ドロワー ----
-  const openNew = () => setDrawer({ item: emptyItem(year) });
-  const openEdit = (item) => setDrawer({ item: { ...item, start: item.start || "", end: item.end || item.start || "" } });
+  const openNew = () => { setDrawerErr(""); setDrawer({ item: emptyItem(year, todayStr) }); };
+  const openEdit = (item) => { setDrawerErr(""); setOutsideOpen(null); setDrawer({ item: { ...item, start: item.start || "", end: item.end || item.start || "" } }); };
   const closeDrawer = () => setDrawer(null);
-  const patchItem = (patch) => setDrawer((d) => (d ? { ...d, item: { ...d.item, ...patch } } : d));
+  const patchItem = (patch) => { setDrawerErr(""); setDrawer((d) => (d ? { ...d, item: { ...d.item, ...patch } } : d)); };
 
   const saveItem = async () => {
     if (!drawer || busy) return;
     const it = drawer.item;
-    if (!it.title.trim()) { setBanner?.("活動名を入力してください"); return; }
-    if (!it.start) { setBanner?.("開始日を入力してください"); return; }
+    if (!it.title.trim()) { setDrawerErr("活動名を入力してください"); return; }
+    if (!it.start) { setDrawerErr("開始日を入力してください"); return; }
     const end = it.end && it.end >= it.start ? it.end : it.start;
     const data = {
       grad: Number(it.grad), kind: it.kind in PLAN_KINDS ? it.kind : "other", title: it.title.trim(),
@@ -168,11 +181,10 @@ export default function AnnualPlan({
     try {
       if (it.id) await touchPlanItem(it.id, data);
       else await addPlanItem(data);
-      setBanner?.(it.id ? "活動を更新しました" : "活動を追加しました");
       setDrawer(null);
     } catch (e) {
       console.error(e);
-      setBanner?.("保存に失敗しました。通信状況を確認してもう一度お試しください。");
+      setDrawerErr("保存に失敗しました。通信状況を確認してもう一度お試しください。");
     } finally { setBusy(false); }
   };
 
@@ -181,39 +193,34 @@ export default function AnnualPlan({
     setBusy(true);
     try {
       await deleteTemplate(drawer.item.id);
-      setBanner?.("活動を削除しました");
       setDrawer(null);
     } catch (e) {
       console.error(e);
-      setBanner?.("削除に失敗しました");
+      setDrawerErr("削除に失敗しました。通信状況を確認してもう一度お試しください。");
     } finally { setBusy(false); }
   };
 
   // ---- 前年度からコピー ----
+  // 件数0や前年度なしのときも同じダイアログで案内する（共通バナーは赤いエラー表示なので使わない）
   const askCopy = () => {
-    if (!prevYear) { setBanner?.("前年度の計画がありません"); return; }
-    const count = items.filter((i) => Number(i.grad) === prevYear && i.status !== "cancel").length;
-    if (count === 0) { setBanner?.("コピーできる活動がありません"); return; }
+    setCopyErr("");
+    const count = prevYear ? items.filter((i) => Number(i.grad) === prevYear && i.status !== "cancel").length : 0;
     setCopyDlg({ from: prevYear, to: year, count });
   };
   const runCopy = async () => {
-    if (!copyDlg || busy) return;
+    if (!copyDlg || !copyDlg.count || busy) return;
     const src = items.filter((i) => Number(i.grad) === copyDlg.from && i.status !== "cancel");
     setBusy(true);
-    let n = 0;
     try {
-      for (const i of src) {
-        await addPlanItem({
-          grad: copyDlg.to, kind: i.kind, title: i.title, start: shiftYear(i.start, 1), end: shiftYear(i.end || i.start, 1),
-          status: "plan", owner: i.owner || "", memo: "",
-        });
-        n++;
-      }
-      setBanner?.(`${n}件を追加しました`);
+      // 一括書き込み（全件成功か全件失敗）。途中失敗で一部だけ残り、やり直すと重複する事故を防ぐ
+      await addPlanItems(src.map((i) => ({
+        grad: copyDlg.to, kind: i.kind, title: i.title, start: shiftYear(i.start, 1), end: shiftYear(i.end || i.start, 1),
+        status: "plan", owner: i.owner || "", memo: "",
+      })));
       setCopyDlg(null);
     } catch (e) {
       console.error(e);
-      setBanner?.(`${n}件まで追加したところで失敗しました。残りはもう一度お試しください。`);
+      setCopyErr("追加できませんでした（1件も追加されていません）。通信状況を確認してもう一度お試しください。");
     } finally { setBusy(false); }
   };
 
@@ -221,7 +228,8 @@ export default function AnnualPlan({
   const boardData = (grad) => {
     const mine = items.filter((i) => Number(i.grad) === grad);
     const inRange = mine.filter((i) => inCycle(grad, i.start));
-    const outside = mine.length - inRange.length;
+    const outsideItems = mine.filter((i) => !inCycle(grad, i.start));
+    const outside = outsideItems.length;
     const lanes = Object.entries(PLAN_KINDS)
       .filter(([k]) => !kindOff.has(k))
       .map(([k, def]) => {
@@ -235,7 +243,7 @@ export default function AnnualPlan({
         return { key: def.key, label: def.label, tab: def.tab, items: rows, ...layoutRows(rows, grad) };
       })
       : [];
-    return { mine, outside, lanes, autoLanes, done: mine.filter((i) => i.status === "done").length, planned: mine.filter((i) => i.status === "plan").length };
+    return { mine, outside, outsideItems, lanes, autoLanes, done: mine.filter((i) => i.status === "done").length, planned: mine.filter((i) => i.status === "plan").length };
   };
 
   const cardStyle = (item, kind) => {
@@ -246,6 +254,21 @@ export default function AnnualPlan({
     return base;
   };
   const cardText = (item) => `${item.status === "done" ? "✓ " : ""}${item.title}`;
+
+  // 年表の期間外（年表にも月リストにも出ない）の活動。見出しの件数を押すと一覧が開き、そこから開いて直せる
+  const outsideBtn = (grad, d) => d.outside > 0 && (
+    <button type="button" onClick={() => setOutsideOpen(outsideOpen === grad ? null : grad)} className="ml-2 underline font-bold" style={{ color: TODAY_FG }}>期間外 {d.outside}件</button>
+  );
+  const outsidePanel = (grad, d, cls) => outsideOpen === grad && d.outside > 0 && (
+    <div className={`rounded-xl border px-3 py-2 text-xs ${cls}`} style={{ background: "#FFFBEB", borderColor: "#FDE68A" }}>
+      <p className="font-bold mb-1.5" style={{ color: TODAY_FG }}>{grad}卒の年表（{cycleMonths(grad)[0].y}/{cycleMonths(grad)[0].m}〜）の期間外の活動です。押して日付か卒年度を直してください。</p>
+      <div className="flex flex-wrap gap-1.5">
+        {d.outsideItems.map((i) => (
+          <button key={i.id} type="button" onClick={() => openEdit(i)} className="px-2 py-1 rounded-lg border bg-white font-bold" style={{ borderColor: HAIR, color: "#374151" }}>{i.title}（{rangeLabel(i.start, i.end)}）</button>
+        ))}
+      </div>
+    </div>
+  );
 
   // ---- 年表（PC） ----
   const renderBoard = (grad, isPrev) => {
@@ -290,10 +313,11 @@ export default function AnnualPlan({
           <p className="text-sm font-bold">{grad}卒{isPrev && <span className="ml-1 text-xs font-normal text-gray-500">（前年度）</span>}</p>
           <p className="text-[11px] text-gray-500">
             {d.done}件 実施済み／{d.planned}件 予定
-            {d.outside > 0 && <span className="ml-2" style={{ color: TODAY_FG }}>期間外 {d.outside}件</span>}
+            {outsideBtn(grad, d)}
           </p>
         </div>
-        <div ref={isPrev ? undefined : scrollRef} className="overflow-x-auto">
+        {outsidePanel(grad, d, "mx-3 my-2")}
+        <div ref={(el) => setScrollEl(grad, el)} onScroll={(e) => syncScroll(e.currentTarget)} className="overflow-x-auto">
           <div style={{ display: "grid", gridTemplateColumns: gridCols, minWidth: "max-content" }}>
             <div className="bg-white border-r border-b border-gray-200 px-2.5 py-1.5 text-[10px] text-gray-400 flex items-end" style={{ position: "sticky", left: 0, zIndex: 3 }}>
               {months[0].y}/{months[0].m}〜{months[PLAN_MONTHS - 1].y}/{months[PLAN_MONTHS - 1].m}
@@ -325,8 +349,9 @@ export default function AnnualPlan({
       <div key={grad} className="mb-4">
         <div className="flex items-center justify-between gap-2 px-1 mb-2">
           <p className="text-sm font-bold">{grad}卒{isPrev && <span className="ml-1 text-xs font-normal text-gray-500">（前年度）</span>}</p>
-          <p className="text-[11px] text-gray-500">{d.done}件 実施済み／{d.planned}件 予定{d.outside > 0 && <span className="ml-2" style={{ color: TODAY_FG }}>期間外 {d.outside}件</span>}</p>
+          <p className="text-[11px] text-gray-500">{d.done}件 実施済み／{d.planned}件 予定{outsideBtn(grad, d)}</p>
         </div>
+        {outsidePanel(grad, d, "mb-2")}
         <div className="grid gap-2.5">
           {months.map((m) => {
             const isNow = !isPrev && m.key === thisMonth;
@@ -511,11 +536,14 @@ export default function AnnualPlan({
                 </div>
               )}
             </div>
-            <div className="px-5 py-3 border-t border-gray-200 shrink-0 flex gap-2">
-              <button type="button" onClick={closeDrawer} className="px-4 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>閉じる</button>
-              <button type="button" onClick={saveItem} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
-                {busy ? "保存中…" : "保存する"}
-              </button>
+            <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+              {drawerErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{drawerErr}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={closeDrawer} className="px-4 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>閉じる</button>
+                <button type="button" onClick={saveItem} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
+                  {busy ? "保存中…" : "保存する"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -528,11 +556,18 @@ export default function AnnualPlan({
           <div className="relative bg-white rounded-2xl w-full max-w-md p-5 shadow-xl">
             <p className="text-sm font-bold mb-2">前年度の計画をコピー</p>
             <p className="text-sm leading-relaxed text-gray-700">
-              {copyDlg.from}卒の活動 {copyDlg.count}件を {copyDlg.to}卒に「予定」として追加します。日付は1年後ろにずらし、メモは引き継ぎません。すでにコピー済みでも重複して追加されます。
+              {!copyDlg.from
+                ? `${copyDlg.to - 1}卒の計画がありません（年度の候補にない年度はコピー元にできません）。`
+                : copyDlg.count === 0
+                  ? `${copyDlg.from}卒にコピーできる活動がありません（中止の活動はコピーしません）。`
+                  : `${copyDlg.from}卒の活動 ${copyDlg.count}件を ${copyDlg.to}卒に「予定」として追加します。日付は1年後ろにずらし、メモは引き継ぎません。すでにコピー済みでも重複して追加されます。`}
             </p>
+            {copyErr && <p className="text-xs font-bold mt-2" style={{ color: "#DC2626" }}>{copyErr}</p>}
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setCopyDlg(null)} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>やめる</button>
-              <button type="button" onClick={runCopy} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>{busy ? "追加中…" : `${copyDlg.count}件を追加`}</button>
+              <button type="button" onClick={() => setCopyDlg(null)} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>{copyDlg.count ? "やめる" : "閉じる"}</button>
+              {copyDlg.count > 0 && (
+                <button type="button" onClick={runCopy} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>{busy ? "追加中…" : `${copyDlg.count}件を追加`}</button>
+              )}
             </div>
           </div>
         </div>
