@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket, CalendarRange,
 } from "lucide-react";
 import SpecialAdmin from "../components/SpecialAdmin";
+import AnnualPlan from "../components/AnnualPlan";
 import { useAuth } from "../auth/AuthContext";
 import { SectionTitle, TimeSelect } from "../components/common";
 import { StudentInner } from "./StudentApp";
@@ -287,6 +288,8 @@ function AdminBody({
   const [quota, setQuota] = useState(null);
   const refreshQuota = async () => { try { setQuota(await getLineQuota()); } catch { /* 取得失敗は表示なし */ } };
   useEffect(() => { if (tab === "line") { refreshBroadcasts(); refreshQuota(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 年間計画タブの「LINE配信」レーンは broadcasts を使うので、開いたときに読み込む
+  useEffect(() => { if (tab === "plan") refreshBroadcasts(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -2044,6 +2047,7 @@ function AdminBody({
     { key: "dash", label: "概況", icon: BarChart3 },
     { key: "students", label: "内定者", icon: Users },
     { key: "meet", label: "面談", icon: CalendarDays },
+    { key: "plan", label: "年間計画", icon: CalendarRange },
     { key: "stats", label: "分析", icon: TrendingUp },
     { key: "news", label: "記事", icon: Newspaper },
     { key: "special", label: "特別選考", icon: Ticket },
@@ -2079,6 +2083,8 @@ function AdminBody({
         </aside>
       )}
       <div className={pc ? "flex-1 min-w-0" : ""}>
+      {/* 共通の年度スイッチャー（年間計画タブは独自の年度切替を持つので出さない） */}
+      {tab !== "plan" && (
       <div className="px-4 pt-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-1.5 min-w-0">
@@ -2119,6 +2125,7 @@ function AdminBody({
           </button>
         </div>
       </div>
+      )}
 
       {tab === "dash" && (
         <div className={pc ? "grid grid-cols-2 gap-5 items-start pt-5" : "px-4 pt-4 space-y-5"}>
@@ -4342,6 +4349,11 @@ function AdminBody({
 
       {tab === "special" && (
         <SpecialAdmin savedTemplates={savedTemplates} pc={pc} setBanner={setBanner} />
+      )}
+
+      {tab === "plan" && (
+        <AnnualPlan savedTemplates={savedTemplates} events={events} surveys={surveys} articles={articles} broadcasts={broadcasts}
+          cohorts={cohorts} pc={pc} setBanner={setBanner} setTab={setTab} selectedYear={selectedYear} selectYear={selectYear} />
       )}
 
       {tab === "qbox" && (
