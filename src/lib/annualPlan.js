@@ -57,24 +57,83 @@ export const inCycle = (grad, dateStr) => {
   return Number.isFinite(p) && p >= 0 && p < PLAN_MONTHS;
 };
 
-// start 昇順に並べ、重ならない最小の行へ置く。
-export const layoutRows = (items, grad, { minWidth = 0.95 } = {}) => {
-  const sorted = [...items].sort((a, b) => String(a.start).localeCompare(String(b.start)) || String(a.end).localeCompare(String(b.end)));
-  const rowEnds = [];
-  const placed = sorted.map((item) => {
+const byDate = (a, b) => String(a.start).localeCompare(String(b.start)) || String(a.end || a.start).localeCompare(String(b.end || b.start));
+const isSingleDay = (item) => !item.end || item.end === item.start;
+
+// レーン内の配置。
+// - 単日の項目（終了日なし／開始日と同じ）は「月の枠」に収める（列の整数位置・幅1）。同じ月に maxPerMonth 件を超えると
+//   先頭 maxPerMonth 件だけ置き、残りを { more:true, items:[…] } の1件にまとめる（画面側で「他N件」として一覧を開く）。
+// - ○〜○の期間がある項目は日の位置に置く（最小幅 minWidth か月）。期間末の列を越えない。
+// 行は start 昇順に、重ならない最小の行へ。
+export const layoutRows = (items, grad, { minWidth = 0.95, maxPerMonth = 3 } = {}) => {
+  const entries = [];
+  const perMonth = new Map();
+  [...items].sort(byDate).forEach((item) => {
     const s = posInCycle(grad, item.start);
-    const rawEnd = posInCycle(grad, item.end || item.start) + 1 / 30;
-    const e = Math.max(rawEnd, s + minWidth + 1e-9); // 浮動小数の誤差で幅が minWidth を割らないよう僅かに足す
-    let row = rowEnds.findIndex((end) => end <= s + 0.02);
+    if (isSingleDay(item)) {
+      const m = Math.floor(s);
+      if (!perMonth.has(m)) perMonth.set(m, []);
+      perMonth.get(m).push(item);
+      return;
+    }
+    const rawEnd = posInCycle(grad, item.end) + 1 / 30;
+    const e = Math.min(PLAN_MONTHS, Math.max(rawEnd, s + minWidth + 1e-9)); // 浮動小数の誤差で幅が minWidth を割らないよう僅かに足す
+    entries.push({ item, s, e });
+  });
+  perMonth.forEach((list, m) => {
+    const shown = list.length > maxPerMonth ? list.slice(0, maxPerMonth) : list;
+    shown.forEach((item) => entries.push({ item, s: m, e: m + 1 }));
+    if (list.length > maxPerMonth) {
+      const rest = list.slice(maxPerMonth);
+      const first = rest[0];
+      // items＝年表に出していない残り、all＝その月の全件（一覧ドロワー用）
+      entries.push({ item: { id: `more:${m}:${first.id}`, more: true, items: rest, all: list, title: `他${rest.length}件`, start: first.start, end: first.start }, s: m, e: m + 1 });
+    }
+  });
+  entries.sort((a, b) => a.s - b.s || (a.item.more ? 1 : 0) - (b.item.more ? 1 : 0) || byDate(a.item, b.item));
+  const rowEnds = [];
+  const placed = entries.map((en) => {
+    let row = rowEnds.findIndex((end) => end <= en.s + 0.02);
     if (row < 0) {
       row = rowEnds.length;
-      rowEnds.push(e);
+      rowEnds.push(en.e);
     } else {
-      rowEnds[row] = e;
+      rowEnds[row] = en.e;
     }
-    return { item, s, e, row };
+    return { ...en, row };
   });
   return { placed, rowCount: rowEnds.length };
+};
+
+// "YYYY-MM" → その月の末日 "YYYY-MM-DD"
+export const monthEnd = (ym) => {
+  const [y, m] = String(ym || "").split("-").map(Number);
+  return `${y}-${pad2(m)}-${pad2(daysInMonth(y, m))}`;
+};
+
+// ドロワーの「開始日と同じ」「月で入力」チェックから、保存する開始日・終了日を決める。
+//   月で入力: 開始＝その月の1日、終了＝（開始日と同じなら同じ月の／そうでなければ終了月の）末日
+//   開始日と同じ: 終了＝開始
+//   終了が開始より前なら開始に合わせる
+export const resolvePeriod = ({ start, end, sameDay, byMonth }) => {
+  if (byMonth) {
+    const sm = String(start).slice(0, 7);
+    const s = `${sm}-01`;
+    let e = sameDay || !end ? monthEnd(sm) : monthEnd(String(end).slice(0, 7));
+    if (e < s) e = monthEnd(sm);
+    return { start: s, end: e };
+  }
+  if (sameDay || !end || end < start) return { start, end: start };
+  return { start, end };
+};
+
+// 保存済みの開始日・終了日からチェック状態を復元する（1日〜末日なら「月で入力」、同じ月なら「開始日と同じ」も）
+export const periodMode = (start, end) => {
+  const s = String(start || "");
+  const e = String(end || "");
+  const byMonth = !!s && !!e && e !== s && s.endsWith("-01") && e === monthEnd(e.slice(0, 7));
+  const sameDay = byMonth ? e.slice(0, 7) === s.slice(0, 7) : !e || e === s;
+  return { sameDay, byMonth };
 };
 
 // 日付を n 年ずらす。2/29 がうるう年でなくなる場合は 2/28 に丸める。

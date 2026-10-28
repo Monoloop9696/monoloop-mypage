@@ -6,6 +6,7 @@ import { useBodyScrollLock } from "../lib/scrollLock";
 import { addPlanItem, addPlanItems, touchPlanItem, deleteTemplate } from "../lib/firestore";
 import {
   PLAN_MONTHS, PLAN_KINDS, PLAN_STATUS, ymd, cycleMonths, posInCycle, inCycle, layoutRows, shiftYear, planYears, defaultPlanDate,
+  monthEnd, resolvePeriod, periodMode,
 } from "../lib/annualPlan";
 
 // =====================================================================
@@ -33,7 +34,26 @@ const mdLabel = (dateStr) => {
   const [, m, d] = String(dateStr || "").split("-").map(Number);
   return m && d ? `${m}/${d}` : "";
 };
-const rangeLabel = (a, b) => (a === b || !b ? mdLabel(a) : `${mdLabel(a)}〜${mdLabel(b)}`);
+const monthLabel = (ym) => {
+  const [y, m] = String(ym || "").split("-").map(Number);
+  return y && m ? `${y}年${m}月` : "";
+};
+// 1日〜末日で入っている活動は「10月」「10月〜12月」と月で見せる
+const rangeLabel = (a, b) => {
+  const { sameDay, byMonth } = periodMode(a, b);
+  if (byMonth) {
+    const m1 = Number(String(a).slice(5, 7));
+    const m2 = Number(String(b).slice(5, 7));
+    return sameDay ? `${m1}月` : `${m1}月〜${m2}月`;
+  }
+  return a === b || !b ? mdLabel(a) : `${mdLabel(a)}〜${mdLabel(b)}`;
+};
+// 「月で入力」の選択肢: その年度の20か月。今の値が期間外ならそれも足す
+const monthOptions = (grad, ...yms) => {
+  const list = cycleMonths(grad).map((m) => ({ key: m.key, label: `${m.y}年${m.m}月` }));
+  yms.forEach((ym) => { if (ym && !list.some((o) => o.key === ym)) list.push({ key: ym, label: monthLabel(ym) }); });
+  return list.sort((x, y) => x.key.localeCompare(y.key));
+};
 
 // 自動レーンの定義（元データ → {id, title, start, end}）。grad は表示中の年度。
 const AUTO_LANES = [
@@ -99,7 +119,7 @@ const monthlyCounts = (rows, grad) => {
 // 既定日は今日。ただし今日がその年度の期間外（例: 次の年度）なら期間の初日にし、年表に出ないカードを作らせない
 const emptyItem = (grad, todayStr) => {
   const t = defaultPlanDate(grad, todayStr);
-  return { grad, kind: "other", title: "", start: t, end: t, status: "plan", owner: "", memo: "" };
+  return { grad, kind: "other", title: "", start: t, end: t, status: "plan", owner: "", memo: "", sameDay: true, byMonth: false };
 };
 
 export default function AnnualPlan({
@@ -118,9 +138,10 @@ export default function AnnualPlan({
   const [drawerErr, setDrawerErr] = useState(""); // ドロワー内に出す入力/保存エラー（共通バナーはドロワーの裏に隠れるため）
   const [copyErr, setCopyErr] = useState("");
   const [outsideOpen, setOutsideOpen] = useState(null); // 「期間外 N件」の一覧を開いている年度
+  const [moreDlg, setMoreDlg] = useState(null); // 年表の「他N件」を押したときの一覧 { grad, lane, auto, month, items }
   const scrollRefs = useRef({}); // 年度ごとの横スクロール要素。前年度ボードと位置を揃える
 
-  useBodyScrollLock(!!drawer || !!copyDlg);
+  useBodyScrollLock(!!drawer || !!copyDlg || !!moreDlg);
 
   // 候補から消えた年度を表示していたら先頭へ戻す
   useEffect(() => { if (!years.includes(year)) setYear(years[0]); }, [years, year]);
@@ -163,7 +184,12 @@ export default function AnnualPlan({
 
   // ---- ドロワー ----
   const openNew = () => { setDrawerErr(""); setDrawer({ item: emptyItem(year, todayStr) }); };
-  const openEdit = (item) => { setDrawerErr(""); setOutsideOpen(null); setDrawer({ item: { ...item, start: item.start || "", end: item.end || item.start || "" } }); };
+  const openEdit = (item) => {
+    setDrawerErr(""); setOutsideOpen(null); setMoreDlg(null);
+    const start = item.start || "";
+    const end = item.end || item.start || "";
+    setDrawer({ item: { ...item, start, end, ...periodMode(start, end) } });
+  };
   const closeDrawer = () => setDrawer(null);
   const patchItem = (patch) => { setDrawerErr(""); setDrawer((d) => (d ? { ...d, item: { ...d.item, ...patch } } : d)); };
 
@@ -171,11 +197,11 @@ export default function AnnualPlan({
     if (!drawer || busy) return;
     const it = drawer.item;
     if (!it.title.trim()) { setDrawerErr("活動名を入力してください"); return; }
-    if (!it.start) { setDrawerErr("開始日を入力してください"); return; }
-    const end = it.end && it.end >= it.start ? it.end : it.start;
+    if (!it.start) { setDrawerErr(it.byMonth ? "開始月を選んでください" : "開始日を入力してください"); return; }
+    const { start, end } = resolvePeriod(it); // チェック状態（開始日と同じ／月で入力）を日付に落とす
     const data = {
       grad: Number(it.grad), kind: it.kind in PLAN_KINDS ? it.kind : "other", title: it.title.trim(),
-      start: it.start, end, status: it.status in PLAN_STATUS ? it.status : "plan", owner: it.owner || "", memo: it.memo || "",
+      start, end, status: it.status in PLAN_STATUS ? it.status : "plan", owner: it.owner || "", memo: it.memo || "",
     };
     setBusy(true);
     try {
@@ -288,7 +314,14 @@ export default function AnnualPlan({
           </div>
           <div className="relative border-b border-gray-200" style={{ gridColumn: `2 / span ${PLAN_MONTHS}`, height: h, ...laneBg }}>
             {todayIdx >= 0 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: todayIdx * COL, width: COL, background: TODAY_BG, opacity: 0.55 }} />}
-            {lane.placed.map(({ item, s, e, row }) => auto ? (
+            {lane.placed.map(({ item, s, e, row }) => item.more ? (
+              <button key={item.id} type="button" title={`${monthLabel(item.start.slice(0, 7))}の${lane.label}をすべて見る`}
+                onClick={() => setMoreDlg({ grad, lane, auto, month: item.start.slice(0, 7), items: item.all })}
+                className="absolute rounded-md px-1.5 text-[10px] font-bold whitespace-nowrap text-center underline"
+                style={{ left: s * COL + 2, width: (e - s) * COL - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: "#374151", background: "#fff", border: "1px dashed #9CA3AF" }}>
+                他{item.items.length}件
+              </button>
+            ) : auto ? (
               <button key={item.id} type="button" title={`${item.title}（${rangeLabel(item.start, item.end)}）`}
                 onClick={() => goTab(grad, lane.tab)}
                 className={`absolute rounded-md px-1.5 text-[10px] font-medium whitespace-nowrap overflow-hidden text-ellipsis ${item.count ? "text-center" : "text-left"}`}
@@ -485,17 +518,57 @@ export default function AnnualPlan({
                   </select>
                 </div>
               </div>
-              <div className={pc ? "grid grid-cols-2 gap-2" : "space-y-3"}>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-500 mb-1">開始日<span className="text-red-500 ml-0.5">*</span></p>
-                  <input type="date" value={it.start} onChange={(e) => patchItem({ start: e.target.value, end: it.end && it.end >= e.target.value ? it.end : e.target.value })}
-                    className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
+              <div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-1.5">
+                  <p className="text-xs font-bold text-gray-500">期間</p>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                    <input type="checkbox" checked={!!it.sameDay} onChange={(e) => patchItem({ sameDay: e.target.checked })} style={{ accentColor: BRAND }} />
+                    {it.byMonth ? "1か月だけ（終了月を入れない）" : "開始日と同じ（終了日を入れない）"}
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+                    <input type="checkbox" checked={!!it.byMonth} onChange={(e) => patchItem({ byMonth: e.target.checked })} style={{ accentColor: BRAND }} />
+                    月で入力
+                  </label>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-gray-500 mb-1">終了日<span className="font-normal text-gray-400 ml-1">（1日なら開始日と同じ）</span></p>
-                  <input type="date" value={it.end} min={it.start || undefined} onChange={(e) => patchItem({ end: e.target.value })}
-                    className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
-                </div>
+                {it.byMonth ? (
+                  <div className={pc && !it.sameDay ? "grid grid-cols-2 gap-2" : "space-y-3"}>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-500 mb-1">開始月<span className="text-red-500 ml-0.5">*</span></p>
+                      <select value={String(it.start).slice(0, 7)}
+                        onChange={(e) => { const ym = e.target.value; const start = `${ym}-01`; patchItem({ start, end: it.end && it.end >= start ? it.end : monthEnd(ym) }); }}
+                        className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+                        {monthOptions(Number(it.grad), String(it.start).slice(0, 7)).map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                    </div>
+                    {!it.sameDay && (
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-500 mb-1">終了月</p>
+                        <select value={String(it.end || it.start).slice(0, 7)} onChange={(e) => patchItem({ end: monthEnd(e.target.value) })}
+                          className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm bg-white">
+                          {monthOptions(Number(it.grad), String(it.start).slice(0, 7), String(it.end || it.start).slice(0, 7))
+                            .filter((o) => o.key >= String(it.start).slice(0, 7))
+                            .map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className={pc && !it.sameDay ? "grid grid-cols-2 gap-2" : "space-y-3"}>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-500 mb-1">開始日<span className="text-red-500 ml-0.5">*</span></p>
+                      <input type="date" value={it.start} onChange={(e) => patchItem({ start: e.target.value, end: it.end && it.end >= e.target.value ? it.end : e.target.value })}
+                        className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
+                    </div>
+                    {!it.sameDay && (
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-500 mb-1">終了日</p>
+                        <input type="date" value={it.end} min={it.start || undefined} onChange={(e) => patchItem({ end: e.target.value })}
+                          className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-400 mt-1">1日だけ・1か月だけの活動は年表の月の枠に収まり、○〜○の期間は日付の位置に幅をとって出ます。</p>
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-500 mb-1">担当者<span className="font-normal text-gray-400 ml-1">（任意）</span></p>
@@ -544,6 +617,43 @@ export default function AnnualPlan({
                   {busy ? "保存中…" : "保存する"}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 年表の「他N件」一覧ドロワー */}
+      {moreDlg && (
+        <div className="fixed inset-0 z-[65] flex justify-end">
+          <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setMoreDlg(null)} />
+          <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-[440px]" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+            <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+              <div className="min-w-0">
+                <p className="text-xs font-bold" style={{ color: BRAND }}>{moreDlg.grad}卒・{monthLabel(moreDlg.month)}</p>
+                <p className="text-base font-bold truncate">{moreDlg.lane.label}（{moreDlg.items.length}件）</p>
+              </div>
+              <button type="button" onClick={() => setMoreDlg(null)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-2">
+              <p className="text-[11px] text-gray-500 py-2">この月の全件です（年表には先頭3件だけ出しています）。{moreDlg.auto ? "押すと元の画面へ移ります。" : "押すと開いて直せます。"}</p>
+              {moreDlg.items.map((i) => moreDlg.auto ? (
+                <button key={i.id} type="button" onClick={() => { setMoreDlg(null); goTab(moreDlg.grad, moreDlg.lane.tab); }}
+                  className="w-full flex items-center gap-2 py-2.5 border-t border-gray-100 text-left text-gray-600">
+                  <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: "#D1D5DB" }} />
+                  <span className="flex-1 min-w-0 text-sm truncate">{i.title}</span>
+                  <span className="text-[11px] text-gray-500 whitespace-nowrap">{mdLabel(i.start)}</span>
+                </button>
+              ) : (
+                <button key={i.id} type="button" onClick={() => openEdit(i)} className="w-full flex items-center gap-2 py-2.5 border-t border-gray-100 text-left">
+                  <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: (PLAN_KINDS[moreDlg.lane.key] || PLAN_KINDS.other).color, opacity: i.status === "cancel" ? 0.4 : 1 }} />
+                  <span className="flex-1 min-w-0 text-sm font-bold truncate" style={i.status === "cancel" ? { textDecoration: "line-through", color: "#9CA3AF" } : undefined}>{cardText(i)}</span>
+                  <span className="text-[11px] text-gray-500 whitespace-nowrap">{rangeLabel(i.start, i.end)}</span>
+                  <span className="text-[10px] font-bold px-1.5 rounded-full" style={i.status === "done" ? { background: "#E7F9EE", color: "#059947" } : i.status === "cancel" ? { background: "#F3F4F6", color: "#6B7280" } : { background: BRAND_LIGHT, color: BRAND }}>{PLAN_STATUS[i.status] || "予定"}</span>
+                </button>
+              ))}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 shrink-0">
+              <button type="button" onClick={() => setMoreDlg(null)} className="w-full py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>閉じる</button>
             </div>
           </div>
         </div>
