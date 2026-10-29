@@ -17,8 +17,23 @@ import {
 //   PC は横スクロールの年表、スマホは月ごとの縦リスト（切替は pc prop）。
 // =====================================================================
 
-const COL = 88; // 1か月の列幅(px)
+const COL_MIN = 88; // 1か月の列幅(px)の下限。カードの文字が省略されないよう、最も長い文字に合わせて広げる（上限 COL_MAX）
+const COL_MAX = 360;
 const LABEL_W = 150; // 左のレーン名列の幅(px)
+const STICKY_TOP = 64; // AdminApp のヘッダー（sticky top-0）の高さ。横スクロールの帯をその下に貼り付ける
+
+// カードの文字幅（canvas で計測。列幅を文字に合わせて広げるため）
+let _measureCtx = null;
+let _fontFamily = "";
+const textWidth = (text, size, weight) => {
+  if (typeof document === "undefined") return String(text).length * size;
+  if (!_measureCtx) {
+    _measureCtx = document.createElement("canvas").getContext("2d");
+    _fontFamily = getComputedStyle(document.body).fontFamily || "sans-serif";
+  }
+  _measureCtx.font = `${weight} ${size}px ${_fontFamily}`;
+  return _measureCtx.measureText(String(text)).width;
+};
 const ROW_H = 30; // カード1行の高さ
 const CARD_H = 26;
 const TODAY_BG = "#FFF3E0";
@@ -139,7 +154,8 @@ export default function AnnualPlan({
   const [copyErr, setCopyErr] = useState("");
   const [outsideOpen, setOutsideOpen] = useState(null); // 「期間外 N件」の一覧を開いている年度
   const [moreDlg, setMoreDlg] = useState(null); // 年表の「他N件」を押したときの一覧 { grad, lane, auto, month, items }
-  const scrollRefs = useRef({}); // 年度ごとの横スクロール要素。前年度ボードと位置を揃える
+  const scrollRefs = useRef({}); // 年度ごとの横スクロール要素（本体と上部の帯）。前年度ボードと位置を揃える
+  const colRef = useRef(COL_MIN); // 今の列幅（effect から参照する用）
 
   useBodyScrollLock(!!drawer || !!copyDlg || !!moreDlg);
 
@@ -161,9 +177,11 @@ export default function AnnualPlan({
   const scrollEls = () => Object.values(scrollRefs.current).filter(Boolean);
   const scrollToToday = (smooth) => {
     const p = posInCycle(year, todayStr);
-    const left = Number.isFinite(p) ? Math.max(0, p * COL - 220) : 0;
+    const left = Number.isFinite(p) ? Math.max(0, p * colRef.current - 220) : 0;
     scrollEls().forEach((el) => { if (smooth) el.scrollTo({ left, behavior: "smooth" }); else el.scrollLeft = left; });
   };
+  // ◀ ▶ ボタン: n か月ぶん動かす（1つ動かせば onScroll の連動で残りも動く）
+  const scrollByMonths = (n) => { const el = scrollEls()[0]; if (el) el.scrollBy({ left: n * colRef.current, behavior: "smooth" }); };
   // 片方のボードを横スクロールしたら、もう片方も同じ位置へ（同じ月の列が縦に揃うように）
   const syncScroll = (src) => {
     scrollEls().forEach((el) => { if (el !== src && Math.abs(el.scrollLeft - src.scrollLeft) > 1) el.scrollLeft = src.scrollLeft; });
@@ -179,11 +197,13 @@ export default function AnnualPlan({
     else document.getElementById("ml-plan-this-month")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // 初期表示・年度切替で今月の列が見える位置へ
-  useEffect(() => { scrollToToday(false); }, [year, pc]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ---- ドロワー ----
   const openNew = () => { setDrawerErr(""); setDrawer({ item: emptyItem(year, todayStr) }); };
+  // 年表の月見出し／レーンの空き・月リストの「＋」から: その月（1日〜末日・「月で入力」）で新規
+  const openNewAt = (grad, ym, kind) => {
+    setDrawerErr("");
+    setDrawer({ item: { ...emptyItem(grad, todayStr), kind: kind || "other", start: `${ym}-01`, end: monthEnd(ym), sameDay: true, byMonth: true } });
+  };
   const openEdit = (item) => {
     setDrawerErr(""); setOutsideOpen(null); setMoreDlg(null);
     const start = item.start || "";
@@ -281,6 +301,26 @@ export default function AnnualPlan({
   };
   const cardText = (item) => `${item.status === "done" ? "✓ " : ""}${item.title}`;
 
+  // 列幅: 表示中のボード全部のカードの文字が省略されない幅（カードの幅 = 列数ぶん × 列幅 − 余白）。下限 COL_MIN・上限 COL_MAX
+  const fitCol = (grads) => {
+    let need = COL_MIN;
+    grads.forEach((grad) => {
+      const d = boardData(grad);
+      d.lanes.forEach((lane) => lane.placed.forEach(({ item, s, e }) => {
+        if (!item.more) need = Math.max(need, (textWidth(cardText(item), 11, 700) + 24) / (e - s));
+      }));
+      d.autoLanes.forEach((lane) => lane.placed.forEach(({ item, s, e }) => {
+        if (!item.more) need = Math.max(need, (textWidth(item.title, 10, 500) + 20) / (e - s));
+      }));
+    });
+    return Math.min(COL_MAX, Math.ceil(need));
+  };
+  const col = pc ? fitCol([year, overlay && prevYear].filter(Boolean)) : COL_MIN;
+  colRef.current = col;
+
+  // 初期表示・年度切替（列幅が変わったときも）で今月の列が見える位置へ
+  useEffect(() => { scrollToToday(false); }, [year, pc, col]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 年表の期間外（年表にも月リストにも出ない）の活動。見出しの件数を押すと一覧が開き、そこから開いて直せる
   const outsideBtn = (grad, d) => d.outside > 0 && (
     <button type="button" onClick={() => setOutsideOpen(outsideOpen === grad ? null : grad)} className="ml-2 underline font-bold" style={{ color: TODAY_FG }}>期間外 {d.outside}件</button>
@@ -302,8 +342,15 @@ export default function AnnualPlan({
     const months = cycleMonths(grad);
     const todayPos = posInCycle(grad, todayStr);
     const todayIdx = Number.isFinite(todayPos) && todayPos >= 0 && todayPos < PLAN_MONTHS ? Math.floor(todayPos) : -1;
-    const gridCols = `${LABEL_W}px repeat(${PLAN_MONTHS}, ${COL}px)`;
-    const laneBg = { backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${COL - 1}px, ${HAIR} ${COL - 1}px, ${HAIR} ${COL}px)` };
+    const gridCols = `${LABEL_W}px repeat(${PLAN_MONTHS}, ${col}px)`;
+    const laneBg = { backgroundImage: `repeating-linear-gradient(to right, transparent 0, transparent ${col - 1}px, ${HAIR} ${col - 1}px, ${HAIR} ${col}px)` };
+    const fullWidth = LABEL_W + PLAN_MONTHS * col;
+    // レーンの空いている所を押したら、その月に活動を追加（カードを押したときは何もしない）
+    const laneClick = (lane) => (e) => {
+      if (e.target !== e.currentTarget) return;
+      const idx = Math.floor(e.nativeEvent.offsetX / col);
+      if (months[idx]) openNewAt(grad, months[idx].key, lane.key);
+    };
     const renderLane = (lane, auto) => {
       const h = 6 + Math.max(1, lane.rowCount) * ROW_H;
       return (
@@ -312,27 +359,28 @@ export default function AnnualPlan({
             <span className="truncate">{lane.label}</span>
             {!auto && <span className="ml-auto font-normal tabular-nums">{lane.done}/{lane.items.length}</span>}
           </div>
-          <div className="relative border-b border-gray-200" style={{ gridColumn: `2 / span ${PLAN_MONTHS}`, height: h, ...laneBg }}>
-            {todayIdx >= 0 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: todayIdx * COL, width: COL, background: TODAY_BG, opacity: 0.55 }} />}
+          <div className={`relative border-b border-gray-200 ${auto ? "" : "cursor-cell"}`} style={{ gridColumn: `2 / span ${PLAN_MONTHS}`, height: h, ...laneBg }}
+            onClick={auto ? undefined : laneClick(lane)} title={auto ? undefined : "空いている所を押すとその月に活動を追加"}>
+            {todayIdx >= 0 && <div className="absolute top-0 bottom-0 pointer-events-none" style={{ left: todayIdx * col, width: col, background: TODAY_BG, opacity: 0.55 }} />}
             {lane.placed.map(({ item, s, e, row }) => item.more ? (
               <button key={item.id} type="button" title={`${monthLabel(item.start.slice(0, 7))}の${lane.label}をすべて見る`}
                 onClick={() => setMoreDlg({ grad, lane, auto, month: item.start.slice(0, 7), items: item.all })}
                 className="absolute rounded-md px-1.5 text-[10px] font-bold whitespace-nowrap text-center underline"
-                style={{ left: s * COL + 2, width: (e - s) * COL - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: "#374151", background: "#fff", border: "1px dashed #9CA3AF" }}>
+                style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: "#374151", background: "#fff", border: "1px dashed #9CA3AF" }}>
                 他{item.items.length}件
               </button>
             ) : auto ? (
               <button key={item.id} type="button" title={`${item.title}（${rangeLabel(item.start, item.end)}）`}
                 onClick={() => goTab(grad, lane.tab)}
                 className={`absolute rounded-md px-1.5 text-[10px] font-medium whitespace-nowrap overflow-hidden text-ellipsis ${item.count ? "text-center" : "text-left"}`}
-                style={{ left: s * COL + 2, width: (e - s) * COL - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: AUTO.color, background: AUTO.bg, border: `1px solid ${AUTO.border}` }}>
+                style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: AUTO.color, background: AUTO.bg, border: `1px solid ${AUTO.border}` }}>
                 {item.title}
               </button>
             ) : (
               <button key={item.id} type="button" title={`${item.title}（${rangeLabel(item.start, item.end)}・${PLAN_STATUS[item.status] || "予定"}）`}
                 onClick={() => openEdit(item)}
                 className="absolute rounded-lg px-2 text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis text-left"
-                style={{ left: s * COL + 2, width: (e - s) * COL - 4, top: 4 + row * ROW_H, height: CARD_H, lineHeight: `${CARD_H}px`, ...cardStyle(item, lane.key), ...(isPrev ? { filter: "saturate(.6)" } : {}) }}>
+                style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: CARD_H, lineHeight: `${CARD_H}px`, ...cardStyle(item, lane.key), ...(isPrev ? { filter: "saturate(.6)" } : {}) }}>
                 {cardText(item)}
               </button>
             ))}
@@ -341,8 +389,8 @@ export default function AnnualPlan({
       );
     };
     return (
-      <div key={grad} className="bg-white border border-gray-200 rounded-2xl overflow-hidden mb-4">
-        <div className={`flex items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-200 ${isPrev ? "bg-gray-50" : ""}`}>
+      <div key={grad} className="bg-white border border-gray-200 rounded-2xl mb-4">
+        <div className={`flex items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-200 rounded-t-2xl ${isPrev ? "bg-gray-50" : ""}`}>
           <p className="text-sm font-bold">{grad}卒{isPrev && <span className="ml-1 text-xs font-normal text-gray-500">（前年度）</span>}</p>
           <p className="text-[11px] text-gray-500">
             {d.done}件 実施済み／{d.planned}件 予定
@@ -350,17 +398,26 @@ export default function AnnualPlan({
           </p>
         </div>
         {outsidePanel(grad, d, "mx-3 my-2")}
-        <div ref={(el) => setScrollEl(grad, el)} onScroll={(e) => syncScroll(e.currentTarget)} className="overflow-x-auto">
+        {/* 上部の横スクロール帯（ページを下に送っても画面上部に貼り付く）＋◀▶。本体と連動 */}
+        <div className="flex items-center gap-1.5 px-2 py-1 border-b border-gray-200 bg-white" style={{ position: "sticky", top: STICKY_TOP, zIndex: 5 }}>
+          <button type="button" onClick={() => scrollByMonths(-3)} aria-label="3か月前へ" title="3か月前へ" className="shrink-0 w-7 h-6 rounded-md border bg-white text-gray-500 text-xs font-bold" style={{ borderColor: HAIR }}>◀</button>
+          <div ref={(el) => setScrollEl(`${grad}:top`, el)} onScroll={(e) => syncScroll(e.currentTarget)} className="flex-1 min-w-0" style={{ overflowX: "scroll", overflowY: "hidden" }} aria-label="年表の横スクロール">
+            <div style={{ width: fullWidth, height: 1 }} />
+          </div>
+          <button type="button" onClick={() => scrollByMonths(3)} aria-label="3か月後へ" title="3か月後へ" className="shrink-0 w-7 h-6 rounded-md border bg-white text-gray-500 text-xs font-bold" style={{ borderColor: HAIR }}>▶</button>
+        </div>
+        <div ref={(el) => setScrollEl(grad, el)} onScroll={(e) => syncScroll(e.currentTarget)} className="overflow-x-auto rounded-b-2xl">
           <div style={{ display: "grid", gridTemplateColumns: gridCols, minWidth: "max-content" }}>
             <div className="bg-white border-r border-b border-gray-200 px-2.5 py-1.5 text-[10px] text-gray-400 flex items-end" style={{ position: "sticky", left: 0, zIndex: 3 }}>
               {months[0].y}/{months[0].m}〜{months[PLAN_MONTHS - 1].y}/{months[PLAN_MONTHS - 1].m}
             </div>
             {months.map((m, i) => (
-              <div key={m.key} className="border-b border-r border-gray-200 text-center py-1.5 text-[11px] font-bold leading-tight"
+              <button key={m.key} type="button" onClick={() => openNewAt(grad, m.key, null)} title={`${m.y}年${m.m}月に活動を追加`}
+                className="group border-b border-r border-gray-200 text-center py-1.5 text-[11px] font-bold leading-tight hover:bg-gray-50"
                 style={i === todayIdx ? { background: TODAY_BG, color: TODAY_FG } : { color: "#6B7280" }}>
-                {m.m}月
+                {m.m}月<span className="ml-1 font-normal opacity-0 group-hover:opacity-100" style={{ color: BRAND }}>＋</span>
                 <span className="block text-[10px] font-normal" style={{ visibility: i === 0 || m.m === 1 ? "visible" : "hidden" }}>{m.y}</span>
-              </div>
+              </button>
             ))}
             {d.lanes.map((lane) => renderLane(lane, false))}
             {d.autoLanes.map((lane) => renderLane(lane, true))}
@@ -392,9 +449,11 @@ export default function AnnualPlan({
             const auto = autoRows.filter((i) => inMonth(i, m)).sort((a, b) => a.start.localeCompare(b.start));
             return (
               <div key={m.key} id={isNow ? "ml-plan-this-month" : undefined} className="bg-white border rounded-xl px-3 py-2.5" style={{ borderColor: isNow ? "#F59E0B" : HAIR }}>
-                <p className="text-[13px] font-bold flex items-baseline gap-2 mb-1">
+                <p className="text-[13px] font-bold flex items-center gap-2 mb-1">
                   {m.m}月<span className="text-[11px] font-normal text-gray-500">{m.y}</span>
-                  {isNow && <span className="ml-auto text-[10px] font-bold px-2 rounded-full" style={{ background: TODAY_BG, color: TODAY_FG }}>今月</span>}
+                  {isNow && <span className="text-[10px] font-bold px-2 rounded-full" style={{ background: TODAY_BG, color: TODAY_FG }}>今月</span>}
+                  <button type="button" onClick={() => openNewAt(grad, m.key, null)} aria-label={`${m.y}年${m.m}月に活動を追加`} title="この月に活動を追加"
+                    className="ml-auto w-6 h-6 rounded-full border text-sm font-bold leading-none flex items-center justify-center" style={{ borderColor: BRAND, color: BRAND }}>＋</button>
                 </p>
                 {rows.length === 0 && auto.length === 0 && <p className="text-[11px] text-gray-400">—</p>}
                 {rows.map((i) => {

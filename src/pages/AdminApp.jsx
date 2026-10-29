@@ -458,6 +458,7 @@ function AdminBody({
   const [srcBusy, setSrcBusy] = useState(false);
   const [srcDelId, setSrcDelId] = useState(null);
   const [showTargetPicker, setShowTargetPicker] = useState(false); // LINE配信の対象を選ぶモーダル
+  const [bcConfirm, setBcConfirm] = useState(false); // LINE配信の送信前確認（送信先の名簿と本文を見てから送る。誤送信防止）
   // LINE配信の個別選択（target === "pick" のとき有効）。pickView は選択画面の状態 {base:[student], label}
   const [pickUids, setPickUids] = useState([]);
   const [pickLabel, setPickLabel] = useState("個別選択");
@@ -1959,6 +1960,7 @@ function AdminBody({
       setBanner(`配信に失敗しました：${ex.message}`);
     } finally {
       setSending(false);
+      setBcConfirm(false);
     }
   };
 
@@ -2040,7 +2042,7 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || bcConfirm || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
   );
 
   const tabs = [
@@ -4535,10 +4537,11 @@ function AdminBody({
                   {overQuota && <span className="font-bold">／残り枠が不足しています。対象を分けるか翌月に送信してください。</span>}
                 </p>
               )}
-              <button disabled={!msg || sending || overQuota} onClick={send}
+              <button disabled={!msg || sending || overQuota} onClick={() => setBcConfirm(true)}
                 className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: LINE_GREEN }}>
-                <Send size={16} /> {sending ? "送信中…" : overQuota ? "送信枠が不足しています" : "LINEで一括送信"}
+                <Send size={16} /> {sending ? "送信中…" : overQuota ? "送信枠が不足しています" : "送信先と内容を確認して送信"}
               </button>
+              <p className="text-[11px] text-gray-400 mt-1.5">押すと送信先の名簿と本文の確認画面が出ます。確認画面の「送信する」で送られます。</p>
             </div>
           </div>
 
@@ -5983,6 +5986,61 @@ function AdminBody({
                     <p className="text-xs text-gray-400 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* LINE配信の送信前確認: 送信先の名簿（LINE／メール／送れない）と本文を見てから送る */}
+      {bcConfirm && (() => {
+        const list = targetRecipientList;
+        const mailCount = list.filter((s) => !s.lineUserId && s.email).length;
+        const noneCount = list.length - lineTargetCount - mailCount;
+        const hasName = /\{name\}|\{名前\}/i.test(msg);
+        return (
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-6 sm:pt-10" onClick={() => !sending && setBcConfirm(false)}>
+            <div className="bg-white rounded-2xl w-full max-w-md flex flex-col" style={{ maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 pt-4 pb-3 border-b border-gray-200 shrink-0">
+                <p className="text-sm font-bold">送信内容の確認</p>
+                <p className="text-xs text-gray-500 mt-1">送信先と本文を確認してから送ってください。送信後は取り消せません。</p>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">送信先</p>
+                  <p className="text-sm font-bold" style={{ color: BRAND }}>{selectedYear}卒・{targetLabel}（{list.length}名）</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    LINE {lineTargetCount}通／メール {mailCount}通
+                    {noneCount > 0 && <span className="font-bold" style={{ color: "#B91C1C" }}>／連絡先なし {noneCount}名（届きません）</span>}
+                  </p>
+                  <div className="mt-1.5 rounded-lg border border-gray-200 max-h-52 overflow-y-auto divide-y divide-gray-100">
+                    {list.length === 0 ? (
+                      <p className="text-xs text-gray-400 px-3 py-2">送信先がいません。「戻って直す」で配信対象を変えてください。</p>
+                    ) : list.map((s) => (
+                      <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                        <span className="min-w-0 truncate font-bold">{s.name || "（名前なし）"}</span>
+                        <span className="min-w-0 flex-1 truncate text-gray-400">{s.univ || ""}</span>
+                        <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : s.email ? { background: "#EEF2FF", color: "#4F46E5" } : { background: "#FEF2F2", color: "#B91C1C" }}>
+                          {s.lineUserId ? "LINE" : s.email ? "メール" : "連絡先なし"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">辞退者・削除済みは含みません。</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
+                  <div className="rounded-lg border border-gray-200 p-3 text-sm whitespace-pre-wrap leading-relaxed break-words" style={{ background: "#F9FAFB" }}>{msg}</div>
+                  {hasName && <p className="text-[11px] text-gray-500 mt-1">「{"{name}"}」は送信時に各自の登録名に置き換わります。</p>}
+                </div>
+              </div>
+              <div className="px-5 py-3 border-t border-gray-200 flex gap-2 shrink-0">
+                <button onClick={() => setBcConfirm(false)} disabled={sending} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-gray-300 text-gray-600 bg-white disabled:opacity-40">戻って直す</button>
+                <button onClick={send} disabled={sending || list.length === 0 || overQuota}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40 flex items-center justify-center gap-1.5" style={{ background: LINE_GREEN }}>
+                  <Send size={14} /> {sending ? "送信中…" : `${list.length}名に送信する`}
+                </button>
               </div>
             </div>
           </div>
