@@ -2,9 +2,10 @@ import { dbAdmin, FieldValue } from "./_lib/firebaseAdmin.js";
 import { readJson, sendJson, methodGuard, requireAdmin } from "./_lib/util.js";
 import { multicast, pushMessage } from "./_lib/line.js";
 import { sendEmail } from "./_lib/resend.js";
+import { resolveRecipients } from "./_lib/broadcastTarget.js";
 
-// タスク未完了者判定のための進捗計算
-async function computeIncompleteUids(grad) {
+// タスク未完了者（公開イベントの出欠・公開アンケートの回答・住所電話のいずれかが未完了）の uid 一覧
+async function computeIncompleteUids(grad, students) {
   const [evSnap, svSnap, rsvpSnap, respSnap] = await Promise.all([
     dbAdmin.collection("events").where("grad", "==", grad).where("published", "==", true).get(),
     dbAdmin.collection("surveys").where("grad", "==", grad).where("published", "==", true).get(),
@@ -15,7 +16,16 @@ async function computeIncompleteUids(grad) {
   const surveyIds = svSnap.docs.map((d) => d.id);
   const rsvpKey = new Set(rsvpSnap.docs.map((d) => { const r = d.data(); return `${r.eventId}_${r.uid}`; }));
   const respKey = new Set(respSnap.docs.map((d) => { const r = d.data(); return `${r.surveyId}_${r.uid}`; }));
-  return { eventIds, surveyIds, rsvpKey, respKey };
+  return students
+    .filter((s) => {
+      const total = eventIds.length + surveyIds.length + 1;
+      let done = 0;
+      eventIds.forEach((eid) => { if (rsvpKey.has(`${eid}_${s.id}`)) done += 1; });
+      surveyIds.forEach((sid) => { if (respKey.has(`${sid}_${s.id}`)) done += 1; });
+      if (s.address && s.phone) done += 1;
+      return done < total;
+    })
+    .map((s) => s.id);
 }
 
 export default async function handler(req, res) {
@@ -24,66 +34,30 @@ export default async function handler(req, res) {
   if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
 
   try {
-    const { target, targetLabel, body, grad, lineOnly, uids: body_uids } = await readJson(req);
+    const { target, targetLabel, body, grad, lineOnly, uids } = await readJson(req);
     const y = Number(grad);
     const text = String(body || "").trim();
     if (!text) return sendJson(res, 400, { error: "メッセージが空です。" });
+    if (!Number.isFinite(y)) return sendJson(res, 400, { error: "年度が不正です。" });
 
-    // 対象年度の在籍者（辞退・削除は除外）
+    // 対象年度の学生（在籍者への絞り込みは resolveRecipients 側）
     const snap = await dbAdmin.collection("students").where("grad", "==", y).get();
-    let recipients = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
+    const students = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    // uids 指定があるときは、その学生だけに送る（面談の日程調整など個別連絡用）
-    const onlyUids = Array.isArray(body_uids) && body_uids.length ? new Set(body_uids) : null;
-    if (onlyUids) {
-      recipients = recipients.filter((s) => onlyUids.has(s.id));
-    } else if (typeof target === "string" && target.startsWith("event:")) {
-      // イベント参加状況で絞り込み： event:<eventId>:<group>（group = yes/arrived/no/none）
-      const [, eventId, group] = target.split(":");
-      const rsnap = await dbAdmin.collection("rsvps").where("eventId", "==", eventId).get();
-      const yes = new Set(), no = new Set(), arrived = new Set();
-      rsnap.docs.forEach((d) => {
-        const r = d.data();
-        if (r.answer === "yes") yes.add(r.uid);
-        else if (r.answer === "no") no.add(r.uid);
-        if (r.arrived === true) arrived.add(r.uid); // 出席かつ当日到着ボタンを押した人
-      });
-      recipients = recipients.filter((s) => {
-        if (group === "yes") return yes.has(s.id);
-        if (group === "arrived") return arrived.has(s.id);
-        if (group === "no") return no.has(s.id);
-        return !yes.has(s.id) && !no.has(s.id); // none = 未回答
-      });
-    } else if (typeof target === "string" && target.startsWith("survey:")) {
-      // アンケートの回答状況で絞り込み： survey:<surveyId>:<group>（group = answered/unanswered）
-      const [, surveyId, group] = target.split(":");
-      const rsnap = await dbAdmin.collection("responses").where("surveyId", "==", surveyId).get();
-      const answered = new Set(rsnap.docs.map((d) => d.data().uid));
-      // アンケートの対象者（個別指定があれば優先）だけに絞る
-      const sdoc = await dbAdmin.collection("surveys").doc(surveyId).get();
-      const sv = sdoc.exists ? sdoc.data() : null;
-      if (sv && Array.isArray(sv.targetUids)) {
-        const allow = new Set(sv.targetUids);
-        recipients = recipients.filter((s) => allow.has(s.id));
-      }
-      recipients = recipients.filter((s) => (group === "answered" ? answered.has(s.id) : !answered.has(s.id)));
-    } else if (target === "内定者（承諾前）") {
-      recipients = recipients.filter((s) => s.status === "内定");
-    } else if (target === "内定承諾者") {
-      recipients = recipients.filter((s) => s.status === "承諾");
-    } else if (target === "タスク未完了者") {
-      const { eventIds, surveyIds, rsvpKey, respKey } = await computeIncompleteUids(y);
-      recipients = recipients.filter((s) => {
-        const total = eventIds.length + surveyIds.length + 1;
-        let done = 0;
-        eventIds.forEach((eid) => { if (rsvpKey.has(`${eid}_${s.id}`)) done += 1; });
-        surveyIds.forEach((sid) => { if (respKey.has(`${sid}_${s.id}`)) done += 1; });
-        if (s.address && s.phone) done += 1;
-        return done < total;
-      });
-    }
+    // 送信先の決定。管理画面は確認モーダルに出した名簿の uid をそのまま渡す（＝見えている名簿に送る）。
+    // uids が無い呼び出し（記事のLINE通知など）は target 文字列で絞る。不明な対象は 400（全員には落とさない）
+    const recipients = await resolveRecipients({
+      students,
+      target,
+      uids,
+      loaders: {
+        event: async (id) => { const d = await dbAdmin.collection("events").doc(id).get(); return d.exists ? { id: d.id, ...d.data() } : null; },
+        rsvps: async (eventId) => (await dbAdmin.collection("rsvps").where("eventId", "==", eventId).get()).docs.map((d) => d.data()),
+        survey: async (id) => { const d = await dbAdmin.collection("surveys").doc(id).get(); return d.exists ? { id: d.id, ...d.data() } : null; },
+        answeredUids: async (surveyId) => (await dbAdmin.collection("responses").where("surveyId", "==", surveyId).get()).docs.map((d) => d.data().uid),
+        incompleteUids: async () => computeIncompleteUids(y, students.filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"))),
+      },
+    });
 
     // {name} / {名前} を各受信者のマイページ登録名に置換（差し込み）
     const hasPlaceholder = /\{name\}|\{名前\}/i.test(text);
@@ -142,6 +116,7 @@ export default async function handler(req, res) {
       mailCount,
     });
   } catch (err) {
+    if (err && err.status === 400) return sendJson(res, 400, { error: err.message });
     return sendJson(res, 500, { error: "配信に失敗しました。時間をおいて再度お試しください。" });
   }
 }

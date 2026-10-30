@@ -599,7 +599,6 @@ function AdminBody({
   const activeStudents = yearStudents.filter((s) => !s.deleted && (s.status === "内定" || s.status === "承諾"));
   const totalActive = activeStudents.length;
   const accepted = activeStudents.filter((s) => s.status === "承諾").length;
-  const preAccept = activeStudents.filter((s) => s.status === "内定").length;
   const linked = activeStudents.filter((s) => s.lineUserId).length;
   const declinedPre = yearStudents.filter((s) => s.status === "辞退").length;
   const declinedPost = yearStudents.filter((s) => s.status === "承諾後辞退").length;
@@ -628,7 +627,7 @@ function AdminBody({
     if (!a || a.type !== "event" || !a.eventId) return activeStudents;
     const e = events.find((x) => x.id === a.eventId);
     if (!e) return activeStudents;
-    return activeStudents.filter((st) => inEventGroup(st, e, a.group || "arrived"));
+    return eventGroupList(e, a.group || "arrived");
   };
   // アンケートの対象者：母集団に対し、個別指定(targetUids)があれば最優先、無ければ住所エリアで絞る
   const surveyAudience = (s) => {
@@ -654,6 +653,9 @@ function AdminBody({
     if (Array.isArray(e.targetUids)) return activeStudents.filter((st) => e.targetUids.includes(st.id));
     return (e.areas && e.areas.length) ? activeStudents.filter((st) => matchesAreas(st, e.areas, e.areaBasis)) : activeStudents;
   };
+  // イベントの対象者の中で出欠グループに該当する学生（対象外の学生を「未回答者」に数えない）。
+  // LINE配信の対象・アンケートの母集団はこれを使う（/api/_lib/broadcastTarget.js の eventGroupList と同じ基準）
+  const eventGroupList = (e, g) => eventAudience(e).filter((st) => inEventGroup(st, e, g));
   // 公開済みイベントの「会場到着ボタン」文言（未入力なら既定文言）
   const arrivalValue = (e) => (arrivalDraft[e.id] !== undefined ? arrivalDraft[e.id] : (e.arrivalLabel || ""));
   const saveArrivalLabel = (e) => {
@@ -869,16 +871,17 @@ function AdminBody({
     return `${e.areas.map(areaLabel).join("・")}（${b}）`;
   };
 
-  const targetCount = isPickTarget
-    ? pickList.length
-    : isEventTarget
-    ? (targetEvent ? activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup)).length : 0)
-    : isSurveyTarget
-    ? (targetSurvey ? surveyGroupList(targetSurvey, tSGroup).length : 0)
-    : target === "全員" ? activeStudents.length
-    : target === "内定者（承諾前）" ? preAccept
-    : target === "内定承諾者" ? accepted
-    : activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; }).length;
+  // 配信の送信先（確認モーダルの名簿＝この一覧。送信時は uid をそのまま API に渡すので「見えている名簿」に送られる）
+  const targetRecipientList = (() => {
+    if (isPickTarget) return pickList;
+    if (isEventTarget) return targetEvent ? eventGroupList(targetEvent, tGroup) : [];
+    if (isSurveyTarget) return targetSurvey ? surveyGroupList(targetSurvey, tSGroup) : [];
+    if (target === "内定者（承諾前）") return activeStudents.filter((s) => s.status === "内定");
+    if (target === "内定承諾者") return activeStudents.filter((s) => s.status === "承諾");
+    if (target === "タスク未完了者") return activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; });
+    return activeStudents; // 全員
+  })();
+  const targetCount = targetRecipientList.length;
 
   const targetLabel = isPickTarget
     ? pickLabel
@@ -889,21 +892,6 @@ function AdminBody({
     : target;
 
   // この配信で使うLINE送信数（＝連携済みの宛先数）。無料枠の消費見込み
-  const targetRecipientList = (() => {
-    if (isPickTarget) return pickList;
-    if (isEventTarget) {
-      if (!targetEvent) return [];
-      return activeStudents.filter((s) => inEventGroup(s, targetEvent, tGroup));
-    }
-    if (isSurveyTarget) {
-      if (!targetSurvey) return [];
-      return surveyGroupList(targetSurvey, tSGroup);
-    }
-    if (target === "内定者（承諾前）") return activeStudents.filter((s) => s.status === "内定");
-    if (target === "内定承諾者") return activeStudents.filter((s) => s.status === "承諾");
-    if (target === "タスク未完了者") return activeStudents.filter((s) => { const p = progressOf(s); return p.done < p.total; });
-    return activeStudents; // 全員
-  })();
   const lineTargetCount = targetRecipientList.filter((s) => s.lineUserId).length;
   const overQuota = quota && quota.remaining != null && lineTargetCount > quota.remaining;
 
@@ -1042,7 +1030,7 @@ function AdminBody({
   const svFormPool = () => {
     if (sv.audType === "event" && sv.audEventId) {
       const e = events.find((x) => x.id === sv.audEventId);
-      if (e) return activeStudents.filter((st) => inEventGroup(st, e, sv.audGroup || "arrived"));
+      if (e) return eventGroupList(e, sv.audGroup || "arrived");
     }
     return activeStudents;
   };
@@ -1947,10 +1935,11 @@ function AdminBody({
     setSending(true);
     setBanner("");
     try {
-      if (isPickTarget && !pickList.length) throw new Error("送信先が選ばれていません。");
+      if (!targetRecipientList.length) throw new Error(isPickTarget ? "送信先が選ばれていません。" : "送信先がいません。");
+      // 確認モーダルに出した名簿の uid をそのまま渡す（API はこの uid にだけ送る＝画面と送信先がズレない）
       const r = await lineBroadcast({
         target: isPickTarget ? "個別選択" : target, targetLabel, body: msg, grad: selectedYear,
-        ...(isPickTarget ? { uids: pickList.map((s) => s.id) } : {}),
+        uids: targetRecipientList.map((s) => s.id),
       });
       setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
       refreshBroadcasts();
@@ -5432,7 +5421,7 @@ function AdminBody({
                           <p className="text-xs text-gray-400 mb-1.5">{e.dateStr || "日付未定"}</p>
                           <div className="flex flex-wrap gap-1.5">
                             {["yes", "arrived", "no", "none"].map((g) => {
-                              const n = activeStudents.filter((s) => inEventGroup(s, e, g)).length;
+                              const n = eventGroupList(e, g).length;
                               return (
                                 <button key={g} onClick={() => pick(`event:${e.id}:${g}`)}
                                   className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border"
