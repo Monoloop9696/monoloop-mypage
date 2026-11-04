@@ -88,6 +88,16 @@ const meetingBody = (m) => {
 // 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
 const VISIBLE_ITEMS = 3;
 const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", pulse: false, questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
+// LINE配信の「配信対象」のカテゴリ色（対象を選ぶモーダルと配信対象カードで共通）
+const TARGET_CAT = {
+  status: { key: "status", label: "ステータス別", color: BRAND, bg: "#FCE3EF" },
+  event: { key: "event", label: "イベントの参加状況", color: "#4F46E5", bg: "#EEF2FF" },
+  survey: { key: "survey", label: "アンケートの回答状況", color: "#EA580C", bg: "#FFF4E5" },
+  pick: { key: "pick", label: "個別選択", color: "#7C3AED", bg: "#F3E8FF" },
+};
+// 出欠グループ／回答状況の色（出席・回答済み=緑、到着=青、欠席=赤、未回答=灰／橙）
+const EVENT_GROUP_COLOR = { yes: "#059947", arrived: "#0891B2", no: "#DC2626", none: "#6B7280" };
+const SURVEY_GROUP_COLOR = { answered: "#059947", unanswered: "#D97706" };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -465,6 +475,7 @@ function AdminBody({
   const [pickView, setPickView] = useState(null);
   const [pickSel, setPickSel] = useState(() => new Set());
   const [pickSearch, setPickSearch] = useState("");
+  const [tpView, setTpView] = useState(null); // 配信対象モーダルの画面: null=トップ / "event"=イベントを選ぶ / "survey"=アンケートを選ぶ
   // 面談記録
   const [meetOpen, setMeetOpen] = useState(false);
   const [meetEditId, setMeetEditId] = useState(null);
@@ -890,6 +901,8 @@ function AdminBody({
     : isSurveyTarget
     ? `${targetSurvey ? targetSurvey.title : "アンケート"}・${surveyGroupLabelOf(tSGroup)}`
     : target;
+  // 現在の配信対象のカテゴリ（色分け用）
+  const targetCat = isPickTarget ? TARGET_CAT.pick : isEventTarget ? TARGET_CAT.event : isSurveyTarget ? TARGET_CAT.survey : TARGET_CAT.status;
 
   // この配信で使うLINE送信数（＝連携済みの宛先数）。無料枠の消費見込み
   const lineTargetCount = targetRecipientList.filter((s) => s.lineUserId).length;
@@ -4401,14 +4414,15 @@ function AdminBody({
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
             <div>
               <p className="text-xs font-bold text-gray-500 mb-2">配信対象</p>
-              <button onClick={() => setShowTargetPicker(true)}
-                className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left bg-white"
-                style={{ borderColor: BRAND }}>
+              <button onClick={() => { setTpView(isEventTarget ? "event" : isSurveyTarget ? "survey" : null); setShowTargetPicker(true); }}
+                className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left"
+                style={{ borderColor: targetCat.color, background: targetCat.bg }}>
                 <span className="min-w-0">
-                  <span className="block text-sm font-bold truncate" style={{ color: BRAND }}>{targetLabel}</span>
+                  <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mb-1 text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
+                  <span className="block text-sm font-bold truncate" style={{ color: targetCat.color }}>{targetLabel}</span>
                   <span className="block text-xs text-gray-500 mt-0.5">{targetCount}名が対象</span>
                 </span>
-                <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>変更</span>
+                <span className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border bg-white" style={{ borderColor: targetCat.color, color: targetCat.color }}>変更</span>
               </button>
               {isPickTarget && (
                 <div className="mt-2 rounded-lg p-2.5 text-xs" style={{ background: "#F4F7F6", color: INK }}>
@@ -5277,10 +5291,15 @@ function AdminBody({
 
       {/* 配信対象を選ぶモーダル */}
       {showTargetPicker && (() => {
-        const pick = (t) => { setTarget(t); setShowTargetPicker(false); };
+        const closePicker = () => { setShowTargetPicker(false); setTpView(null); };
+        const pick = (t) => { setTarget(t); closePicker(); };
         const chip = (active) => (active
           ? { background: BRAND, color: "#fff", borderColor: BRAND }
           : { borderColor: "#D7DEDB", color: INK, background: "#fff" });
+        // 色つきチップ（選択中＝塗り、未選択＝白地に色の枠と文字）
+        const chipC = (active, color) => (active
+          ? { background: color, color: "#fff", borderColor: color }
+          : { borderColor: `${color}80`, color, background: "#fff" });
         // 個別選択の画面を開く（base＝選べる学生の母集団、label＝配信対象の表示名）
         const openPick = (base, label) => {
           const baseIds = new Set(base.map((s) => s.id));
@@ -5297,7 +5316,7 @@ function AdminBody({
           setPickLabel(pickView.label);
           setTarget("pick");
           closePick();
-          setShowTargetPicker(false);
+          closePicker();
         };
         const togglePick = (id) => setPickSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
         const q = pickSearch.trim().toLowerCase();
@@ -5369,113 +5388,191 @@ function AdminBody({
             </div>
           );
         }
-        return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
-            onClick={() => setShowTargetPicker(false)}>
-            <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
-              onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
-                <div className="min-w-0">
-                  <p className="text-xs text-gray-400">配信対象を選ぶ</p>
-                  <p className="text-base font-bold mt-0.5 truncate">{targetLabel}・{targetCount}名</p>
-                </div>
-                <button onClick={() => setShowTargetPicker(false)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
-              </div>
-              <div className="overflow-y-auto px-5 py-4 space-y-5">
-                <div>
-                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">ステータス別</p>
-                  <div className="flex flex-wrap gap-2">
-                    {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
-                      <button key={t} onClick={() => pick(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
-                        style={chip(!isEventTarget && !isSurveyTarget && !isPickTarget && target === t)}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+        // 現在の対象を色つきで示すヘッダー（トップ／イベント／アンケートの各画面で共通）
+        const currentTag = (
+          <p className="text-base font-bold mt-0.5 truncate flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
+            <span className="truncate" style={{ color: targetCat.color }}>{targetLabel}</span>
+            <span className="shrink-0 text-xs font-bold text-gray-500">・{targetCount}名</span>
+          </p>
+        );
+        const freshnessNote = (
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            人数は「回答状況を更新」で取得した時点のものです。最新にするには概況タブの更新ボタンを押してください。
+          </p>
+        );
 
-                <div>
-                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">学生を個別に選んで送る</p>
-                  <button onClick={() => openPick(activeStudents, "個別選択")}
-                    className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left"
-                    style={chip(isPickTarget && pickLabel === "個別選択")}>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-bold truncate">登録済みの学生から選ぶ</span>
-                      <span className="block text-xs mt-0.5" style={{ opacity: 0.75 }}>
-                        {isPickTarget && pickLabel === "個別選択" ? `${pickList.length}名を選択中・タップで選び直す` : `${activeStudents.length}名から1人ずつ選べます`}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs font-bold">選ぶ</span>
+        // ---- イベント／アンケートを選ぶ画面 ----
+        if (tpView === "event" || tpView === "survey") {
+          const isEv = tpView === "event";
+          const cat = TARGET_CAT[tpView];
+          const list = isEv ? yearEvents : yearSurveys;
+          return (
+            <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+              onClick={closePicker}>
+              <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
+                onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-2 p-4 pb-3 border-b shrink-0" style={{ background: cat.bg, borderColor: `${cat.color}33` }}>
+                  <button onClick={() => setTpView(null)} aria-label="配信対象の選択へ戻る"
+                    className="shrink-0 p-1.5 rounded-full bg-white border" style={{ color: cat.color, borderColor: `${cat.color}55` }}>
+                    <ChevronLeft size={18} />
                   </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold" style={{ color: cat.color }}>{cat.label}で送る</p>
+                    <p className="text-base font-bold truncate" style={{ color: INK }}>{isEv ? "イベントを選ぶ" : "アンケートを選ぶ"}</p>
+                  </div>
+                  <button onClick={closePicker} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-white"><X size={20} /></button>
                 </div>
-
-                <div>
-                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">イベントの参加状況で送る</p>
-                  {yearEvents.length === 0 ? (
-                    <p className="text-xs text-gray-400">この年度のイベントはまだありません。</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {yearEvents.map((e) => (
-                        <div key={e.id} className="border border-gray-200 rounded-xl p-2.5">
-                          <p className="text-sm font-bold truncate">{e.title}</p>
-                          <p className="text-xs text-gray-400 mb-1.5">{e.dateStr || "日付未定"}</p>
+                <div className="overflow-y-auto px-5 py-4 space-y-3 flex-1">
+                  <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2" style={{ background: "#F4F7F6" }}>
+                    <span className="shrink-0 text-gray-400 font-bold">現在</span>
+                    {currentTag}
+                  </div>
+                  {/* 色の凡例 */}
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500">
+                    {(isEv ? ["yes", "arrived", "no", "none"] : ["unanswered", "answered"]).map((g) => (
+                      <span key={g} className="inline-flex items-center gap-1">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: isEv ? EVENT_GROUP_COLOR[g] : SURVEY_GROUP_COLOR[g] }} />
+                        {isEv ? groupLabelOf(g) : surveyGroupLabelOf(g)}
+                      </span>
+                    ))}
+                    {!isEv && (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: TARGET_CAT.pick.color }} />回答済みから個別に選ぶ
+                      </span>
+                    )}
+                  </div>
+                  {list.length === 0 ? (
+                    <p className="text-xs text-gray-400 py-4">この年度の{isEv ? "イベント" : "アンケート"}はまだありません。</p>
+                  ) : isEv ? (
+                    yearEvents.map((e) => {
+                      const on = isEventTarget && tEventId === e.id;
+                      return (
+                        <div key={e.id} className="rounded-xl p-3 border" style={{ borderColor: on ? cat.color : "#E5E7EB", borderLeftWidth: 4, borderLeftColor: cat.color, background: on ? cat.bg : "#fff" }}>
+                          <p className="text-sm font-bold truncate" style={{ color: INK }}>{e.title}</p>
+                          <p className="text-xs text-gray-400 mb-2">{e.dateStr || "日付未定"}・対象 {eventAudience(e).length}名</p>
                           <div className="flex flex-wrap gap-1.5">
                             {["yes", "arrived", "no", "none"].map((g) => {
                               const n = eventGroupList(e, g).length;
                               return (
-                                <button key={g} onClick={() => pick(`event:${e.id}:${g}`)}
-                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border"
-                                  style={chip(isEventTarget && tEventId === e.id && tGroup === g)}>
+                                <button key={g} onClick={() => pick(`event:${e.id}:${g}`)} disabled={n === 0}
+                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                                  style={chipC(on && tGroup === g, EVENT_GROUP_COLOR[g])}>
                                   {groupLabelOf(g)} {n}名
                                 </button>
                               );
                             })}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })
+                  ) : (
+                    yearSurveys.map((sv) => {
+                      const on = isSurveyTarget && tSurveyId === sv.id;
+                      const label = `${sv.title}・回答済みから選択`;
+                      const pickOn = isPickTarget && pickLabel === label;
+                      const answered = surveyGroupList(sv, "answered");
+                      return (
+                        <div key={sv.id} className="rounded-xl p-3 border" style={{ borderColor: on || pickOn ? cat.color : "#E5E7EB", borderLeftWidth: 4, borderLeftColor: cat.color, background: on || pickOn ? cat.bg : "#fff" }}>
+                          <p className="text-sm font-bold truncate" style={{ color: INK }}>{sv.title}</p>
+                          <p className="text-xs text-gray-400 mb-2">{sv.dueDate ? `期限 ${sv.due || sv.dueDate}` : "期限なし"}・対象 {surveyAudience(sv).length}名</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {["unanswered", "answered"].map((g) => {
+                              const n = surveyGroupList(sv, g).length;
+                              return (
+                                <button key={g} onClick={() => pick(`survey:${sv.id}:${g}`)} disabled={n === 0}
+                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                                  style={chipC(on && tSGroup === g, SURVEY_GROUP_COLOR[g])}>
+                                  {surveyGroupLabelOf(g)} {n}名
+                                </button>
+                              );
+                            })}
+                            <button onClick={() => openPick(answered, label)} disabled={answered.length === 0}
+                              className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                              style={chipC(pickOn, TARGET_CAT.pick.color)}>
+                              回答済みから選ぶ{pickOn ? ` ${pickList.length}名` : ""}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
+                  {freshnessNote}
+                </div>
+                <div className="shrink-0 border-t border-gray-100 p-4">
+                  <button onClick={() => setTpView(null)} className="w-full text-xs font-bold px-3 py-2.5 rounded-lg border border-gray-300 text-gray-600">配信対象の選択へ戻る</button>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // ---- トップ：ステータス別 → イベント／アンケートのボタン → 個別選択 ----
+        const catButton = (cat, view, count, noun, selectedText) => (
+          <button onClick={() => setTpView(view)} disabled={count === 0}
+            className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left disabled:opacity-50"
+            style={{ borderColor: targetCat.key === cat.key ? cat.color : `${cat.color}66`, background: cat.bg }}>
+            <span className="min-w-0">
+              <span className="block text-sm font-bold" style={{ color: cat.color }}>{cat.label}で送る</span>
+              <span className="block text-xs mt-0.5 truncate" style={{ color: INK, opacity: 0.8 }}>
+                {count === 0 ? `この年度の${noun}はまだありません` : selectedText || `${noun} ${count}件から選ぶ`}
+              </span>
+            </span>
+            <ChevronRight size={18} className="shrink-0" style={{ color: cat.color }} />
+          </button>
+        );
+        return (
+          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+            onClick={closePicker}>
+            <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
+              onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400">配信対象を選ぶ</p>
+                  {currentTag}
+                </div>
+                <button onClick={closePicker} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+              </div>
+              <div className="overflow-y-auto px-5 py-4 space-y-5">
+                <div>
+                  <p className="text-[11px] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.status.color }}>
+                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: TARGET_CAT.status.color }} />ステータス別
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {["全員", "内定者（承諾前）", "内定承諾者", "タスク未完了者"].map((t) => (
+                      <button key={t} onClick={() => pick(t)} className="text-xs font-bold px-3 py-2 rounded-full border"
+                        style={chipC(!isEventTarget && !isSurveyTarget && !isPickTarget && target === t, TARGET_CAT.status.color)}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[11px] font-bold text-gray-400">イベント・アンケートで絞る</p>
+                  {catButton(TARGET_CAT.event, "event", yearEvents.length, "イベント",
+                    isEventTarget ? `選択中：${targetLabel}・${targetCount}名（タップで変更）` : null)}
+                  {catButton(TARGET_CAT.survey, "survey", yearSurveys.length, "アンケート",
+                    isSurveyTarget || (isPickTarget && pickLabel !== "個別選択") ? `選択中：${targetLabel}・${targetCount}名（タップで変更）` : null)}
                 </div>
 
                 <div>
-                  <p className="text-[11px] font-bold text-gray-400 mb-1.5">アンケートの回答状況で送る</p>
-                  {yearSurveys.length === 0 ? (
-                    <p className="text-xs text-gray-400">この年度のアンケートはまだありません。</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {yearSurveys.map((sv) => (
-                        <div key={sv.id} className="border border-gray-200 rounded-xl p-2.5">
-                          <p className="text-sm font-bold truncate">{sv.title}</p>
-                          <p className="text-xs text-gray-400 mb-1.5">{sv.dueDate ? `期限 ${sv.due || sv.dueDate}` : "期限なし"}・対象 {surveyAudience(sv).length}名</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {["unanswered", "answered"].map((g) => (
-                              <button key={g} onClick={() => pick(`survey:${sv.id}:${g}`)}
-                                className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border"
-                                style={chip(isSurveyTarget && tSurveyId === sv.id && tSGroup === g)}>
-                                {surveyGroupLabelOf(g)} {surveyGroupList(sv, g).length}名
-                              </button>
-                            ))}
-                            {(() => {
-                              const label = `${sv.title}・回答済みから選択`;
-                              const on = isPickTarget && pickLabel === label;
-                              const answered = surveyGroupList(sv, "answered");
-                              return (
-                                <button onClick={() => openPick(answered, label)} disabled={answered.length === 0}
-                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
-                                  style={chip(on)}>
-                                  回答済みから選ぶ{on ? ` ${pickList.length}名` : ""}
-                                </button>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <p className="text-[11px] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.pick.color }}>
+                    <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: TARGET_CAT.pick.color }} />学生を個別に選んで送る
+                  </p>
+                  <button onClick={() => openPick(activeStudents, "個別選択")}
+                    className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left"
+                    style={{ borderColor: isPickTarget && pickLabel === "個別選択" ? TARGET_CAT.pick.color : `${TARGET_CAT.pick.color}66`, background: TARGET_CAT.pick.bg }}>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-bold truncate" style={{ color: TARGET_CAT.pick.color }}>登録済みの学生から選ぶ</span>
+                      <span className="block text-xs mt-0.5" style={{ color: INK, opacity: 0.8 }}>
+                        {isPickTarget && pickLabel === "個別選択" ? `${pickList.length}名を選択中・タップで選び直す` : `${activeStudents.length}名から1人ずつ選べます`}
+                      </span>
+                    </span>
+                    <ChevronRight size={18} className="shrink-0" style={{ color: TARGET_CAT.pick.color }} />
+                  </button>
                 </div>
-                <p className="text-[11px] text-gray-400 leading-relaxed">
-                  人数は「回答状況を更新」で取得した時点のものです。最新にするには概況タブの更新ボタンを押してください。
-                </p>
+                {freshnessNote}
               </div>
             </div>
           </div>
