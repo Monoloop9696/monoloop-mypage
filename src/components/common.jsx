@@ -10,12 +10,12 @@ export function SectionTitle({ children }) {
   );
 }
 
-// 学生側：セクション見出し（英字キャプション＋明朝）
+// 学生側：セクション見出し。en（英字キャプション）は任意。内定者マイページ本体は日本語の見出しだけにしている
 export function EdHeader({ en, jp, note }) {
   return (
     <div className="mb-5">
-      <p style={caps(10, GOLD)}>{en}</p>
-      <div className="flex items-end justify-between mt-1.5">
+      {en && <p style={caps(10, GOLD)}>{en}</p>}
+      <div className={`flex items-end justify-between ${en ? "mt-1.5" : ""}`}>
         <h2 className="jp-mincho font-bold" style={{ fontSize: 21, lineHeight: 1.3 }}>
           {jp}
         </h2>

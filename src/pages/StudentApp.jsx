@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Calendar, ClipboardList, MessageCircle, Newspaper,
-  ChevronRight, MapPin, Clock, X, Check, LogOut, Bell, Download,
+  ChevronRight, MapPin, Clock, X, Check, LogOut, Download,
   Menu, HelpCircle, User, Send,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { EdHeader, FullLoader, TimeSelect } from "../components/common";
 import {
-  PAPER, PINK, ROSE, ROSE_DEEP, IVORY, MAUVE, GOLD, HAIR, MUTE, INK, LINE_GREEN,
-  studentFontStyle, caps,
+  PAPER, PINK, ROSE, ROSE_DEEP, IVORY, MAUVE, GOLD, MAUVE_INK, GOLD_INK, HAIR, MUTE, INK, LINE_GREEN,
+  studentFontStyle, caps as baseCaps,
 } from "../theme";
+import { buildTasks } from "../lib/studentTasks";
+
+// 小さなラベル（状態タグなど）。内定者マイページでは最小12pxにそろえる（他ページの見た目は変えない）
+const caps = (size = 12, color = MAUVE_INK, ls = "0.12em") => baseCaps(Math.max(size, 12), color, ls);
 import {
   listenStudent, listenPublishedEvents, listenPublishedSurveys, listenJourney,
   listenMyRsvps, listenMyResponses, listenNotices, listenPublishedArticles,
@@ -38,9 +42,20 @@ const LOOPCHAN = {
   latenight: { img: "/loopchan/loopchan-7.png", msg: "まだ起きてるの？無理せず早めに休もう〜" },
   // LINE未連携のあいだは時間帯の挨拶より優先して連携をお願いする（吹き出しタップでLINE連携へ）
   line: { img: "/loopchan/loopchan-4.png", msg: "公式LINEと連携すると、イベント前日のリマインドが届くよ！まずは連携をお願い📱", goLine: true },
+  // やること（未対応のタスク）が残っているあいだは、時間帯の挨拶より優先して知らせる
+  tasks: (n) => ({ img: "/loopchan/loopchan-4.png", msg: `やることが${n}件あるよ。上から順にどうぞ！` }),
 };
 
-function pickLoopChan(student, events, lineLinked = true) {
+// ホーム「やること」カードの見た目（種類ごとのアイコン・色・ボタン文言）
+const TASK_META = {
+  line: { icon: MessageCircle, bg: "#E3F8EB", fg: "#05803A", btn: "連携する", btnBg: LINE_GREEN },
+  event: { icon: Calendar, bg: "#E6EEFC", fg: "#2457C5", btn: "回答する", btnBg: ROSE },
+  survey: { icon: ClipboardList, bg: "#FEF1DC", fg: "#B45309", btn: "回答する", btnBg: ROSE },
+  interview: { icon: Clock, bg: "#F3E8FF", fg: "#7C3AED", btn: "登録する", btnBg: ROSE },
+  profile: { icon: User, bg: "#FCE3EF", fg: ROSE_DEEP, btn: "登録する", btnBg: ROSE },
+};
+
+function pickLoopChan(student, events, lineLinked = true, taskCount = 0) {
   const now = new Date();
   const h = now.getHours();
   // 誕生日（student.birth = "YYYY-MM-DD"）
@@ -55,6 +70,8 @@ function pickLoopChan(student, events, lineLinked = true) {
   if (ev) return LOOPCHAN.event(ev.title);
   // LINE未連携（誕生日・イベント当日より後、時間帯より前）
   if (!lineLinked) return LOOPCHAN.line;
+  // 未対応のタスクが残っている
+  if (taskCount > 0) return LOOPCHAN.tasks(taskCount);
   // 時間帯
   if (h >= 5 && h < 10) return LOOPCHAN.morning;
   if (h >= 10 && h < 14) return LOOPCHAN.noon;
@@ -78,24 +95,6 @@ export function slotText(slot, withMins = false) {
   const a = toMin(slot.start); const b = toMin(slot.end);
   const mins = a != null && b != null && b > a ? b - a : null;
   return `${m}/${d}(${w}) ${slot.start} - ${slot.end}${withMins && mins ? `（${mins}分）` : ""}`;
-}
-
-// ホームの日付・時刻表示（毎秒更新）
-function HomeClock() {
-  const [now, setNow] = useState(new Date());
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const wd = ["日", "月", "火", "水", "木", "金", "土"][now.getDay()];
-  const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日（${wd}）`;
-  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-  return (
-    <div className="flex items-baseline gap-2 mt-2">
-      <span className="text-sm font-bold" style={{ color: INK }}>{dateStr}</span>
-      <span className="en-serif" style={{ fontSize: 18, letterSpacing: "0.04em", color: ROSE }}>{timeStr}</span>
-    </div>
-  );
 }
 
 export default function StudentApp() {
@@ -168,7 +167,6 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [tab, setTab] = useState(justSignedUp ? "line" : "home");
   const [activeSurvey, setActiveSurvey] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [qData, setQData] = useState({ mine: [], faq: [] });
   const [qText, setQText] = useState("");
   const [qBusy, setQBusy] = useState(false);
@@ -324,7 +322,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   };
 
   // モーダル表示中は背面をスクロール・操作できないようにする
-  useBodyScrollLock(!!(activeSurvey || activeArticle || showProfile || celebrate || menuOpen || interviewOpen));
+  useBodyScrollLock(!!(activeSurvey || activeArticle || showProfile || celebrate || interviewOpen));
 
   const profileDone = !!(student.address && student.phone);
   // 管理者がステータスを「承諾」にすると、学生側の表示が切り替わる
@@ -396,9 +394,6 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     myEvents.filter((e) => e.rsvp !== null).length +
     (profileDone ? 1 : 0);
   const totalCount = mySurveys.length + myEvents.length + 1;
-
-  // ループちゃん（時間帯・誕生日・イベントでポーズ＆吹き出しを出し分け）
-  const loop = pickLoopChan(student, myEvents, lineLinked);
 
   const doRsvp = (id, v) => {
     if (readOnly) {
@@ -593,32 +588,49 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
   const statusTag = (e) =>
     e.rsvp === null ? (
-      <span className="px-2 py-1" style={{ ...caps(9, GOLD, "0.15em"), border: `1px solid ${GOLD}` }}>出欠未回答</span>
+      <span className="px-2 py-1" style={{ ...caps(9, GOLD_INK, "0.15em"), border: `1px solid ${GOLD}` }}>出欠未回答</span>
     ) : e.rsvp === "yes" ? (
       <span className="px-2 py-1" style={{ ...caps(9, ROSE, "0.15em"), background: "#F7E2EA" }}>出席</span>
     ) : (
-      <span className="px-2 py-1" style={{ ...caps(9, "#9B8A8B", "0.15em"), background: "#EFE6E3" }}>欠席</span>
+      <span className="px-2 py-1" style={{ ...caps(9, MUTE, "0.15em"), background: "#EFE6E3" }}>欠席</span>
     );
-
-  const tabs = [
-    { key: "home", label: "HOME", icon: Home },
-    { key: "event", label: "EVENTS", icon: Calendar },
-    { key: "survey", label: "SURVEY", icon: ClipboardList },
-    { key: "news", label: "NEWS", icon: Newspaper },
-  ];
 
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
-  // 上部アラート：未対応タスクの集約（受付終了＝期日超過は対象外）
-  const pendingEvents = myEvents.filter((e) => e.rsvp === null && !eventClosed(e)).length;
-  const pendingSurveys = mySurveys.filter((s) => !s.done && !surveyClosed(s)).length;
-  const alerts = [];
-  if (pendingEvents) alerts.push({ label: `出欠未回答 ${pendingEvents}件`, onTap: () => setTab("event") });
-  if (pendingSurveys) alerts.push({ label: `未回答アンケート ${pendingSurveys}件`, onTap: () => setTab("survey") });
-  if (!profileDone) alerts.push({ label: "基本情報が未登録", onTap: () => setShowProfile(true) });
-  if (myInterview && !myBooking && !myProposal) alerts.push({ label: "面談の希望日時が未提出", onTap: openInterview });
-  // LINE未連携は常に先頭・強調表示（連絡が届かなくなるため最優先で促す）
-  if (!lineLinked) alerts.unshift({ label: "LINE連携をお願いします", onTap: () => setTab("line"), strong: true });
+  // ホームの「やること」：未対応タスクの集約（受付終了＝期日超過は対象外）。
+  // LINE未連携を先頭に、残りは期限が近い順（並びと期限の文言は lib/studentTasks.js）
+  const openEvents = myEvents.filter((e) => e.rsvp === null && !eventClosed(e));
+  const openSurveys = mySurveys.filter((s) => !s.done && !surveyClosed(s));
+  const pendingEvents = openEvents.length;
+  const pendingSurveys = openSurveys.length;
+  const tasks = buildTasks({
+    lineLinked, profileDone,
+    interview: myInterview && !myBooking && !myProposal ? { dueDate: myInterview.dueDate } : null,
+    events: openEvents, surveys: openSurveys, todayStr,
+  });
+  const runTask = (t) => {
+    if (t.kind === "line") setTab("line");
+    else if (t.kind === "profile") setShowProfile(true);
+    else if (t.kind === "interview") openInterview();
+    else if (t.kind === "event") { setTab("event"); setFocusEventId(t.id); }
+    else if (t.kind === "survey") {
+      const s = mySurveys.find((x) => x.id === t.id);
+      if (s) { setActiveSurvey(s); setSvAnswers({}); setSvPath([]); }
+    }
+  };
+
+  // ループちゃん（誕生日・イベント当日・LINE未連携・やること・時間帯でポーズ＆吹き出しを出し分け）
+  const loop = pickLoopChan(student, myEvents, lineLinked, tasks.length);
+
+  // 下部ナビ（日本語5項目）。質問箱・LINE連携・プロフィール・ログアウトは「メニュー」にまとめる
+  const tabs = [
+    { key: "home", label: "ホーム", icon: Home, badge: 0 },
+    { key: "event", label: "イベント", icon: Calendar, badge: pendingEvents },
+    { key: "survey", label: "アンケート", icon: ClipboardList, badge: pendingSurveys },
+    { key: "news", label: "お知らせ", icon: Newspaper, badge: 0 },
+    { key: "menu", label: "メニュー", icon: Menu, badge: (lineLinked ? 0 : 1) + (profileDone ? 0 : 1) },
+  ];
+  const MENU_TABS = ["menu", "line", "questions"];
 
   return (
     <div className="min-h-screen" style={{ background: PAPER, ...studentFontStyle }}>
@@ -630,116 +642,100 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 22, width: "auto" }} />
             <div>
               <p className="en-serif font-bold leading-none" style={{ fontSize: 15, fontStyle: "italic", color: ROSE }}>Monoloop</p>
-              <p className="leading-none mt-1" style={caps(8, MAUVE, "0.2em")}>My Page</p>
+              <p className="leading-none mt-1 font-bold" style={{ fontSize: 11, color: MUTE }}>内定者マイページ</p>
             </div>
-          </div>
-          <div className="relative">
-            <button onClick={() => setMenuOpen((v) => !v)} className="p-1.5 rounded-full" style={{ color: MUTE }} aria-label="メニュー">
-              <Menu size={20} />
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 mt-1 z-50 bg-white rounded-xl shadow-xl overflow-hidden"
-                  style={{ border: `1px solid ${HAIR}`, minWidth: 176 }}>
-                  {[
-                    { label: "質問箱", icon: HelpCircle, onClick: () => setTab("questions") },
-                    { label: "LINE連携", icon: MessageCircle, onClick: () => setTab("line") },
-                    { label: "プロフィール", icon: User, onClick: () => setShowProfile(true) },
-                    { label: "ログアウト", icon: LogOut, onClick: signOut },
-                  ].map((m) => {
-                    const Icon = m.icon;
-                    return (
-                      <button key={m.label} onClick={() => { setMenuOpen(false); m.onClick(); }}
-                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-left"
-                        style={{ color: INK, borderBottom: `1px solid ${HAIR}` }}>
-                        <Icon size={15} style={{ color: MUTE }} /> {m.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
           </div>
         </header>
 
-        {/* 上部アラート（未対応タスク） */}
+        {/* 送信完了などの短い通知 */}
         {toast && (
           <div className="fixed left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-full text-xs font-bold shadow-lg"
             style={{ top: 72, background: INK, color: "#fff", maxWidth: "90%" }}>
             {toast}
           </div>
         )}
-        {alerts.length > 0 && (
-          <div className="px-4 py-2.5 flex items-center gap-2 overflow-x-auto"
-            style={{ background: "#FFF3E0", borderBottom: `1px solid ${HAIR}` }}>
-            <span className="shrink-0 flex items-center gap-1 text-xs font-bold" style={{ color: "#B45309" }} aria-hidden="true">
-              <Bell size={13} /> 未対応
-            </span>
-            {alerts.map((a) => (
-              <button key={a.label} onClick={a.onTap} disabled={readOnly}
-                className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full disabled:opacity-70"
-                style={a.strong
-                  ? { background: LINE_GREEN, color: "#fff", border: `1px solid ${LINE_GREEN}` }
-                  : { background: "#fff", color: "#B45309", border: "1px solid #F5D08C" }}>
-                {a.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="pb-32">
+        <div className="pb-28">
           {/* ホーム */}
           {tab === "home" && (
             <div>
-              <section className="relative overflow-hidden ml-in"
-                style={{ background: `linear-gradient(165deg, #FCE1EA 0%, ${PINK} 100%)` }}>
-                <div className="px-6 pt-8 pb-9 relative">
-                  <p style={caps(10, ROSE)}>Monoloop Onboarding — Class of {grad}</p>
-                  <h1 className="font-bold mt-3 flex items-baseline flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 20, color: INK }}>
-                    <span>こんにちは、{studentName}さん。</span>
-                    {accepted && (
-                      <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
-                    )}
-                  </h1>
-                  <HomeClock />
-
-                  {/* ループちゃん＋吹き出し */}
-                  <div className="flex items-end gap-3 mt-5">
-                    <img src={loop.img} alt="ループちゃん" className="ml-float shrink-0"
-                      style={{ width: 108, height: 108, objectFit: "contain" }} />
-                    <div className="flex-1 mb-5">
-                      <div className="bg-white px-4 py-3 shadow-sm"
-                        role={loop.goLine && !readOnly ? "button" : undefined}
-                        onClick={loop.goLine && !readOnly ? () => setTab("line") : undefined}
-                        style={{ borderRadius: 18, borderBottomLeftRadius: 4, cursor: loop.goLine && !readOnly ? "pointer" : "default" }}>
-                        <p className="text-sm font-bold leading-relaxed" style={{ color: ROSE_DEEP }}>{loop.msg}</p>
-                        {loop.goLine && (
-                          <p className="text-xs font-bold mt-1.5" style={{ color: LINE_GREEN }}>LINE連携へ →</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6">
-                    <div className="flex justify-between items-baseline mb-2">
-                      <p style={caps(9, ROSE)}>Onboarding progress</p>
-                      <p className="font-bold" style={{ fontSize: 14, color: ROSE }}>
-                        {doneCount} <span style={{ opacity: 0.5 }}>/ {totalCount}</span>
-                      </p>
-                    </div>
-                    <div style={{ height: 5, background: "rgba(228,0,127,0.14)", borderRadius: 999 }}>
-                      <div style={{ height: 5, width: `${totalCount ? (doneCount / totalCount) * 100 : 0}%`, background: ROSE, borderRadius: 999, transition: "width .6s ease" }} />
+              {/* あいさつ（ループちゃん＋吹き出し）。やることが最初の1画面に入るよう低くしている */}
+              <section className="px-4 pt-4 ml-in">
+                <div className="flex items-center gap-3 px-3.5 py-3"
+                  style={{ background: `linear-gradient(165deg, #FCE1EA 0%, ${PINK} 100%)`, borderRadius: 18 }}>
+                  <img src={loop.img} alt="ループちゃん" className="ml-float shrink-0"
+                    style={{ width: 84, height: 84, objectFit: "contain" }} />
+                  <div className="flex-1 min-w-0">
+                    <h1 className="font-bold flex items-center flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 17, lineHeight: 1.35, color: INK }}>
+                      <span>こんにちは、{studentName}さん</span>
+                      {accepted && (
+                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
+                      )}
+                    </h1>
+                    <div className="bg-white px-3 py-2 mt-2 shadow-sm"
+                      role={loop.goLine && !readOnly ? "button" : undefined}
+                      onClick={loop.goLine && !readOnly ? () => setTab("line") : undefined}
+                      style={{ borderRadius: 14, borderBottomLeftRadius: 4, cursor: loop.goLine && !readOnly ? "pointer" : "default" }}>
+                      <p className="font-bold leading-relaxed" style={{ fontSize: 13, color: ROSE_DEEP }}>{loop.msg}</p>
+                      {loop.goLine && (
+                        <p className="text-xs font-bold mt-1" style={{ color: "#05803A" }}>LINE連携へ →</p>
+                      )}
                     </div>
                   </div>
                 </div>
+              </section>
+
+              {/* やること（未対応のタスク。LINE連携→期限が近い順） */}
+              <section className="px-4 mt-6 ml-in">
+                <div className="flex items-center gap-2 mb-2.5 px-1">
+                  <h2 className="font-bold" style={{ fontSize: 18 }}>やること</h2>
+                  {tasks.length > 0 && (
+                    <span className="font-bold flex items-center justify-center"
+                      style={{ background: "#C81E1E", color: "#fff", fontSize: 12, minWidth: 20, height: 20, padding: "0 6px", borderRadius: 10 }}>{tasks.length}</span>
+                  )}
+                  <span className="ml-auto text-xs font-bold" style={{ color: MUTE }}>完了 {doneCount} / {totalCount}</span>
+                </div>
+                {tasks.length === 0 ? (
+                  <div className="flex items-center gap-2 px-4 py-3.5 text-sm font-bold"
+                    style={{ background: "#E4F6EC", color: "#0A8F4D", borderRadius: 14 }}>
+                    <Check size={17} strokeWidth={3} /> いま対応が必要なものはありません
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {tasks.map((t) => {
+                      const meta = TASK_META[t.kind];
+                      const Icon = meta.icon;
+                      const sub = [t.note, t.due && `期限 ${t.due.date}`].filter(Boolean).join("・");
+                      return (
+                        <button key={t.key} onClick={() => runTask(t)} disabled={readOnly && t.kind === "interview"}
+                          className="w-full text-left bg-white flex items-center gap-3 p-3 disabled:opacity-60"
+                          style={{ border: `1px solid ${HAIR}`, borderRadius: 14 }}>
+                          <span className="shrink-0 flex items-center justify-center"
+                            style={{ width: 40, height: 40, borderRadius: 10, background: meta.bg, color: meta.fg }}>
+                            <Icon size={20} />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block font-bold" style={{ fontSize: 14, lineHeight: 1.4 }}>{t.title}</span>
+                            <span className="block text-xs mt-0.5" style={{ color: MUTE }}>
+                              {sub}
+                              {t.due && (
+                                <span className="font-bold" style={{ color: t.due.urgent ? "#C81E1E" : "#B45309" }}>{sub ? "・" : ""}{t.due.leftText}</span>
+                              )}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-xs font-bold px-3 flex items-center"
+                            style={{ minHeight: 36, borderRadius: 10, background: meta.btnBg, color: "#fff" }}>{meta.btn}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
 
               <div className="px-6 mt-10 space-y-12">
                 {/* 面談の日程調整 */}
                 {myInterview && (
                   <section className="ml-in">
-                    <EdHeader en="Interview" jp="面談のご案内" />
+                    <EdHeader jp="面談のご案内" />
                     <div className="bg-white p-6 ml-in" style={{ border: `1px solid ${HAIR}` }}>
                       {myBooking ? (
                         <>
@@ -768,7 +764,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                           <p className="jp-mincho font-bold" style={{ fontSize: 17 }}>{myInterview.title || "面談の日程調整"}</p>
                           {myInterview.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{myInterview.desc}</p>}
                           {myInterview.dueDate && (
-                            <p className="text-xs mt-2 font-bold" style={{ color: GOLD }}>
+                            <p className="text-xs mt-2 font-bold" style={{ color: GOLD_INK }}>
                               {Number(myInterview.dueDate.slice(5, 7))}/{Number(myInterview.dueDate.slice(8, 10))} までにご回答ください
                             </p>
                           )}
@@ -810,7 +806,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
                 {/* ジャーニー */}
                 <section className="ml-in ml-in-1">
-                  <EdHeader en="Journey" jp="入社までの道のり" />
+                  <EdHeader jp="入社までの道のり" />
                   <div>
                     {milestones.map((m, i) => {
                       const state = displayState(m, i);
@@ -819,25 +815,25 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         <div className="flex items-start gap-4 py-5"
                           style={{ borderBottom: i < milestones.length - 1 ? `1px solid ${HAIR}` : "none" }}>
                           <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 22, lineHeight: 1, width: 34,
-                            color: state === "done" ? MAUVE : state === "now" ? GOLD : "#D9C4CB" }}>
+                            color: state === "done" ? MAUVE_INK : state === "now" ? GOLD_INK : MUTE }}>
                             {String(i + 1).padStart(2, "0")}
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-3">
-                              <p className="jp-mincho font-bold" style={{ fontSize: 16, color: state === "next" ? "#A78F98" : INK }}>{m.label}</p>
+                              <p className="jp-mincho font-bold" style={{ fontSize: 16, color: state === "next" ? MUTE : INK }}>{m.label}</p>
                               {state === "done" && (
                                 m.expired
-                                  ? <span style={caps(9, "#B7A2AA", "0.18em")}>Closed</span>
-                                  : <span className="flex items-center gap-1.5" style={caps(9, MAUVE, "0.18em")}><Check size={11} strokeWidth={3} /> Done</span>
+                                  ? <span style={caps(9, MUTE, "0.18em")}>終了</span>
+                                  : <span className="flex items-center gap-1.5" style={caps(9, MAUVE_INK, "0.18em")}><Check size={11} strokeWidth={3} /> 完了</span>
                               )}
                               {state === "now" && (
-                                <span className="flex items-center gap-1.5" style={caps(9, GOLD, "0.18em")}>
-                                  <span className="ml-blink inline-block w-1.5 h-1.5 rounded-full" style={{ background: GOLD }} /> Now
+                                <span className="flex items-center gap-1.5" style={caps(9, GOLD_INK, "0.18em")}>
+                                  <span className="ml-blink inline-block w-1.5 h-1.5 rounded-full" style={{ background: GOLD }} /> いまここ
                                 </span>
                               )}
-                              {state === "next" && <span style={caps(9, "#D3BFC6", "0.18em")}>Coming</span>}
+                              {state === "next" && <span style={caps(9, MUTE, "0.18em")}>これから</span>}
                             </div>
-                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? "#B7A2AA" : MUTE }}>{m.desc}</p>
+                            <p className="text-xs mt-1.5" style={{ color: state === "next" ? MUTE : MUTE }}>{m.desc}</p>
                             {tappable && m.cta && (
                               <span className="inline-flex items-center gap-1.5 mt-3 text-sm font-bold"
                                 style={{ color: ROSE, borderBottom: `1px solid ${ROSE}`, paddingBottom: 2 }}>
@@ -859,7 +855,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
                 {/* 直近のイベント */}
                 <section className="ml-in ml-in-2">
-                  <EdHeader en="Upcoming" jp="直近のイベント" />
+                  <EdHeader jp="直近のイベント" />
                   {myEvents.length === 0 ? (
                     <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>
                   ) : (
@@ -882,7 +878,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
                 {/* お知らせ */}
                 <section className="ml-in ml-in-3">
-                  <EdHeader en="News" jp="お知らせ" />
+                  <EdHeader jp="お知らせ" />
                   {notices.length === 0 ? (
                     <p className="text-xs" style={{ color: MUTE }}>現在お知らせはありません。</p>
                   ) : (
@@ -890,7 +886,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       {notices.slice(0, 6).map((n, i, arr) => (
                         <div key={n.id} className="py-4 flex items-baseline gap-4"
                           style={{ borderBottom: i < arr.length - 1 ? `1px solid ${HAIR}` : "none" }}>
-                          <span className="en-serif shrink-0" style={{ fontSize: 14, color: MAUVE, width: 40 }}>{fmtNoticeDate(n)}</span>
+                          <span className="en-serif shrink-0" style={{ fontSize: 14, color: MAUVE_INK, width: 40 }}>{fmtNoticeDate(n)}</span>
                           <p className="text-sm whitespace-pre-wrap">{n.text}</p>
                         </div>
                       ))}
@@ -915,7 +911,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-3">
                     <p className="en-serif" style={{ fontStyle: "italic", fontSize: 32, lineHeight: 1, color: ROSE }}>
-                      {e.num}<span className="ml-2" style={caps(10, MAUVE, "0.2em")}>{e.en}</span>
+                      {e.num}<span className="ml-2" style={caps(10, MAUVE_INK, "0.2em")}>{e.en}</span>
                     </p>
                     {isEnded
                       ? <span className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{ background: "#F3F4F6", color: "#9CA3AF" }}>受付終了</span>
@@ -984,7 +980,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
             return (
               <div className="px-6 pt-8 space-y-8">
-                <EdHeader en="Events" jp="イベント" note="出欠のご回答をお願いします" />
+                <EdHeader jp="イベント" note="出欠のご回答をお願いします" />
                 {myEvents.length === 0 && <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>}
                 {unanswered.length > 0 && (
                   <div className="space-y-5">
@@ -994,7 +990,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 )}
                 {answered.length > 0 && (
                   <div className="space-y-5">
-                    <p className="text-xs font-bold" style={{ color: MAUVE }}>回答済み（{answered.length}）</p>
+                    <p className="text-xs font-bold" style={{ color: MAUVE_INK }}>回答済み（{answered.length}）</p>
                     {answered.map((e) => EventCard(e, false))}
                   </div>
                 )}
@@ -1023,7 +1019,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     onClick={() => { setActiveSurvey(s); setSvAnswers({}); setSvPath([]); }}
                     className="w-full text-left px-5 py-5 flex items-center gap-4"
                     style={{ borderBottom: i < items.length - 1 ? `1px solid ${HAIR}` : "none", opacity: (s.done || isEnded) ? 0.65 : 1 }}>
-                    <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE : GOLD, width: 30 }}>0{i + 1}</span>
+                    <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE_INK : GOLD_INK, width: 30 }}>0{i + 1}</span>
                     <div className="flex-1 min-w-0">
                       <p className="jp-mincho font-bold text-sm truncate" style={{ fontSize: 15 }}>{s.title}</p>
                       <p className="text-xs mt-1" style={{ color: MUTE }}>
@@ -1031,11 +1027,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       </p>
                     </div>
                     {isEnded ? (
-                      <span style={caps(9, MUTE, "0.18em")}>Closed</span>
+                      <span style={caps(9, MUTE, "0.18em")}>終了</span>
                     ) : s.done ? (
-                      <span style={caps(9, MAUVE, "0.18em")}>Answered</span>
+                      <span style={caps(9, MAUVE_INK, "0.18em")}>回答済み</span>
                     ) : (
-                      <span className="flex items-center gap-1" style={caps(9, GOLD, "0.18em")}>Open <ChevronRight size={12} /></span>
+                      <span className="flex items-center gap-1" style={caps(9, GOLD_INK, "0.18em")}>回答する <ChevronRight size={12} /></span>
                     )}
                   </button>
                 ))}
@@ -1044,7 +1040,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
             return (
               <div className="px-6 pt-8">
-                <EdHeader en="Survey" jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} />
+                <EdHeader jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} />
                 {mySurveys.length === 0 ? (
                   <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のアンケートはありません。</p>
                 ) : (
@@ -1052,8 +1048,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     <div className="mb-6" style={{ height: 2, background: "#F0DFE0" }}>
                       <div style={{ height: 2, width: `${mySurveys.length ? (surveyDoneCount / mySurveys.length) * 100 : 0}%`, background: GOLD, transition: "width .6s ease" }} />
                     </div>
-                    {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2" style={{ color: GOLD }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
-                    {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MAUVE }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
+                    {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2" style={{ color: GOLD_INK }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
+                    {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MAUVE_INK }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
                     {ended.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MUTE }}>受付終了（{ended.length}）</p>{SurveyList(ended, true)}</>)}
                   </>
                 )}
@@ -1064,7 +1060,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           {/* NEWS（記事） */}
           {tab === "news" && (
             <div className="px-6 pt-8">
-              <EdHeader en="News & Report" jp="NEWS" note="イベントの様子をお届け" />
+              <EdHeader jp="お知らせ・記事" note="イベントの様子をお届け" />
               {myArticles.length === 0 ? (
                 <p className="text-xs" style={{ color: MUTE }}>まだ記事はありません。</p>
               ) : (
@@ -1076,7 +1072,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         <img src={a.thumb} alt="" className="w-full" style={{ height: 150, objectFit: "cover" }} />
                       )}
                       <div className="p-4">
-                        <p className="en-serif" style={{ fontSize: 12, color: MAUVE }}>{fmtDate(a.createdAt)}</p>
+                        <p className="en-serif" style={{ fontSize: 12, color: MAUVE_INK }}>{fmtDate(a.createdAt)}</p>
                         <h3 className="jp-mincho font-bold mt-1" style={{ fontSize: 17 }}>{a.title}</h3>
                         {a.body && <p className="text-xs mt-1.5 line-clamp-2" style={{ color: MUTE }}>{a.body}</p>}
                         <span className="inline-flex items-center gap-1 mt-3 text-sm font-bold" style={{ color: ROSE }}>
@@ -1096,7 +1092,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <div className="max-w-md mx-auto min-h-screen pb-20">
                 <div className="sticky top-0 z-10 px-5 py-3 flex items-center justify-between"
                   style={{ background: PAPER, borderBottom: `1px solid ${HAIR}` }}>
-                  <p style={caps(9, MAUVE, "0.18em")}>News</p>
+                  <p style={caps(9, MAUVE_INK, "0.18em")}>お知らせ・記事</p>
                   <button onClick={() => setActiveArticle(null)} aria-label="閉じる" className="flex items-center gap-1 text-xs font-bold" style={{ color: MUTE }}>
                     <X size={16} /> 閉じる
                   </button>
@@ -1119,7 +1115,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 )}
                 {/* 下：文章 */}
                 <div className="px-6 pt-5">
-                  <p className="en-serif" style={{ fontSize: 12, color: MAUVE }}>{fmtDate(activeArticle.createdAt)}</p>
+                  <p className="en-serif" style={{ fontSize: 12, color: MAUVE_INK }}>{fmtDate(activeArticle.createdAt)}</p>
                   <h1 className="jp-mincho font-bold mt-1" style={{ fontSize: 22, lineHeight: 1.4 }}>{activeArticle.title}</h1>
                   {activeArticle.body && (
                     <p className="text-sm mt-4 leading-relaxed whitespace-pre-wrap">{activeArticle.body}</p>
@@ -1129,10 +1125,48 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             </div>
           )}
 
+          {/* メニュー（質問箱・LINE連携・プロフィール・ログアウト） */}
+          {tab === "menu" && (
+            <div className="px-6 pt-8">
+              <EdHeader jp="メニュー" />
+              <div className="space-y-2.5">
+                {[
+                  { label: "質問箱", sub: "採用担当への質問と、みんなのQ&A", icon: HelpCircle, onClick: () => setTab("questions") },
+                  {
+                    label: "LINE連携", sub: "イベント前日のお知らせを受け取る", icon: MessageCircle, onClick: () => setTab("line"),
+                    chip: lineLinked ? { text: "連携済み", bg: "#E4F6EC", fg: "#0A8F4D" } : { text: "未連携", bg: "#FDE8E8", fg: "#C81E1E" },
+                  },
+                  {
+                    label: "プロフィール", sub: "住所・電話番号の確認と変更", icon: User, onClick: () => setShowProfile(true),
+                    chip: profileDone ? null : { text: "未登録", bg: "#FDE8E8", fg: "#C81E1E" },
+                  },
+                  { label: "ログアウト", sub: "", icon: LogOut, onClick: signOut },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  return (
+                    <button key={m.label} onClick={m.onClick}
+                      className="w-full text-left bg-white flex items-center gap-3 px-4 py-3.5 ml-in"
+                      style={{ border: `1px solid ${HAIR}`, borderRadius: 14 }}>
+                      <Icon size={22} className="shrink-0" style={{ color: ROSE_DEEP }} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-bold" style={{ fontSize: 15 }}>{m.label}</span>
+                        {m.sub && <span className="block text-xs mt-0.5" style={{ color: MUTE }}>{m.sub}</span>}
+                      </span>
+                      {m.chip && (
+                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: m.chip.bg, color: m.chip.fg }}>{m.chip.text}</span>
+                      )}
+                      <ChevronRight size={18} className="shrink-0" style={{ color: MUTE }} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* LINE連携 */}
           {tab === "line" && (
             <div className="px-6 pt-8">
-              <EdHeader en="Connect" jp="LINE連携" />
+              <EdHeader jp="LINE連携" />
               <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
                 <div className="p-6">
                   {lineLinked ? (
@@ -1163,7 +1197,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       <div className="mt-6 space-y-4">
                         {[`${LINE_ACCOUNT_NAME}を友だち追加`, "トーク画面に下の連携コードを送信"].map((t, i) => (
                           <div key={t} className="flex items-start gap-3">
-                            <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 16, color: GOLD }}>0{i + 1}</span>
+                            <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 16, color: GOLD_INK }}>0{i + 1}</span>
                             <p className="text-sm pt-0.5">{t}</p>
                           </div>
                         ))}
@@ -1192,7 +1226,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           {/* 質問箱 */}
           {tab === "questions" && (
             <div className="px-6 pt-8 space-y-6">
-              <EdHeader en="Q&A" jp="質問箱" note="採用担当に直接きけます" />
+              <EdHeader jp="質問箱" note="採用担当に直接きけます" />
               {readOnly ? (
                 <p className="text-xs" style={{ color: MUTE }}>プレビューでは質問箱はご利用いただけません。</p>
               ) : (
@@ -1236,7 +1270,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
                   {qData.faq.length > 0 && (
                     <div>
-                      <p className="text-xs font-bold mb-2" style={{ color: MAUVE }}>みんなのQ&A（{qData.faq.length}）</p>
+                      <p className="text-xs font-bold mb-2" style={{ color: MAUVE_INK }}>みんなのQ&A（{qData.faq.length}）</p>
                       <div className="space-y-3">
                         {qData.faq.map((q) => (
                           <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}` }}>
@@ -1258,10 +1292,10 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <div className="w-full max-w-md p-6 max-h-96 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER }}>
                 <div className="flex items-start justify-between">
                   <div>
-                    <p style={caps(9, GOLD)}>Profile</p>
+                    <p style={caps(9, GOLD_INK)}>基本情報</p>
                     <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>基本情報の登録</p>
                   </div>
-                  <button onClick={() => setShowProfile(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                  <button onClick={() => setShowProfile(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE_INK }} /></button>
                 </div>
                 <p className="text-xs mt-2 mb-5" style={{ color: MUTE }}>入社書類の送付・緊急時の連絡に使用します。</p>
                 <div className="space-y-4">
@@ -1272,7 +1306,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     { key: "emergency", label: "緊急連絡先（任意）", ph: "続柄・電話番号（例：母 090-xxxx-xxxx）", req: false },
                   ].map((fld) => (
                     <div key={fld.key}>
-                      <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>{fld.label}{fld.req && <span style={{ color: GOLD }}> *</span>}</p>
+                      <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>{fld.label}{fld.req && <span style={{ color: GOLD_INK }}> *</span>}</p>
                       <input value={profileForm[fld.key]} onChange={(e) => setProfileForm({ ...profileForm, [fld.key]: e.target.value })}
                         placeholder={fld.ph} className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
                     </div>
@@ -1292,13 +1326,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                 <div className="flex items-start justify-between mb-5">
                   <div>
-                    <p style={caps(9, GOLD)}>Interview</p>
+                    <p style={caps(9, GOLD_INK)}>面談</p>
                     <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>ご希望の日時をご登録ください</p>
                     <p className="text-xs mt-2 leading-relaxed" style={{ color: MUTE }}>
                       ご都合のよいお日にち・時間帯を複数ご登録ください。いただいた候補から担当者が日程を確定します。
                     </p>
                   </div>
-                  <button onClick={() => setInterviewOpen(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                  <button onClick={() => setInterviewOpen(false)} aria-label="閉じる"><X size={20} style={{ color: MAUVE_INK }} /></button>
                 </div>
 
                 <p className="text-sm font-bold mb-1">候補を追加</p>
@@ -1331,7 +1365,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   {ivSlots.map((x) => (
                     <div key={x.id} className="flex items-center gap-2 px-3 py-2.5 bg-white" style={{ border: `1px solid ${HAIR}` }}>
                       <span className="text-sm flex-1">{slotText(x)}</span>
-                      <button onClick={() => removeIvSlot(x.id)} aria-label="削除" className="shrink-0"><X size={15} style={{ color: MAUVE }} /></button>
+                      <button onClick={() => removeIvSlot(x.id)} aria-label="削除" className="shrink-0"><X size={15} style={{ color: MAUVE_INK }} /></button>
                     </div>
                   ))}
                 </div>
@@ -1367,7 +1401,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               </div>
               <div className="ml-pop relative w-full max-w-sm text-center px-6 py-8"
                 style={{ background: PAPER, border: `1px solid ${HAIR}`, boxShadow: "0 18px 48px rgba(58,42,48,0.28)" }}>
-                <p style={caps(9, GOLD)}>Congratulations</p>
+                <p style={caps(9, GOLD_INK)}>Congratulations</p>
                 <img src="/loopchan/loopchan-8.png" alt="" className="ml-float mx-auto mt-3"
                   style={{ width: 132, height: "auto" }} />
                 <p className="jp-mincho font-bold mt-4" style={{ fontSize: 21, color: ROSE_DEEP }}>内定承諾<br />ありがとうございます！</p>
@@ -1429,11 +1463,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <div ref={svScrollRef} className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                   <div className="flex items-start justify-between mb-5">
                     <div>
-                      <p style={caps(9, GOLD)}>Survey</p>
+                      <p style={caps(9, GOLD_INK)}>アンケート</p>
                       <p className="jp-mincho font-bold mt-1" style={{ fontSize: 18 }}>{activeSurvey.title}</p>
                       {activeSurvey.desc && <p className="text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: MUTE }}>{activeSurvey.desc}</p>}
                     </div>
-                    <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); setSvPath([]); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE }} /></button>
+                    <button onClick={() => { setActiveSurvey(null); setSvAnswers({}); setSvPath([]); }} aria-label="閉じる"><X size={20} style={{ color: MAUVE_INK }} /></button>
                   </div>
                   {hasSec && curSec && (curSec.title || curSec.desc) && (
                     <div className="mb-5 pb-4" style={{ borderBottom: `1px solid ${HAIR}` }}>
@@ -1501,7 +1535,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   <div className="flex gap-2 mt-6">
                     {hasSec && svPath.length > 0 && (
                       <button onClick={goBack} className="px-5 py-3.5 text-sm font-bold bg-white"
-                        style={{ border: `1px solid ${HAIR}`, color: MAUVE }}>戻る</button>
+                        style={{ border: `1px solid ${HAIR}`, color: MAUVE_INK }}>戻る</button>
                     )}
                     {isLastPage ? (
                       <button disabled={readOnly || !valid || svBusy} onClick={submitSurvey}
@@ -1520,16 +1554,24 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             );
           })()}
 
-          {/* 下部ナビ（ダークピル） */}
-          <nav className="fixed bottom-4 left-1/2 z-40 w-full max-w-md px-6" style={{ transform: "translateX(-50%)" }}>
-            <div className="flex px-2 py-1.5 shadow-xl" style={{ background: "#20141A", borderRadius: 999 }}>
+          {/* 下部ナビ（日本語5項目・未対応の件数バッジ） */}
+          <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-md" aria-label="メニュー"
+            style={{ transform: "translateX(-50%)", background: "#fff", borderTop: `1px solid ${HAIR}`, paddingBottom: "env(safe-area-inset-bottom)" }}>
+            <div className="grid grid-cols-5 px-1 pt-1.5 pb-2">
               {tabs.map((t) => {
                 const Icon = t.icon;
-                const active = tab === t.key;
+                const active = t.key === "menu" ? MENU_TABS.includes(tab) : tab === t.key;
                 return (
-                  <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2 flex flex-col items-center gap-1">
-                    <Icon size={17} color={active ? IVORY : "#8E7580"} />
-                    <span style={caps(8, active ? IVORY : "#8E7580", "0.16em")}>{t.label}</span>
+                  <button key={t.key} onClick={() => setTab(t.key)} aria-current={active ? "page" : undefined}
+                    className="py-1.5 flex flex-col items-center gap-0.5" style={{ color: active ? ROSE : MUTE }}>
+                    <span className="relative">
+                      <Icon size={22} />
+                      {t.badge > 0 && (
+                        <span className="absolute font-bold flex items-center justify-center"
+                          style={{ top: -6, right: -12, background: "#C81E1E", color: "#fff", fontSize: 11, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, lineHeight: 1 }}>{t.badge}</span>
+                      )}
+                    </span>
+                    <span className="font-bold" style={{ fontSize: 11 }}>{t.label}</span>
                   </button>
                 );
               })}

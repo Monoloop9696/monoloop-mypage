@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket, CalendarRange,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket, CalendarRange, MoreHorizontal,
 } from "lucide-react";
 import SpecialAdmin from "../components/SpecialAdmin";
 import AnnualPlan from "../components/AnnualPlan";
@@ -227,6 +227,7 @@ function AdminBody({
   const [tab, setTab] = useState("dash");
   const [selectedYear, setSelectedYear] = useState(null);
   const [preview, setPreview] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false); // スマホ表示の下部ナビ「その他」のメニュー
   const [showAddCohort, setShowAddCohort] = useState(false);
   const [newYear, setNewYear] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -2044,46 +2045,59 @@ function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || bcConfirm || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || bcConfirm || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView || moreOpen)
   );
 
+  // メニューは3グループ（2026-11）。PCは左サイドバーにグループ見出しつきで並べ、
+  // スマホは下部ナビに MOBILE_MAIN の4つ＋「その他」（残りはグループ見出しつきのシートから選ぶ）
   const tabs = [
-    { key: "dash", label: "概況", icon: BarChart3 },
-    { key: "students", label: "内定者", icon: Users },
-    { key: "meet", label: "面談", icon: CalendarDays },
-    { key: "plan", label: "年間計画", icon: CalendarRange },
-    { key: "stats", label: "分析", icon: TrendingUp },
-    { key: "news", label: "記事", icon: Newspaper },
-    { key: "special", label: "特別選考", icon: Ticket },
-    { key: "qbox", label: "質問箱", icon: HelpCircle },
-    { key: "line", label: "LINE配信", icon: Send },
+    { key: "dash", label: "概況", icon: BarChart3, group: "毎日の業務" },
+    { key: "students", label: "内定者", icon: Users, group: "毎日の業務" },
+    { key: "meet", label: "面談", icon: CalendarDays, group: "毎日の業務" },
+    { key: "line", label: "LINE配信", icon: Send, group: "毎日の業務" },
+    { key: "qbox", label: "質問箱", icon: HelpCircle, group: "毎日の業務" },
+    { key: "news", label: "記事", icon: Newspaper, group: "企画・発信" },
+    { key: "plan", label: "年間計画", icon: CalendarRange, group: "企画・発信" },
+    { key: "special", label: "特別選考", icon: Ticket, group: "採用・分析" },
+    { key: "stats", label: "分析", icon: TrendingUp, group: "採用・分析" },
   ];
+  const TAB_GROUPS = ["毎日の業務", "企画・発信", "採用・分析"];
+  const MOBILE_MAIN = ["dash", "students", "meet", "line"];
   // 特別選考LPからの未対応エントリー数（タブのバッジ用）
   const specialNew = savedTemplates.filter((t) => t._type === "specialEntry" && (t.status || "未対応") === "未対応").length;
+  const tabBadge = (key) => (key === "qbox" ? unansweredQ : key === "special" ? specialNew : 0);
+  const moreTabs = tabs.filter((t) => !MOBILE_MAIN.includes(t.key));
+  const moreBadge = moreTabs.reduce((n, t) => n + tabBadge(t.key), 0);
+  const badgeDot = (n, size = 17) => (
+    <span className="text-white rounded-full font-bold flex items-center justify-center"
+      style={{ background: "#DC2626", fontSize: 11, minWidth: size, height: size, padding: "0 4px", lineHeight: 1 }}>{n}</span>
+  );
 
   return (
     <div className={pc ? "flex gap-5 px-5 py-4 items-start" : "pb-20"}>
       {pc && (
         <aside className="shrink-0 sticky" style={{ width: 208, top: 64 }}>
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            {tabs.map((t) => {
-              const Icon = t.icon;
-              const active = tab === t.key;
-              const badge = t.key === "qbox" ? unansweredQ : t.key === "special" ? specialNew : 0;
-              return (
-                <button key={t.key} onClick={() => setTab(t.key)}
-                  className="w-full px-3.5 py-3 flex items-center gap-2.5 text-sm font-bold border-b border-gray-100 last:border-b-0"
-                  style={active ? { background: BRAND_LIGHT, color: BRAND } : { color: "#6B7280", background: "#fff" }}>
-                  <Icon size={17} />
-                  <span className="flex-1 text-left">{t.label}</span>
-                  {badge > 0 && (
-                    <span className="text-white rounded-full font-bold flex items-center justify-center"
-                      style={{ background: "#DC2626", fontSize: 10, minWidth: 17, height: 17, padding: "0 4px" }}>{badge}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          <nav className="bg-white border border-gray-200 rounded-xl p-2 space-y-3" aria-label="管理メニュー">
+            {TAB_GROUPS.map((g) => (
+              <div key={g}>
+                <p className="px-2 pt-1 pb-1 text-[11px] font-bold text-gray-500">{g}</p>
+                {tabs.filter((t) => t.group === g).map((t) => {
+                  const Icon = t.icon;
+                  const active = tab === t.key;
+                  const badge = tabBadge(t.key);
+                  return (
+                    <button key={t.key} onClick={() => setTab(t.key)} aria-current={active ? "page" : undefined}
+                      className="w-full px-2.5 py-2.5 flex items-center gap-2.5 text-sm font-bold rounded-lg"
+                      style={active ? { background: BRAND_LIGHT, color: BRAND } : { color: "#4B5563", background: "#fff" }}>
+                      <Icon size={17} />
+                      <span className="flex-1 text-left">{t.label}</span>
+                      {badge > 0 && badgeDot(badge)}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
         </aside>
       )}
       <div className={pc ? "flex-1 min-w-0" : ""}>
@@ -6173,25 +6187,76 @@ function AdminBody({
 
       </div>
 
+      {/* スマホ表示：「その他」のメニュー（下部ナビに出していないタブをグループ見出しつきで並べる） */}
+      {!pc && moreOpen && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(58,42,48,0.40)" }}
+          onClick={() => setMoreOpen(false)}>
+          <div className="bg-white w-full max-w-md rounded-t-2xl p-4 pb-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-base font-bold">その他のメニュー</p>
+              <button onClick={() => setMoreOpen(false)} aria-label="閉じる" className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+            </div>
+            <div className="space-y-3">
+              {TAB_GROUPS.map((g) => {
+                const list = moreTabs.filter((t) => t.group === g);
+                if (!list.length) return null;
+                return (
+                  <div key={g}>
+                    <p className="text-[11px] font-bold text-gray-500 mb-1">{g}</p>
+                    <div className="space-y-1.5">
+                      {list.map((t) => {
+                        const Icon = t.icon;
+                        const active = tab === t.key;
+                        const badge = tabBadge(t.key);
+                        return (
+                          <button key={t.key} onClick={() => { setTab(t.key); setMoreOpen(false); }}
+                            className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl border text-sm font-bold text-left"
+                            style={active ? { background: BRAND_LIGHT, color: BRAND, borderColor: BRAND } : { color: INK, borderColor: "#E5E7EB", background: "#fff" }}>
+                            <Icon size={19} />
+                            <span className="flex-1">{t.label}</span>
+                            {badge > 0 && badgeDot(badge, 19)}
+                            <ChevronRight size={16} className="text-gray-400" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!pc && (
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex max-w-md mx-auto">
-          {tabs.map((t) => {
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 grid grid-cols-5 max-w-md mx-auto" aria-label="管理メニュー">
+          {tabs.filter((t) => MOBILE_MAIN.includes(t.key)).map((t) => {
             const Icon = t.icon;
             const active = tab === t.key;
-            const badge = t.key === "qbox" ? unansweredQ : t.key === "special" ? specialNew : 0;
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 relative" style={{ color: active ? BRAND : "#9AA7A2" }}>
-                <div className="relative">
-                  <Icon size={18} />
-                  {badge > 0 && (
-                    <span className="absolute -top-1.5 -right-2.5 text-white rounded-full font-bold flex items-center justify-center"
-                      style={{ background: "#DC2626", fontSize: 9, minWidth: 15, height: 15, padding: "0 3px" }}>{badge}</span>
-                  )}
-                </div>
-                <span className="text-[10px] font-bold">{t.label}</span>
+              <button key={t.key} onClick={() => setTab(t.key)} aria-current={active ? "page" : undefined}
+                className="py-2.5 flex flex-col items-center gap-0.5" style={{ color: active ? BRAND : "#6B7280" }}>
+                <Icon size={21} />
+                <span className="text-[11px] font-bold">{t.label}</span>
               </button>
             );
           })}
+          {(() => {
+            const active = moreTabs.some((t) => t.key === tab);
+            return (
+              <button onClick={() => setMoreOpen(true)} aria-current={active ? "page" : undefined}
+                className="py-2.5 flex flex-col items-center gap-0.5" style={{ color: active ? BRAND : "#6B7280" }}>
+                <span className="relative">
+                  <MoreHorizontal size={21} />
+                  {moreBadge > 0 && (
+                    <span className="absolute text-white rounded-full font-bold flex items-center justify-center"
+                      style={{ top: -6, right: -12, background: "#DC2626", fontSize: 11, minWidth: 17, height: 17, padding: "0 4px", lineHeight: 1 }}>{moreBadge}</span>
+                  )}
+                </span>
+                <span className="text-[11px] font-bold">{active ? tabs.find((t) => t.key === tab).label : "その他"}</span>
+              </button>
+            );
+          })()}
         </nav>
       )}
     </div>

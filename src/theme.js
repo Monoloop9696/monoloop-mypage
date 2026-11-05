@@ -13,8 +13,11 @@ export const IVORY = "#FFFFFF"; // マゼンタ上の文字色
 export const MAUVE = "#E39AB4"; // くすみピンク（補助）
 export const GOLD = "#C2A15C"; // 真鍮（アクセント）
 export const HAIR = "#F3D9E2"; // 罫線（ピンク寄り）
-export const MUTE = "#8A6E77"; // 補足テキスト
+export const MUTE = "#6A545E"; // 補足テキスト（2026-11 に #8A6E77 から濃くした。淡いピンク地でも読める濃さ）
 export const INK = "#3A2A30"; // 本文の濃色
+// 文字に使うときの濃い版。MAUVE / GOLD は淡いピンク地の文字には薄すぎるので、枠線・塗り・飾りにだけ使う
+export const MAUVE_INK = "#A84A72";
+export const GOLD_INK = "#8A6516";
 
 // ---- 管理画面カラー（ブランド統一） ----
 export const BRAND = "#E4007F";
