@@ -88,8 +88,8 @@ const meetingBody = (m) => {
   if (parts.length === 0 && (m.note || "").trim()) return [{ key: "note", label: "面談内容", text: m.note.trim() }];
   return parts;
 };
-// 概況のイベント／アンケートは新しい3件まで表示し、残りは折りたたむ
-const VISIBLE_ITEMS = 3;
+// イベント・アンケートの表の列（名前／日付・期限／対象／回答状況／状態／＞）
+const LIST_COLS = "minmax(0,1.7fr) minmax(130px,0.9fr) 56px minmax(170px,1.2fr) minmax(104px,0.7fr) 18px";
 const EMPTY_SV = { title: "", desc: "", dueDate: "", dueTime: "", time: "約3分", pulse: false, questions: [], audType: "all", audEventId: "", audGroup: "arrived", areas: [], areaBasis: "either", targetUids: null, sections: [] };
 // LINE配信の「配信対象」のカテゴリ色（対象を選ぶモーダルと配信対象カードで共通）
 const TARGET_CAT = {
@@ -775,6 +775,14 @@ export function AdminBody({
       return String(va).localeCompare(String(vb), "ja") * dir;
     });
   };
+  // 一覧の列見出し：押すとその列で並び替え（同じ列をもう一度押すと昇順⇄降順）。上の「並び替え」プルダウンと同じ状態を使う
+  const sortHead = (key, label) => (
+    <button onClick={() => { if (sortKey === key) setSortAsc((v) => !v); else { setSortKey(key); setSortAsc(true); } }}
+      className="inline-flex items-center gap-0.5 font-bold" style={{ color: sortKey === key ? BRAND : "#6B7280" }}
+      title={`${label}で並び替え`} aria-label={`${label}で並び替え`}>
+      {label}<span aria-hidden="true">{sortKey === key ? (sortAsc ? "▲" : "▼") : "↕"}</span>
+    </button>
+  );
   // 現住所のエリア（都道府県→地方区分）で絞る。住所に都道府県が無い学生は「判定不可」にまとまる
   const matchesArea = (s) => {
     if (areaFilter === "all") return true;
@@ -2062,7 +2070,7 @@ export function AdminBody({
   // モーダル／ドロワー表示中は背面をスクロール・操作できないようにする
   useBodyScrollLock(
     !!(showEventForm || showSurveyForm || multiEditOpen || attendEdit || optionVoters ||
-       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || bcConfirm || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView || moreOpen)
+       historyPicker || targetModal || detailStudent || pendingStatus || preview || showTargetPicker || bcConfirm || meetOpen || meetHist || shotView || followDrawer || ivReqOpen || ivConfirm || textAnswers || ivBookedView || moreOpen || expandedEvent || expandedSurvey)
   );
 
   // メニューは3グループ（2026-11）。PCは左サイドバーにグループ見出しつきで並べ、
@@ -2448,7 +2456,7 @@ export function AdminBody({
           </div>
 
           {/* イベント */}
-          <div>
+          <div className={pc ? "col-span-2" : ""}>
             <div className="flex items-center justify-between">
               <SectionTitle>イベント出欠状況</SectionTitle>
               <div className="flex items-center gap-1.5 mb-3">
@@ -2637,44 +2645,99 @@ export function AdminBody({
               </div>
             )}
 
-            {(showAllEvents ? yearEvents : yearEvents.slice(0, VISIBLE_ITEMS)).map((e) => {
+            {/* イベントの表（受付中→「終了したイベントを表示」で終了分）。行を押すと右に内訳のドロワーが開く */}
+            {(() => {
+              const openList = yearEvents.filter((e) => !eventIsClosed(e));
+              const endedList = yearEvents.filter((e) => eventIsClosed(e)).slice().reverse();
+              const rows = showAllEvents ? [...openList, ...endedList] : openList;
+              return (
+            <>
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-2">
+              {pc && rows.length > 0 && (
+                <div className="grid gap-3 items-center px-4 py-2 text-xs font-bold text-gray-500 border-b border-gray-200" style={{ gridTemplateColumns: LIST_COLS, background: "#FAFBFC" }}>
+                  <span>イベント名</span><span>開催日・出欠期限</span><span>対象</span><span>回答状況</span><span>状態</span><span />
+                </div>
+              )}
+              {rows.length === 0 && (
+                <p className="px-4 py-5 text-xs text-gray-500">{yearEvents.length ? "受付中のイベントはありません。" : "この年度のイベントはまだありません。"}</p>
+              )}
+              {rows.map((e, rowIdx) => {
               const aud = eventRecordAudience(e); // 辞退・削除済みでも回答が残っていれば含める
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: rsvpOf(st, e) }));
               const yes = list.filter((x) => x.r === "出席").length;
+              const noCount = list.filter((x) => x.r === "欠席").length;
+              const noneCount = audTotal - yes - noCount;
               const arrivedCount = list.filter((x) => x.r === "出席" && arrivedOf(x.st, e)).length;
               const changedCount = list.filter((x) => (x.r === "出席" || x.r === "欠席") && changedOf(x.st, e)).length;
               const areaTxt = eventAreaText(e);
               const open = expandedEvent === e.id;
+              const chip = e.closed ? { tone: "idle", text: "受付終了済み" } : eventIsClosed(e) ? { tone: "idle", text: "受付終了" } : dueChip(e.deadlineDate || e.dateStr);
+              const w = (n) => `${audTotal ? (n / audTotal) * 100 : 0}%`;
+              const bar = (
+                <span className="flex h-2 rounded-full overflow-hidden bg-gray-100">
+                  <span style={{ width: w(yes), background: TONE.ok.solid }} />
+                  <span style={{ width: w(noCount), background: TONE.idle.solid }} />
+                  <span style={{ width: w(noneCount), background: "#F2C078" }} />
+                </span>
+              );
+              const counts = `出席 ${yes}・欠席 ${noCount}・未回答 ${noneCount}`;
               return (
-                <div key={e.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
-                  <button onClick={() => setExpandedEvent(open ? null : e.id)} className="w-full text-left p-4">
-                    <div className="flex justify-between text-sm gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold">
-                          {e.title}
-                          {e.closed && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#F3F4F6", color: "#6B7280" }}>受付終了済み</span>}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-0.5">{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}・{e.place}</p>
-                        <p className="text-xs mt-0.5" style={{ color: eventIsClosed(e) ? "#B45309" : "#6B7280" }}>
-                          出欠期限：{e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}
-                          {eventIsClosed(e) ? "（受付終了）" : ""}
-                        </p>
-                        {areaTxt && <p className="text-xs mt-0.5" style={{ color: BRAND }}>対象：{areaTxt}</p>}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-500">参加 {yes}/{audTotal}</p>
-                        {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#0A8F4D" }}>到着 {arrivedCount}/{yes}</p>}
-                        {changedCount > 0 && <p className="text-xs mt-0.5 font-bold" style={{ color: "#B45309" }}>回答変更 {changedCount}件</p>}
-                        <p className="text-xs mt-0.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${audTotal ? (yes / audTotal) * 100 : 0}%`, background: BRAND }} />
-                    </div>
+                <div key={e.id} className={rowIdx > 0 ? "border-t border-gray-100" : ""}>
+                  <button onClick={() => setExpandedEvent(open ? null : e.id)}
+                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${pc ? "grid gap-3 items-center" : "block"}`}
+                    style={pc ? { gridTemplateColumns: LIST_COLS } : undefined}>
+                    <span className="block min-w-0">
+                      <span className="block text-sm font-bold truncate">{e.title}</span>
+                      {areaTxt && <span className="block text-xs text-gray-500 truncate">対象：{areaTxt}</span>}
+                      {!pc && <span className="block text-xs text-gray-500 mt-0.5">{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}・出欠期限 {e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}</span>}
+                    </span>
+                    {pc && (
+                      <span className="block min-w-0 text-xs">
+                        <span className="block truncate" style={{ color: INK }}>{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}</span>
+                        <span className="block text-gray-500 truncate">期限 {e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}</span>
+                      </span>
+                    )}
+                    {pc && <span className="text-xs" style={{ fontVariantNumeric: "tabular-nums" }}>{audTotal}名</span>}
+                    <span className={`block min-w-0 ${pc ? "" : "mt-2"}`}>
+                      {bar}
+                      <span className="block text-xs text-gray-500 mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {counts}{!pc ? `（対象 ${audTotal}名）` : ""}{yes > 0 ? `・到着 ${arrivedCount}` : ""}
+                      </span>
+                    </span>
+                    <span className={`flex flex-wrap gap-1 ${pc ? "" : "mt-2"}`}>
+                      <StatusChip tone={chip.tone}>{chip.text}</StatusChip>
+                      {changedCount > 0 && <StatusChip tone="warn">回答変更 {changedCount}件</StatusChip>}
+                    </span>
+                    {pc && <ChevronRight size={16} className="text-gray-400" />}
                   </button>
                   {open && (
-                    <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-2.5">
+                    <div className="fixed inset-0 z-[60] flex justify-end">
+                      <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setExpandedEvent(null)} />
+                      <div className="ml-drawer relative h-full w-full max-w-xl bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+                        <div className="flex items-start justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+                          <div className="min-w-0">
+                            <p className="text-base font-bold truncate">{e.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}{e.place ? `・${e.place}` : ""}・出欠期限 {e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              <StatusChip tone={chip.tone}>{chip.text}</StatusChip>
+                              <span className="text-xs text-gray-500">対象 {audTotal}名{areaTxt ? `（${areaTxt}）` : ""}</span>
+                            </div>
+                          </div>
+                          <button onClick={() => setExpandedEvent(null)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                        </div>
+                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2.5">
+                      <div>
+                        {bar}
+                        <p className="text-xs text-gray-500 mt-1">{counts}</p>
+                      </div>
+                      {noneCount > 0 && !eventIsClosed(e) && (
+                        <Btn onClick={() => { setTarget(`event:${e.id}:none`); setExpandedEvent(null); setTab("line"); }}>
+                          <Send size={13} /> 未回答者にLINE
+                        </Btn>
+                      )}
                       {["出席", "欠席", "未回答"].map((k) => {
                         const g = list.filter((x) => x.r === k);
                         return (
@@ -2763,21 +2826,27 @@ export function AdminBody({
                         )}
                       </div>
                     </div>
+                      </div>
+                    </div>
                   )}
                 </div>
               );
             })}
-            {yearEvents.length > VISIBLE_ITEMS && (
+            </div>
+            {endedList.length > 0 && (
               <button onClick={() => setShowAllEvents((v) => !v)}
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
                 style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
-                {showAllEvents ? "最新3件だけ表示する ▲" : `過去のイベントをすべて表示（残り ${yearEvents.length - VISIBLE_ITEMS}件）▼`}
+                {showAllEvents ? "終了したイベントを隠す ▲" : `終了したイベントを表示（${endedList.length}件）▼`}
               </button>
             )}
+            </>
+              );
+            })()}
           </div>
 
           {/* アンケート */}
-          <div>
+          <div className={pc ? "col-span-2" : ""}>
             <div className="flex items-center justify-between">
               <SectionTitle>アンケート回答率</SectionTitle>
               <div className="flex items-center gap-1.5 mb-3">
@@ -3066,7 +3135,23 @@ export function AdminBody({
               </div>
             )}
 
-            {(showAllSurveys ? yearSurveys : yearSurveys.slice(0, VISIBLE_ITEMS)).map((s) => {
+            {/* アンケートの表（受付中→「終了したアンケートを表示」で終了分）。行を押すと右に集計のドロワーが開く */}
+            {(() => {
+              const openList = yearSurveys.filter((s) => !surveyIsClosed(s));
+              const endedList = yearSurveys.filter((s) => surveyIsClosed(s)).slice().reverse();
+              const rows = showAllSurveys ? [...openList, ...endedList] : openList;
+              return (
+            <>
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden mb-2">
+              {pc && rows.length > 0 && (
+                <div className="grid gap-3 items-center px-4 py-2 text-xs font-bold text-gray-500 border-b border-gray-200" style={{ gridTemplateColumns: LIST_COLS, background: "#FAFBFC" }}>
+                  <span>アンケート名</span><span>回答期限</span><span>対象</span><span>回答状況</span><span>状態</span><span />
+                </div>
+              )}
+              {rows.length === 0 && (
+                <p className="px-4 py-5 text-xs text-gray-500">{yearSurveys.length ? "受付中のアンケートはありません。" : "この年度のアンケートはまだありません。"}</p>
+              )}
+              {rows.map((s, rowIdx) => {
               const aud = surveyRecordAudience(s); // 辞退・削除済みでも回答が残っていれば含める
               const audTotal = aud.length;
               const list = aud.map((st) => ({ st, r: answeredOf(st, s) }));
@@ -3075,29 +3160,41 @@ export function AdminBody({
               const targeted = s.audience && s.audience.type === "event";
               const areaTxt = surveyAreaText(s);
               const targetText = [targeted ? audienceLabel(s) : null, areaTxt].filter(Boolean).join(" ／ ");
+              const chip = surveyIsClosed(s) ? { tone: "idle", text: "受付終了" } : dueChip(s.dueDate);
+              const w = (n) => `${audTotal ? (n / audTotal) * 100 : 0}%`;
+              const bar = (
+                <span className="flex h-2 rounded-full overflow-hidden bg-gray-100">
+                  <span style={{ width: w(done), background: TONE.ok.solid }} />
+                  <span style={{ width: w(audTotal - done), background: "#F2C078" }} />
+                </span>
+              );
+              const counts = `回答済み ${done}・未回答 ${audTotal - done}`;
+              const dueLabel = s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし";
               return (
-                <div key={s.id} className="bg-white border border-gray-200 rounded-xl mb-2 overflow-hidden">
-                  <button onClick={() => setExpandedSurvey(open ? null : s.id)} className="w-full text-left p-4">
-                    <div className="flex justify-between text-sm gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold truncate">
-                          {s.title}
-                          {s.pulse && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>パルス調査</span>}
-                        </p>
-                        <p className="text-xs mt-0.5" style={{ color: surveyIsClosed(s) ? "#B45309" : "#6B7280" }}>
-                          回答期限：{s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし"}
-                          {surveyIsClosed(s) ? "（受付終了）" : ""}
-                        </p>
-                        {targetText && <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>対象：{targetText}</p>}
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs text-gray-500">{done}/{audTotal} 回答</p>
-                        <p className="text-xs mt-0.5" style={{ color: "#5B8DEF" }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${audTotal ? (done / audTotal) * 100 : 0}%`, background: "#5B8DEF" }} />
-                    </div>
+                <div key={s.id} className={rowIdx > 0 ? "border-t border-gray-100" : ""}>
+                  <button onClick={() => setExpandedSurvey(open ? null : s.id)}
+                    className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${pc ? "grid gap-3 items-center" : "block"}`}
+                    style={pc ? { gridTemplateColumns: LIST_COLS } : undefined}>
+                    <span className="block min-w-0">
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm font-bold truncate">{s.title}</span>
+                        {s.pulse && <StatusChip tone="info" className="shrink-0">パルス調査</StatusChip>}
+                      </span>
+                      {targetText && <span className="block text-xs text-gray-500 truncate">対象：{targetText}</span>}
+                      {!pc && <span className="block text-xs text-gray-500 mt-0.5">回答期限 {dueLabel}</span>}
+                    </span>
+                    {pc && <span className="block min-w-0 text-xs truncate" style={{ color: INK }}>{dueLabel}</span>}
+                    {pc && <span className="text-xs" style={{ fontVariantNumeric: "tabular-nums" }}>{audTotal}名</span>}
+                    <span className={`block min-w-0 ${pc ? "" : "mt-2"}`}>
+                      {bar}
+                      <span className="block text-xs text-gray-500 mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {counts}{!pc ? `（対象 ${audTotal}名）` : ""}
+                      </span>
+                    </span>
+                    <span className={`flex flex-wrap gap-1 ${pc ? "" : "mt-2"}`}>
+                      <StatusChip tone={chip.tone}>{chip.text}</StatusChip>
+                    </span>
+                    {pc && <ChevronRight size={16} className="text-gray-400" />}
                   </button>
                   {open && (() => {
                     const detail = aud.map((st) => ({ st, a: answerOf(st, s) }));
@@ -3116,7 +3213,26 @@ export function AdminBody({
                       return <p className="text-xs font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
                     };
                     return (
-                      <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-3">
+                    <div className="fixed inset-0 z-[60] flex justify-end">
+                      <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setExpandedSurvey(null)} />
+                      <div className={`ml-drawer relative h-full w-full bg-white flex flex-col ${pc ? "max-w-4xl" : "max-w-xl"}`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
+                        <div className="flex items-start justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
+                          <div className="min-w-0">
+                            <p className="text-base font-bold truncate">{s.title}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">回答期限 {dueLabel}{targetText ? `・対象：${targetText}` : ""}</p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              <StatusChip tone={chip.tone}>{chip.text}</StatusChip>
+                              <span className="text-xs text-gray-500">対象 {audTotal}名・{counts}</span>
+                            </div>
+                          </div>
+                          <button onClick={() => setExpandedSurvey(null)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
+                        </div>
+                      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                        {audTotal - done > 0 && !surveyIsClosed(s) && (
+                          <Btn onClick={() => { setTarget(`survey:${s.id}:unanswered`); setExpandedSurvey(null); setTab("line"); }}>
+                            <Send size={13} /> 未回答者にLINE
+                          </Btn>
+                        )}
                         {/* 未回答は先に見たいので上に出す */}
                         <div className="rounded-lg p-2.5" style={{ background: unanswered.length ? "#FEF1DC" : "#E4F6EC", border: `1px solid ${unanswered.length ? "#F5D08C" : "#CDE8D6"}` }}>
                           <p className="text-xs font-bold mb-1" style={{ color: unanswered.length ? "#B45309" : "#0A8F4D" }}>
@@ -3242,18 +3358,24 @@ export function AdminBody({
                           )}
                         </div>
                       </div>
+                      </div>
+                    </div>
                     );
                   })()}
                 </div>
               );
             })}
-            {yearSurveys.length > VISIBLE_ITEMS && (
+            </div>
+            {endedList.length > 0 && (
               <button onClick={() => setShowAllSurveys((v) => !v)}
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
                 style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
-                {showAllSurveys ? "最新3件だけ表示する ▲" : `過去のアンケートをすべて表示（残り ${yearSurveys.length - VISIBLE_ITEMS}件）▼`}
+                {showAllSurveys ? "終了したアンケートを隠す ▲" : `終了したアンケートを表示（${endedList.length}件）▼`}
               </button>
             )}
+            </>
+              );
+            })()}
             <button onClick={refreshAnswers} className="text-xs font-bold text-gray-500 mt-1">回答状況を更新</button>
           </div>
 
@@ -3651,13 +3773,13 @@ export function AdminBody({
                 <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ background: "#F6F7F9" }}>
                   <div className="min-w-0 flex-1 grid gap-3 items-center text-xs font-bold text-gray-500"
                     style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
-                    <span>氏名 / LINE</span>
-                    <span>大学</span>
+                    <span>{sortHead("kana", "氏名")} / LINE</span>
+                    <span>{sortHead("univ", "大学")}</span>
                     <span>郵便番号・住所</span>
                     <span>電話番号</span>
-                    <span>タスク / 最終ログイン</span>
+                    <span>{sortHead("progress", "タスク")} / {sortHead("lastLogin", "最終ログイン")}</span>
                   </div>
-                  <span className="shrink-0 text-xs font-bold text-gray-500" style={{ width: 196 }}>ステータス</span>
+                  <span className="shrink-0 text-xs font-bold text-gray-500" style={{ width: 196 }}>{sortHead("status", "ステータス")}</span>
                 </div>
               )}
               {filteredActive.length === 0 && <p className="p-4 text-xs text-gray-500">該当する学生がいません</p>}
@@ -3681,7 +3803,12 @@ export function AdminBody({
                           </p>
                           <p className="text-xs text-gray-600 truncate">{s.phone || "-"}</p>
                           <div className="min-w-0">
-                            <p className="text-xs text-gray-500">タスク {p.done}/{p.total}</p>
+                            <span className="flex items-center gap-1.5">
+                              <span className="block h-1.5 rounded-full bg-gray-100 overflow-hidden" style={{ width: 64 }}>
+                                <span className="block h-full rounded-full" style={{ width: `${p.total ? (p.done / p.total) * 100 : 0}%`, background: p.done >= p.total ? TONE.ok.solid : TONE.warn.solid }} />
+                              </span>
+                              <span className="text-xs text-gray-500" style={{ fontVariantNumeric: "tabular-nums" }}>{p.done}/{p.total}</span>
+                            </span>
                             <p className="text-xs text-gray-500 truncate">{lastLoginText(s.id)}</p>
                           </div>
                         </div>
@@ -6290,8 +6417,11 @@ export function AdminBody({
           ["アカウント作成", (logins[d.id] && fmtDateTime(logins[d.id].creationTime)) || "—"],
         ];
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
-            <div className="bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden">
+          <div className={`fixed inset-0 z-[80] flex bg-black bg-opacity-40 ${pc ? "justify-end" : "items-center justify-center px-6"}`}
+            onClick={() => { if (!editDetail) setDetailStudent(null); }}>
+            <div onClick={(ev) => ev.stopPropagation()}
+              className={pc ? "ml-drawer bg-white h-full w-full max-w-md flex flex-col overflow-hidden" : "bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden"}
+              style={pc ? { boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" } : undefined}>
               {/* 固定ヘッダー：名前の横に編集、右上に閉じる（スクロールで隠れない） */}
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">

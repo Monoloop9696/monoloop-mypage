@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Calendar, ClipboardList, MessageCircle, Newspaper,
   ChevronRight, MapPin, Clock, X, Check, LogOut, Download,
@@ -10,7 +10,7 @@ import {
   PAPER, PINK, ROSE, ROSE_DEEP, IVORY, MAUVE, GOLD, MAUVE_INK, GOLD_INK, HAIR, MUTE, INK, LINE_GREEN,
   studentFontStyle, caps as baseCaps,
 } from "../theme";
-import { buildTasks } from "../lib/studentTasks";
+import { buildTasks, dueText } from "../lib/studentTasks";
 
 // 小さなラベル（状態タグなど）。内定者マイページでは最小12pxにそろえる（他ページの見た目は変えない）
 const caps = (size = 12, color = MAUVE_INK, ls = "0.12em") => baseCaps(Math.max(size, 12), color, ls);
@@ -180,6 +180,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   const [interviewBusy, setInterviewBusy] = useState(false);
   const [interviewErr, setInterviewErr] = useState("");
   const [focusEventId, setFocusEventId] = useState(null); // Journeyから開いたイベントへスクロール
+  const [evFilter, setEvFilter] = useState(null); // イベントタブの切替（open/answered/ended。null＝自動）
+  const [rsvpEdit, setRsvpEdit] = useState(null); // 回答を選び直しているイベントid
+  const [journeyOpen, setJourneyOpen] = useState(false); // 道のりの全ステップを開いているか
   const [celebrate, setCelebrate] = useState(false); // 内定承諾のお祝い演出
   const [svBusy, setSvBusy] = useState(false); // アンケート送信中
   const [svErr, setSvErr] = useState(""); // アンケート送信エラー
@@ -361,6 +364,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
   // Journey から特定イベントを開いたとき、そのカードまでスクロール
   useEffect(() => {
     if (tab !== "event" || !focusEventId) return;
+    const target = myEvents.find((x) => x.id === focusEventId);
+    if (target) setEvFilter(eventClosed(target) ? "ended" : target.rsvp === null ? "open" : "answered");
     const t = setTimeout(() => {
       const el = typeof document !== "undefined" ? document.getElementById(`ev-${focusEventId}`) : null;
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -368,6 +373,8 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     }, 80);
     return () => clearTimeout(t);
   }, [tab, focusEventId]);
+
+  useEffect(() => { if (tab !== "event") { setEvFilter(null); setRsvpEdit(null); } }, [tab]);
 
   // 質問箱：開いたら読み込み
   const loadQuestions = async () => {
@@ -586,14 +593,30 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
     return { ...m, label, cta, onTap, isLink, expired: states[i] === "expired" && m.type !== "accept" && m.type !== "join" };
   });
 
-  const statusTag = (e) =>
-    e.rsvp === null ? (
-      <span className="px-2 py-1" style={{ ...caps(9, GOLD_INK, "0.15em"), border: `1px solid ${GOLD}` }}>出欠未回答</span>
-    ) : e.rsvp === "yes" ? (
-      <span className="px-2 py-1" style={{ ...caps(9, ROSE, "0.15em"), background: "#F7E2EA" }}>出席</span>
-    ) : (
-      <span className="px-2 py-1" style={{ ...caps(9, MUTE, "0.15em"), background: "#EFE6E3" }}>欠席</span>
+  const chipStyle = (bg, fg) => ({ background: bg, color: fg });
+  const statusTag = (e) => {
+    const [text, st] = e.rsvp === "yes" ? ["出席", chipStyle("#E4F6EC", "#0A8F4D")]
+      : e.rsvp === "no" ? ["欠席", chipStyle("#EEF0F2", "#6B7280")]
+      : eventClosed(e) ? ["受付終了", chipStyle("#EEF0F2", "#6B7280")]
+      : ["出欠が未回答", chipStyle("#FEF1DC", "#B45309")];
+    return <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={st}>{text}</span>;
+  };
+  // 開催日の日付ブロック（月・日・曜日）。日付未定は「未定」
+  const dateBlock = (dateStr, muted) => {
+    const ok = /^\d{4}-\d{2}-\d{2}$/.test(dateStr || "");
+    const d = ok ? new Date(Number(dateStr.slice(0, 4)), Number(dateStr.slice(5, 7)) - 1, Number(dateStr.slice(8, 10))) : null;
+    return (
+      <span className="shrink-0 text-center font-bold" style={{ width: 54, padding: "6px 0", borderRadius: 12, lineHeight: 1.15, ...(muted ? { background: "#EEF0F2", color: "#6B7280" } : { background: "#FCE3EF", color: ROSE_DEEP }) }}>
+        {d ? (
+          <>
+            <span className="block" style={{ fontSize: 11 }}>{d.getMonth() + 1}月</span>
+            <span className="block" style={{ fontSize: 22 }}>{d.getDate()}</span>
+            <span className="block" style={{ fontSize: 11 }}>{WEEK_JP[d.getDay()]}</span>
+          </>
+        ) : <span className="block py-3" style={{ fontSize: 12 }}>未定</span>}
+      </span>
     );
+  };
 
   const surveyDoneCount = mySurveys.filter((s) => s.done).length;
 
@@ -668,7 +691,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     <h1 className="font-bold flex items-center flex-wrap gap-x-2 gap-y-1" style={{ fontSize: 17, lineHeight: 1.35, color: INK }}>
                       <span>こんにちは、{studentName}さん</span>
                       {accepted && (
-                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY }}>内定承諾済</span>
+                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>内定承諾済</span>
                       )}
                     </h1>
                     <div className="bg-white px-3 py-2 mt-2 shadow-sm"
@@ -736,13 +759,13 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 {myInterview && (
                   <section className="ml-in">
                     <EdHeader jp="面談のご案内" />
-                    <div className="bg-white p-6 ml-in" style={{ border: `1px solid ${HAIR}` }}>
+                    <div className="bg-white p-6 ml-in" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                       {myBooking ? (
                         <>
                           <span style={caps(9, ROSE, "0.18em")}>予約済み</span>
                           <p className="jp-mincho font-bold mt-2" style={{ fontSize: 17 }}>{slotText(myBooking, true)}</p>
                           {myInterview.zoomUrl ? (
-                            <div className="mt-4 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}` }}>
+                            <div className="mt-4 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}`, borderRadius: 12 }}>
                               <p className="text-xs font-bold" style={{ color: MUTE }}>ZOOM URL</p>
                               <a href={myInterview.zoomUrl} target="_blank" rel="noopener noreferrer"
                                 className="text-xs break-all" style={{ color: ROSE, textDecoration: "underline" }}>
@@ -770,7 +793,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                           )}
                           {myProposal ? (
                             <>
-                              <div className="mt-3 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}` }}>
+                              <div className="mt-3 p-3" style={{ background: PAPER, border: `1px solid ${HAIR}`, borderRadius: 12 }}>
                                 <p className="text-xs font-bold" style={{ color: MUTE }}>ご提出いただいた候補（{(myProposal.slots || []).length}件）</p>
                                 {(myProposal.slots || []).map((x) => (
                                   <p key={x.id} className="text-xs mt-1" style={{ color: INK }}>・{slotText(x)}</p>
@@ -782,7 +805,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                               </p>
                               <button onClick={openInterview} disabled={readOnly}
                                 className="w-full mt-3 py-3 text-sm font-bold bg-white disabled:opacity-40"
-                                style={{ border: `1px solid ${ROSE}`, color: ROSE }}>
+                                style={{ border: `1px solid ${ROSE}`, color: ROSE, borderRadius: 12 }}>
                                 候補を修正する
                               </button>
                             </>
@@ -793,7 +816,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                               </p>
                               <button onClick={openInterview} disabled={readOnly}
                                 className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40"
-                                style={{ background: ROSE, color: IVORY }}>
+                                style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                                 希望の日時を登録する
                               </button>
                             </>
@@ -804,10 +827,67 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   </section>
                 )}
 
-                {/* ジャーニー */}
+                {/* ジャーニー：進み具合の点と「いまここ」だけを出し、全体は「すべてのステップを見る」で開く */}
                 <section className="ml-in ml-in-1">
                   <EdHeader jp="入社までの道のり" />
-                  <div>
+                  {milestones.length > 0 && (() => {
+                    // 点の見た目：先頭の「内定/内定承諾」は済んだもの、Now のステップを強調、入社式はこれから
+                    const dotState = (m, i) => (m.type === "accept" ? "done" : displayState(m, i));
+                    const cur = nowIdx >= 0 ? milestones[nowIdx] : null;
+                    const curTappable = cur && !!cur.onTap;
+                    return (
+                      <div className="bg-white p-4 mb-3" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
+                        <div className="flex items-center" aria-hidden="true">
+                          {milestones.map((m, i) => {
+                            const st = dotState(m, i);
+                            return (
+                              <Fragment key={m.id}>
+                                <span className="shrink-0 flex items-center justify-center font-bold"
+                                  style={{
+                                    width: 22, height: 22, borderRadius: 11, fontSize: 11,
+                                    ...(st === "done" ? { background: "#0A8F4D", color: "#fff" }
+                                      : st === "now" ? { background: ROSE, color: "#fff", boxShadow: "0 0 0 4px #FCE3EF" }
+                                      : { background: "#fff", color: MUTE, border: `2px solid ${HAIR}` }),
+                                  }}>
+                                  {st === "done" ? <Check size={12} strokeWidth={3} /> : i + 1}
+                                </span>
+                                {i < milestones.length - 1 && (
+                                  <span className="flex-1" style={{ height: 3, minWidth: 6, background: st === "done" ? "#0A8F4D" : HAIR }} />
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-3.5">
+                          {cur ? (
+                            <>
+                              <p className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>いまここ</span>
+                                <span className="font-bold" style={{ fontSize: 15 }}>{cur.label}</span>
+                              </p>
+                              {cur.desc && <p className="text-xs mt-1" style={{ color: MUTE }}>{cur.desc}</p>}
+                              {curTappable && cur.cta && (
+                                <button onClick={cur.onTap} className="inline-flex items-center gap-1 mt-2.5 text-sm font-bold px-3.5"
+                                  style={{ minHeight: 38, borderRadius: 10, background: ROSE, color: IVORY }}>
+                                  {cur.cta}<ChevronRight size={14} />
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-sm font-bold flex items-center gap-1.5" style={{ color: "#0A8F4D" }}>
+                              <Check size={15} strokeWidth={3} /> ここまでのステップは完了しています
+                            </p>
+                          )}
+                        </div>
+                        <button onClick={() => setJourneyOpen((v) => !v)} aria-expanded={journeyOpen}
+                          className="mt-3 text-xs font-bold inline-flex items-center gap-1" style={{ color: ROSE_DEEP }}>
+                          {journeyOpen ? "たたむ" : `すべてのステップを見る（${milestones.length}）`}
+                          <ChevronRight size={13} style={{ transform: journeyOpen ? "rotate(-90deg)" : "rotate(90deg)" }} />
+                        </button>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ display: journeyOpen || milestones.length === 0 ? "block" : "none" }}>
                     {milestones.map((m, i) => {
                       const state = displayState(m, i);
                       const tappable = !!m.onTap && (m.isLink || state === "now");
@@ -853,27 +933,32 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   </div>
                 </section>
 
-                {/* 直近のイベント */}
+                {/* 次の予定（今日以降のイベントを開催日が近い順に2件） */}
                 <section className="ml-in ml-in-2">
-                  <EdHeader jp="直近のイベント" />
-                  {myEvents.length === 0 ? (
-                    <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>
-                  ) : (
-                    <div className="bg-white" style={{ border: `1px solid ${HAIR}` }}>
-                      {myEvents.slice(0, 2).map((e, i) => (
-                        <button key={e.id} onClick={() => setTab("event")}
-                          className="w-full text-left px-5 py-4 flex items-center gap-4"
-                          style={{ borderBottom: i === 0 && myEvents.length > 1 ? `1px solid ${HAIR}` : "none" }}>
-                          <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 19, color: ROSE, width: 62 }}>{e.num}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-bold text-sm truncate">{e.title}</p>
-                            <p className="text-xs mt-0.5 truncate" style={{ color: MUTE }}>{e.copy}</p>
-                          </div>
-                          {statusTag(e)}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  <EdHeader jp="次の予定" />
+                  {(() => {
+                    const upcoming = myEvents
+                      .filter((e) => !e.dateStr || e.dateStr >= todayStr)
+                      .sort((a, b) => (a.dateStr || "9999").localeCompare(b.dateStr || "9999"))
+                      .slice(0, 2);
+                    if (upcoming.length === 0) return <p className="text-xs" style={{ color: MUTE }}>これからのイベントはありません。</p>;
+                    return (
+                      <div className="space-y-2">
+                        {upcoming.map((e) => (
+                          <button key={e.id} onClick={() => { setTab("event"); setFocusEventId(e.id); }}
+                            className="w-full text-left bg-white p-3 flex items-center gap-3"
+                            style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
+                            {dateBlock(e.dateStr, false)}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold truncate" style={{ fontSize: 15 }}>{e.title}</p>
+                              <p className="text-xs mt-0.5 truncate" style={{ color: MUTE }}>{[e.time, e.place].filter(Boolean).join("・")}</p>
+                            </div>
+                            {statusTag(e)}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </section>
 
                 {/* お知らせ */}
@@ -882,9 +967,9 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   {notices.length === 0 ? (
                     <p className="text-xs" style={{ color: MUTE }}>現在お知らせはありません。</p>
                   ) : (
-                    <div>
+                    <div className="bg-white px-4" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                       {notices.slice(0, 6).map((n, i, arr) => (
-                        <div key={n.id} className="py-4 flex items-baseline gap-4"
+                        <div key={n.id} className="py-3.5 flex items-baseline gap-4"
                           style={{ borderBottom: i < arr.length - 1 ? `1px solid ${HAIR}` : "none" }}>
                           <span className="en-serif shrink-0" style={{ fontSize: 14, color: MAUVE_INK, width: 40 }}>{fmtNoticeDate(n)}</span>
                           <p className="text-sm whitespace-pre-wrap">{n.text}</p>
@@ -906,42 +991,62 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             const unanswered = activeEv.filter((e) => e.rsvp === null);
             const answered = activeEv.filter((e) => e.rsvp !== null);
 
-            const EventCard = (e, isEnded) => (
-              <article key={e.id} id={`ev-${e.id}`} className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, opacity: isEnded ? 0.75 : 1 }}>
-                <div className="p-6">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="en-serif" style={{ fontStyle: "italic", fontSize: 32, lineHeight: 1, color: ROSE }}>
-                      {e.num}<span className="ml-2" style={caps(10, MAUVE_INK, "0.2em")}>{e.en}</span>
-                    </p>
-                    {isEnded
-                      ? <span className="text-xs font-bold px-2 py-1 rounded-full shrink-0" style={{ background: "#F3F4F6", color: "#9CA3AF" }}>受付終了</span>
-                      : statusTag(e)}
-                  </div>
-                  <h3 className="jp-mincho font-bold mt-3" style={{ fontSize: 19 }}>{e.title}</h3>
-                  {e.copy && <p className="text-xs mt-1.5" style={{ color: MUTE }}>{e.copy}</p>}
-                  <div className="mt-4 space-y-1.5 text-xs" style={{ color: MUTE }}>
-                    <p className="flex items-center gap-2"><Clock size={12} /> {e.date}</p>
-                    <p className="flex items-center gap-2"><MapPin size={12} /> {e.place}</p>
-                    <p className="flex items-center gap-2"><ClipboardList size={12} /> 回答期限：{e.deadline}</p>
+            // 上の切替（未回答／回答済み／終了）。選んでいなければ、未回答があればそれを、無ければ回答済みを出す
+            const cur = evFilter || (unanswered.length ? "open" : answered.length ? "answered" : "ended");
+            const shown = cur === "open" ? unanswered : cur === "answered" ? answered : ended;
+
+            const EventCard = (e, isEnded) => {
+              const due = isEnded ? null : dueText(e.deadlineDate || e.dateStr, todayStr);
+              const editing = rsvpEdit === e.id; // 「変更する」を押して選び直し中
+              return (
+              <article key={e.id} id={`ev-${e.id}`} className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
+                <div className="p-4">
+                  <div className="flex gap-3">
+                    {dateBlock(e.dateStr, isEnded)}
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold" style={{ fontSize: 16, lineHeight: 1.4 }}>{e.title}</h3>
+                      <div className="mt-1 space-y-0.5 text-xs" style={{ color: MUTE }}>
+                        <p className="flex items-center gap-1.5"><Clock size={12} className="shrink-0" /> {e.date || e.time || "時間未定"}</p>
+                        {e.place && <p className="flex items-center gap-1.5"><MapPin size={12} className="shrink-0" /> {e.place}</p>}
+                      </div>
+                      {e.copy && <p className="text-xs mt-1.5">{e.copy}</p>}
+                    </div>
                   </div>
                   {isEnded ? (
-                    <p className="mt-4 text-xs font-bold" style={{ color: MUTE }}>
-                      回答受付は終了しました。あなたの回答：{e.rsvp === "yes" ? "出席" : e.rsvp === "no" ? "欠席" : "未回答"}
+                    <p className="mt-3 px-3 py-2 text-xs font-bold" style={{ background: "#EEF0F2", color: "#6B7280", borderRadius: 10 }}>
+                      受付は終了しました（あなたの回答：{e.rsvp === "yes" ? "出席" : e.rsvp === "no" ? "欠席" : "未回答"}）
                     </p>
-                  ) : (
+                  ) : e.rsvp !== null && !editing ? (
                     <>
-                      <div className="flex gap-2.5 mt-5">
-                        <button onClick={() => doRsvp(e.id, "yes")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
-                          style={e.rsvp === "yes" ? { background: ROSE, color: IVORY, border: `1px solid ${ROSE}` } : { background: "#fff", color: ROSE, border: `1px solid ${ROSE}` }}>
-                          出席する
-                        </button>
-                        <button onClick={() => doRsvp(e.id, "no")} className="flex-1 py-2.5 text-sm font-bold disabled:opacity-60"
-                          style={e.rsvp === "no" ? { background: "#6E5A62", color: "#fff", border: "1px solid #6E5A62" } : { background: "#fff", color: MUTE, border: `1px solid ${HAIR}` }}>
-                          欠席する
-                        </button>
+                      <div className="mt-3 px-3 py-2.5 flex items-center justify-between gap-2 text-sm font-bold"
+                        style={{ borderRadius: 10, ...(e.rsvp === "yes" ? { background: "#E4F6EC", color: "#0A8F4D" } : { background: "#EEF0F2", color: "#6B7280" }) }}>
+                        <span className="flex items-center gap-1.5"><Check size={15} strokeWidth={3} /> {e.rsvp === "yes" ? "出席" : "欠席"}で回答済み</span>
+                        <button onClick={() => setRsvpEdit(e.id)} className="text-xs font-bold underline">変更する</button>
                       </div>
                       {e.changed && (
                         <p className="text-xs mt-2" style={{ color: MUTE }}>回答を変更しました。担当者に共有されます。</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <p className="mt-3 flex items-center gap-1.5 text-xs font-bold" style={{ color: due && due.urgent ? "#C81E1E" : "#B45309" }}>
+                        <ClipboardList size={13} className="shrink-0" />
+                        {due ? `回答期限 ${due.date}・${due.leftText}` : `回答期限：${e.deadline || "開催日まで"}`}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 mt-2.5">
+                        <button onClick={() => { doRsvp(e.id, "yes"); setRsvpEdit(null); }} className="text-sm font-bold disabled:opacity-60"
+                          style={{ minHeight: 46, borderRadius: 12, background: ROSE, color: IVORY, border: `1px solid ${ROSE}` }}>
+                          出席する
+                        </button>
+                        <button onClick={() => { doRsvp(e.id, "no"); setRsvpEdit(null); }} className="text-sm font-bold disabled:opacity-60"
+                          style={{ minHeight: 46, borderRadius: 12, background: "#fff", color: INK, border: `1.5px solid ${HAIR}` }}>
+                          欠席する
+                        </button>
+                      </div>
+                      {editing && (
+                        <button onClick={() => setRsvpEdit(null)} className="mt-2 text-xs font-bold underline" style={{ color: MUTE }}>
+                          変更をやめる（いまの回答：{e.rsvp === "yes" ? "出席" : "欠席"}）
+                        </button>
                       )}
                     </>
                   )}
@@ -956,18 +1061,18 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       <div className="mt-3">
                         {e.arrived ? (
                           <div className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5"
-                            style={{ background: "#EAF7EE", color: "#1E874B", border: "1px solid #BFE6CC" }}>
+                            style={{ background: "#E4F6EC", color: "#0A8F4D", border: "1px solid #BFE6CC", borderRadius: 12 }}>
                             <Check size={15} /> 到着を受け付けました
                           </div>
                         ) : canArrive ? (
                           <button onClick={() => doArrive(e.id)}
                             className="w-full py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                            style={{ background: "#1E874B", color: "#fff", border: "1px solid #1E874B" }}>
+                            style={{ background: "#0A8F4D", color: "#fff", border: "1px solid #0A8F4D", borderRadius: 12 }}>
                             <MapPin size={15} /> {e.arrivalLabel || "会場に到着したら押す"}
                           </button>
                         ) : (
                           <div className="w-full py-2.5 text-xs font-bold text-center"
-                            style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}` }}>
+                            style={{ background: "#F7F3F4", color: MUTE, border: `1px solid ${HAIR}`, borderRadius: 12 }}>
                             当日にこちらから到着を受け付けます
                           </div>
                         )}
@@ -976,29 +1081,34 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   })()}
                 </div>
               </article>
-            );
+              );
+            };
 
             return (
-              <div className="px-6 pt-8 space-y-8">
-                <EdHeader jp="イベント" note="出欠のご回答をお願いします" />
-                {myEvents.length === 0 && <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>}
-                {unanswered.length > 0 && (
-                  <div className="space-y-5">
-                    <p className="text-xs font-bold" style={{ color: ROSE }}>未回答（{unanswered.length}）</p>
-                    {unanswered.map((e) => EventCard(e, false))}
-                  </div>
-                )}
-                {answered.length > 0 && (
-                  <div className="space-y-5">
-                    <p className="text-xs font-bold" style={{ color: MAUVE_INK }}>回答済み（{answered.length}）</p>
-                    {answered.map((e) => EventCard(e, false))}
-                  </div>
-                )}
-                {ended.length > 0 && (
-                  <div className="space-y-5">
-                    <p className="text-xs font-bold" style={{ color: MUTE }}>受付終了（{ended.length}）</p>
-                    {ended.map((e) => EventCard(e, true))}
-                  </div>
+              <div className="px-4 pt-8">
+                <div className="px-2"><EdHeader jp="イベント" note="出欠のご回答をお願いします" /></div>
+                {myEvents.length === 0 ? (
+                  <p className="text-xs px-2" style={{ color: MUTE }}>現在ご案内中のイベントはありません。</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-3 gap-0.5 p-1 bg-white mb-4" role="group" aria-label="表示するイベント"
+                      style={{ border: `1px solid ${HAIR}`, borderRadius: 12 }}>
+                      {[["open", "未回答", unanswered.length], ["answered", "回答済み", answered.length], ["ended", "終了", ended.length]].map(([k, label, n]) => (
+                        <button key={k} onClick={() => { setEvFilter(k); setRsvpEdit(null); }} aria-pressed={cur === k}
+                          className="py-2 text-sm font-bold"
+                          style={cur === k ? { background: ROSE, color: IVORY, borderRadius: 9 } : { color: MUTE, borderRadius: 9 }}>
+                          {label} {n}
+                        </button>
+                      ))}
+                    </div>
+                    {shown.length === 0 ? (
+                      <p className="text-xs text-center py-8" style={{ color: MUTE }}>
+                        {cur === "open" ? "未回答のイベントはありません。" : cur === "answered" ? "回答済みのイベントはありません。" : "終了したイベントはありません。"}
+                      </p>
+                    ) : (
+                      <div className="space-y-3">{shown.map((e) => EventCard(e, cur === "ended"))}</div>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -1012,45 +1122,51 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
             const unanswered = activeSv.filter((s) => !s.done);
             const answered = activeSv.filter((s) => s.done);
 
+            // アンケート1件のカード。未回答＝橙の印と「回答する」、回答済み＝緑、受付終了＝灰
             const SurveyList = (items, isEnded) => (
-              <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
-                {items.map((s, i) => (
-                  <button key={s.id} disabled={s.done || isEnded}
-                    onClick={() => { setActiveSurvey(s); setSvAnswers({}); setSvPath([]); }}
-                    className="w-full text-left px-5 py-5 flex items-center gap-4"
-                    style={{ borderBottom: i < items.length - 1 ? `1px solid ${HAIR}` : "none", opacity: (s.done || isEnded) ? 0.65 : 1 }}>
-                    <span className="en-serif shrink-0" style={{ fontStyle: "italic", fontSize: 20, color: (s.done || isEnded) ? MAUVE_INK : GOLD_INK, width: 30 }}>0{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="jp-mincho font-bold text-sm truncate" style={{ fontSize: 15 }}>{s.title}</p>
-                      <p className="text-xs mt-1" style={{ color: MUTE }}>
-                        {isEnded ? "受付は終了しました" : s.done ? "ご回答ありがとうございました" : `${s.due || "期限なし"} ・ 所要 ${s.time || "—"}`}
-                      </p>
-                    </div>
-                    {isEnded ? (
-                      <span style={caps(9, MUTE, "0.18em")}>終了</span>
-                    ) : s.done ? (
-                      <span style={caps(9, MAUVE_INK, "0.18em")}>回答済み</span>
-                    ) : (
-                      <span className="flex items-center gap-1" style={caps(9, GOLD_INK, "0.18em")}>回答する <ChevronRight size={12} /></span>
-                    )}
-                  </button>
-                ))}
+              <div className="space-y-2">
+                {items.map((s) => {
+                  const openNow = !s.done && !isEnded;
+                  const due = openNow ? dueText(s.dueDate, todayStr) : null;
+                  const tile = isEnded ? { bg: "#EEF0F2", fg: "#6B7280" } : s.done ? { bg: "#E4F6EC", fg: "#0A8F4D" } : { bg: "#FEF1DC", fg: "#B45309" };
+                  const sub = isEnded ? "受付は終了しました" : s.done ? "ご回答ありがとうございました"
+                    : [s.time ? `所要 ${s.time}` : "", due ? `期限 ${due.date}` : (s.due ? `期限 ${s.due}` : "期限なし")].filter(Boolean).join("・");
+                  return (
+                    <button key={s.id} disabled={!openNow}
+                      onClick={() => { setActiveSurvey(s); setSvAnswers({}); setSvPath([]); }}
+                      className="w-full text-left bg-white p-3 flex items-center gap-3 ml-in"
+                      style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
+                      <span className="shrink-0 flex items-center justify-center" style={{ width: 40, height: 40, borderRadius: 10, background: tile.bg, color: tile.fg }}>
+                        {s.done ? <Check size={20} strokeWidth={3} /> : <ClipboardList size={20} />}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-bold" style={{ fontSize: 15, lineHeight: 1.4 }}>{s.title}</span>
+                        <span className="block text-xs mt-0.5" style={{ color: MUTE }}>
+                          {sub}
+                          {due && <span className="font-bold" style={{ color: due.urgent ? "#C81E1E" : "#B45309" }}>・{due.leftText}</span>}
+                        </span>
+                      </span>
+                      {openNow ? (
+                        <span className="shrink-0 text-xs font-bold px-3 flex items-center" style={{ minHeight: 36, borderRadius: 10, background: ROSE, color: IVORY }}>回答する</span>
+                      ) : (
+                        <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: tile.bg, color: tile.fg }}>{isEnded ? "終了" : "回答済み"}</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             );
 
             return (
-              <div className="px-6 pt-8">
-                <EdHeader jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} />
+              <div className="px-4 pt-8">
+                <div className="px-2"><EdHeader jp="アンケート" note={`${surveyDoneCount} / ${mySurveys.length} 回答済み`} /></div>
                 {mySurveys.length === 0 ? (
-                  <p className="text-xs" style={{ color: MUTE }}>現在ご案内中のアンケートはありません。</p>
+                  <p className="text-xs px-2" style={{ color: MUTE }}>現在ご案内中のアンケートはありません。</p>
                 ) : (
                   <>
-                    <div className="mb-6" style={{ height: 2, background: "#F0DFE0" }}>
-                      <div style={{ height: 2, width: `${mySurveys.length ? (surveyDoneCount / mySurveys.length) * 100 : 0}%`, background: GOLD, transition: "width .6s ease" }} />
-                    </div>
-                    {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2" style={{ color: GOLD_INK }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
-                    {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MAUVE_INK }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
-                    {ended.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6" style={{ color: MUTE }}>受付終了（{ended.length}）</p>{SurveyList(ended, true)}</>)}
+                    {unanswered.length > 0 && (<><p className="text-xs font-bold mb-2 px-2" style={{ color: "#B45309" }}>未回答（{unanswered.length}）</p>{SurveyList(unanswered, false)}</>)}
+                    {answered.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6 px-2" style={{ color: "#0A8F4D" }}>回答済み（{answered.length}）</p>{SurveyList(answered, false)}</>)}
+                    {ended.length > 0 && (<><p className="text-xs font-bold mb-2 mt-6 px-2" style={{ color: MUTE }}>受付終了（{ended.length}）</p>{SurveyList(ended, true)}</>)}
                   </>
                 )}
               </div>
@@ -1067,7 +1183,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <div className="space-y-4">
                   {myArticles.map((a) => (
                     <button key={a.id} onClick={() => setActiveArticle(a)}
-                      className="w-full text-left bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
+                      className="w-full text-left bg-white ml-in" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                       {a.thumb && (
                         <img src={a.thumb} alt="" className="w-full" style={{ height: 150, objectFit: "cover" }} />
                       )}
@@ -1167,7 +1283,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
           {tab === "line" && (
             <div className="px-6 pt-8">
               <EdHeader jp="LINE連携" />
-              <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}` }}>
+              <div className="bg-white ml-in" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                 <div className="p-6">
                   {lineLinked ? (
                     <div className="text-center py-4">
@@ -1231,16 +1347,16 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <p className="text-xs" style={{ color: MUTE }}>プレビューでは質問箱はご利用いただけません。</p>
               ) : (
                 <>
-                  <div className="bg-white ml-in p-5" style={{ border: `1px solid ${HAIR}` }}>
+                  <div className="bg-white ml-in p-5" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                     <p className="jp-mincho font-bold" style={{ fontSize: 15 }}>質問を送る</p>
                     <p className="text-xs mt-1" style={{ color: MUTE }}>内容は採用担当のみが確認します。回答が届くとLINEでお知らせします（連携時）。</p>
                     <textarea value={qText} onChange={(e) => setQText(e.target.value)} rows={3}
                       placeholder="例）内定式の服装について教えてください。"
-                      className="w-full mt-3 p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                      className="w-full mt-3 p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }} />
                     {qErr && <p className="text-xs mt-1" style={{ color: "#DC2626" }}>{qErr}</p>}
                     <button disabled={!qText.trim() || qBusy} onClick={submitQuestion}
                       className="w-full mt-2 py-2.5 text-sm font-bold flex items-center justify-center gap-1.5 disabled:opacity-40"
-                      style={{ background: ROSE, color: IVORY }}>
+                      style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                       <Send size={15} /> {qBusy ? "送信中…" : "質問を送信"}
                     </button>
                   </div>
@@ -1252,7 +1368,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     ) : (
                       <div className="space-y-3">
                         {qData.mine.map((q) => (
-                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}` }}>
+                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                             <p className="text-sm whitespace-pre-wrap">{q.text}</p>
                             {q.answer ? (
                               <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${HAIR}` }}>
@@ -1273,7 +1389,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                       <p className="text-xs font-bold mb-2" style={{ color: MAUVE_INK }}>みんなのQ&A（{qData.faq.length}）</p>
                       <div className="space-y-3">
                         {qData.faq.map((q) => (
-                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}` }}>
+                          <div key={q.id} className="bg-white ml-in p-4" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                             <p className="text-sm font-bold">Q. {q.text}</p>
                             <p className="text-sm mt-2 whitespace-pre-wrap" style={{ color: INK }}>A. {q.answer}</p>
                           </div>
@@ -1308,12 +1424,12 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     <div key={fld.key}>
                       <p className="mb-1.5" style={caps(9, MUTE, "0.14em")}>{fld.label}{fld.req && <span style={{ color: GOLD_INK }}> *</span>}</p>
                       <input value={profileForm[fld.key]} onChange={(e) => setProfileForm({ ...profileForm, [fld.key]: e.target.value })}
-                        placeholder={fld.ph} className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                        placeholder={fld.ph} className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }} />
                     </div>
                   ))}
                 </div>
                 <button disabled={readOnly || !profileForm.address || !profileForm.phone || savingProfile} onClick={saveProfile}
-                  className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                  className="w-full mt-6 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                   {readOnly ? "プレビュー（保存不可）" : savingProfile ? "保存中…" : "登録する"}
                 </button>
               </div>
@@ -1341,7 +1457,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 </p>
                 <p className="text-xs mb-1" style={{ color: MUTE }}>日付</p>
                 <input type="date" value={ivDraft.date} onChange={(e) => setIvDraft({ ...ivDraft, date: e.target.value })}
-                  className="w-full p-2.5 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                  className="w-full p-2.5 text-sm bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }} />
                 <div className="grid grid-cols-2 gap-2 mt-2">
                   <div>
                     <p className="text-xs mb-1" style={{ color: MUTE }}>開始できる時刻（から）</p>
@@ -1363,7 +1479,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <div className="mt-4 space-y-1.5">
                   {ivSlots.length === 0 && <p className="text-xs" style={{ color: MUTE }}>まだ候補がありません。上の欄から追加してください。</p>}
                   {ivSlots.map((x) => (
-                    <div key={x.id} className="flex items-center gap-2 px-3 py-2.5 bg-white" style={{ border: `1px solid ${HAIR}` }}>
+                    <div key={x.id} className="flex items-center gap-2 px-3 py-2.5 bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }}>
                       <span className="text-sm flex-1">{slotText(x)}</span>
                       <button onClick={() => removeIvSlot(x.id)} aria-label="削除" className="shrink-0"><X size={15} style={{ color: MAUVE_INK }} /></button>
                     </div>
@@ -1373,11 +1489,11 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                 <p className="text-sm font-bold mt-5 mb-2">担当者へのご連絡（任意）</p>
                 <textarea value={ivNote} onChange={(e) => setIvNote(e.target.value)} rows={3}
                   placeholder="例）平日は18時以降ですと助かります。"
-                  className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                  className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }} />
 
                 {interviewErr && <p className="text-xs font-bold mt-3" style={{ color: "#C0264B" }}>{interviewErr}</p>}
                 <button disabled={readOnly || interviewBusy || ivSlots.length === 0} onClick={submitInterview}
-                  className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                  className="w-full mt-4 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                   {readOnly ? "プレビュー（送信不可）" : interviewBusy ? "送信中…" : `この${ivSlots.length}件を送る`}
                 </button>
               </div>
@@ -1411,7 +1527,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                   これから入社までの道のりを、このマイページで一緒に進めていきましょう。
                 </p>
                 <button onClick={closeCelebrate} className="w-full mt-6 py-3.5 text-sm font-bold"
-                  style={{ background: ROSE, color: IVORY }}>
+                  style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                   はじめる
                 </button>
               </div>
@@ -1487,7 +1603,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                         </p>
                         {q.type === "text" ? (
                           <textarea value={svAnswers[q.id] || ""} onChange={(e) => setText(q, e.target.value)} rows={3}
-                            placeholder="自由にご記入ください" className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}` }} />
+                            placeholder="自由にご記入ください" className="w-full p-3 text-sm bg-white" style={{ border: `1px solid ${HAIR}`, borderRadius: 16 }} />
                         ) : q.type === "scale" ? (
                           <div>
                             <div className="flex gap-1.5">
@@ -1539,12 +1655,12 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
                     )}
                     {isLastPage ? (
                       <button disabled={readOnly || !valid || svBusy} onClick={submitSurvey}
-                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                         {readOnly ? "プレビュー（送信不可）" : svBusy ? "送信中…" : "回答を送信する"}
                       </button>
                     ) : (
                       <button disabled={!valid} onClick={goNext}
-                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY }}>
+                        className="flex-1 py-3.5 text-sm font-bold disabled:opacity-40" style={{ background: ROSE, color: IVORY, borderRadius: 12 }}>
                         次へ
                       </button>
                     )}
