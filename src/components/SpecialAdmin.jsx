@@ -17,11 +17,11 @@ import {
 // =====================================================================
 
 const STATUS_STYLE = {
-  未対応: { background: "#FFF7E6", color: "#B45309" },
+  未対応: { background: "#FEF1DC", color: "#B45309" },
   連絡済: { background: "#EEF2FF", color: "#4338CA" },
   日程調整済: { background: "#EEF2FF", color: "#4338CA" },
   選考中: { background: BRAND_LIGHT, color: BRAND },
-  内定: { background: "#EAF7EE", color: "#1E874B" },
+  内定: { background: "#E4F6EC", color: "#0A8F4D" },
   辞退: { background: "#F3F4F6", color: "#6B7280" },
   見送り: { background: "#F3F4F6", color: "#6B7280" },
 };
@@ -32,8 +32,8 @@ const KIND_STYLE = {
 };
 const kindStyle = (k) => KIND_STYLE[k] || { background: "#F3F4F6", color: "#6B7280", border: "#E5E7EB", accent: "#6B7280" };
 const CODE_STATE = {
-  on: { label: "受付中", style: { background: "#EAF7EE", color: "#1E874B" } },
-  exp: { label: "期限切れ", style: { background: "#FFF7E6", color: "#B45309" } },
+  on: { label: "受付中", style: { background: "#E4F6EC", color: "#0A8F4D" } },
+  exp: { label: "期限切れ", style: { background: "#FEF1DC", color: "#B45309" } },
   off: { label: "停止中", style: { background: "#F3F4F6", color: "#6B7280" } },
 };
 
@@ -220,7 +220,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
           ...SPECIAL_ROUTES.map((r) => [r.name.replace("ルート", ""), entries.filter((e) => e.route === r.id).length]),
         ].map(([k, v]) => (
           <div key={k} className="bg-white border border-gray-200 rounded-xl px-3 py-2.5">
-            <p className="text-[11px] text-gray-500 truncate">{k}</p>
+            <p className="text-xs text-gray-500 truncate">{k}</p>
             <p className="text-xl font-bold tabular-nums" style={k === "未対応" && v > 0 ? { color: "#B45309" } : {}}>{v}</p>
           </div>
         ))}
@@ -238,7 +238,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
             className="shrink-0 px-3.5 py-2 rounded-lg text-xs font-bold border flex items-center gap-1.5"
             style={view === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
             {label}
-            {n != null && <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={view === v ? { background: "rgba(255,255,255,0.25)" } : { background: "#F3F4F6" }}>{n}</span>}
+            {n != null && <span className="text-xs px-1.5 py-0.5 rounded-full" style={view === v ? { background: "rgba(255,255,255,0.25)" } : { background: "#F3F4F6" }}>{n}</span>}
           </button>
         ))}
       </div>
@@ -278,11 +278,11 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
           </div>
 
           {entries.length === 0 ? (
-            <p className="text-xs text-gray-400 bg-white border border-dashed border-gray-300 rounded-xl px-4 py-6 text-center">
+            <p className="text-xs text-gray-500 bg-white border border-dashed border-gray-300 rounded-xl px-4 py-6 text-center">
               まだエントリーはありません。「特別コード」でコードを発行し、「スカウト文面」をコピーして送ってください。
             </p>
           ) : list.length === 0 ? (
-            <p className="text-xs text-gray-400">条件に合うエントリーはありません。</p>
+            <p className="text-xs text-gray-500">条件に合うエントリーはありません。</p>
           ) : (
             <div className={pc ? "grid grid-cols-2 gap-3" : "space-y-3"}>
               {list.map((e) => {
@@ -291,7 +291,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                   <div key={e.id} className={`${card} space-y-2 min-w-0`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-bold text-sm truncate">{e.name}<span className="text-xs text-gray-400 font-normal ml-1.5">{e.kana}</span></p>
+                        <p className="font-bold text-sm truncate">{e.name}<span className="text-xs text-gray-500 font-normal ml-1.5">{e.kana}</span></p>
                         <p className="text-xs text-gray-500 truncate">{e.univ}{e.faculty ? `・${e.faculty}` : ""}{e.grad ? `・${e.grad}卒` : ""}</p>
                       </div>
                       <select value={st} onChange={(ev) => safe(() => updateTemplate(e.id, { status: ev.target.value }), "対応状況の更新に失敗しました")}
@@ -300,11 +300,11 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         {SPECIAL_STATUSES.map((s) => <option key={s}>{s}</option>)}
                       </select>
                     </div>
-                    <div className="flex flex-wrap gap-1.5 text-[11px]">
+                    <div className="flex flex-wrap gap-1.5 text-xs">
                       <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: BRAND_LIGHT, color: BRAND }}>{specialRouteName(e.route)}</span>
                       <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 font-mono">{e.code}</span>
                       {e.codeLabel && <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{e.codeLabel}</span>}
-                      {e.resubmitCount > 0 && <span className="px-2 py-0.5 rounded-full" style={{ background: "#FFF7E6", color: "#B45309" }}>再エントリー{e.resubmitCount}回</span>}
+                      {e.resubmitCount > 0 && <span className="px-2 py-0.5 rounded-full" style={{ background: "#FEF1DC", color: "#B45309" }}>再エントリー{e.resubmitCount}回</span>}
                     </div>
                     {(slotKindForRoute(e.route) || e.otherDate || e.confirmedSlotId) && (() => {
                       const kind = slotKindForRoute(e.route);
@@ -312,24 +312,24 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                       const fixed = e.confirmedSlotId ? slotById.get(e.confirmedSlotId) : null;
                       return (
                         <div className="rounded-lg px-2.5 py-2 space-y-1.5" style={{ background: "#F9FAFB" }}>
-                          <p className="text-[11px] text-gray-400">{kind ? `${SLOT_KINDS[kind]}の候補日程` : "候補日程"}</p>
-                          <div className="flex flex-wrap gap-1.5 text-[11px]">
+                          <p className="text-xs text-gray-500">{kind ? `${SLOT_KINDS[kind]}の候補日程` : "候補日程"}</p>
+                          <div className="flex flex-wrap gap-1.5 text-xs">
                             {(e.slotIds || []).map((id) => (
                               <span key={id} className="px-2 py-0.5 rounded-full border"
                                 style={{ background: "#fff", borderColor: kindStyle(kind).border, color: kindStyle(kind).color }}>{slotLabelOf(id)}</span>
                             ))}
-                            {e.otherDate && <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: "#FFF7E6", color: "#B45309" }}>別日で調整を希望</span>}
-                            {!(e.slotIds || []).length && !e.otherDate && <span className="text-gray-400">候補なし（公開中の日程がありませんでした）</span>}
+                            {e.otherDate && <span className="px-2 py-0.5 rounded-full font-bold" style={{ background: "#FEF1DC", color: "#B45309" }}>別日で調整を希望</span>}
+                            {!(e.slotIds || []).length && !e.otherDate && <span className="text-gray-500">候補なし（公開中の日程がありませんでした）</span>}
                           </div>
                           {e.confirmedSlotId && (
-                            <p className="text-[11px] font-bold flex flex-wrap items-center gap-1.5">
-                              <span className="px-2 py-0.5 rounded-full" style={{ background: "#EAF7EE", color: "#1E874B" }}>
+                            <p className="text-xs font-bold flex flex-wrap items-center gap-1.5">
+                              <span className="px-2 py-0.5 rounded-full" style={{ background: "#E4F6EC", color: "#0A8F4D" }}>
                                 確定 {fixed ? formatSlotLabel(fixed) : "（削除済みの枠）"}{fixed && fixed.active === false ? "（停止中）" : ""}
                               </span>
-                              {e.confirmMailAt && <span className="text-gray-400 font-normal">案内メール送信済 {fmt(e.confirmMailAt)}</span>}
+                              {e.confirmMailAt && <span className="text-gray-500 font-normal">案内メール送信済 {fmt(e.confirmMailAt)}</span>}
                             </p>
                           )}
-                          <label className="flex items-center gap-2 text-[11px] text-gray-500">
+                          <label className="flex items-center gap-2 text-xs text-gray-500">
                             確定する日程
                             <select value={e.confirmedSlotId || ""} className={`${sel} flex-1 min-w-0`}
                               onChange={(ev) => setConfirmDlg({ entry: e, slotId: ev.target.value || null, sendMail: !!ev.target.value })}>
@@ -343,11 +343,11 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                     <div className="text-xs text-gray-600 space-y-0.5 break-all">
                       <p>✉ <span className="select-all">{e.email}</span></p>
                       {e.phone && <p>☎ <span className="select-all">{e.phone}</span></p>}
-                      <p className="text-gray-400">受付 {fmt(e.createdAt)}{e.resubmitCount > 0 ? `／最終更新 ${fmt(e.updatedAt)}` : ""}</p>
+                      <p className="text-gray-500">受付 {fmt(e.createdAt)}{e.resubmitCount > 0 ? `／最終更新 ${fmt(e.updatedAt)}` : ""}</p>
                     </div>
                     {e.question && (
                       <p className="text-xs rounded-lg px-2.5 py-2 whitespace-pre-wrap" style={{ background: "#F9FAFB" }}>
-                        <span className="text-gray-400">聞きたいこと：</span>{e.question}
+                        <span className="text-gray-500">聞きたいこと：</span>{e.question}
                       </p>
                     )}
                     {openMemo === e.id ? (
@@ -357,13 +357,13 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         <div className="flex gap-2">
                           <button onClick={() => safe(async () => { await updateTemplate(e.id, { memo: memoDraft }); setOpenMemo(null); }, "メモの保存に失敗しました")}
                             className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
-                          <button onClick={() => setOpenMemo(null)} className="text-xs text-gray-400">取消</button>
+                          <button onClick={() => setOpenMemo(null)} className="text-xs text-gray-500">取消</button>
                         </div>
                       </div>
                     ) : e.memo ? (
                       <button onClick={() => { setOpenMemo(e.id); setMemoDraft(e.memo || ""); }}
                         className="block w-full text-left text-xs rounded-lg px-2.5 py-2 whitespace-pre-wrap" style={{ background: "#FFFBEB" }}>
-                        <span className="text-gray-400">メモ：</span>{e.memo}
+                        <span className="text-gray-500">メモ：</span>{e.memo}
                       </button>
                     ) : null}
                     <div className="flex items-center gap-3 pt-1">
@@ -374,8 +374,8 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         <span className="ml-auto flex items-center gap-2">
                           <span className="text-xs text-gray-500">削除しますか？</span>
                           <button onClick={() => { setConfirmDel(null); safe(() => deleteTemplate(e.id), "削除に失敗しました"); }}
-                            className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
-                          <button onClick={() => setConfirmDel(null)} className="text-xs text-gray-400">取消</button>
+                            className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
+                          <button onClick={() => setConfirmDel(null)} className="text-xs text-gray-500">取消</button>
                         </span>
                       ) : (
                         <button onClick={() => setConfirmDel(e.id)} className="ml-auto text-gray-300 hover:text-gray-500" aria-label="エントリーを削除">
@@ -414,14 +414,14 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                     placeholder="OfferBox 11月第1回" className="w-full border border-gray-300 rounded-lg px-2.5 py-2 text-sm" />
                 </div>
               </div>
-              {codeErr && <p className="text-xs" style={{ color: "#B91C1C" }}>{codeErr}</p>}
+              {codeErr && <p className="text-xs" style={{ color: "#C81E1E" }}>{codeErr}</p>}
               <button type="submit" disabled={busy} className={`${pc ? "px-6" : "w-full"} text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50`} style={{ background: BRAND }}>
                 {busy ? "発行中…" : "コードを発行"}
               </button>
             </form>
 
             {codes.length === 0 ? (
-              <p className="text-xs text-gray-400">まだコードはありません。</p>
+              <p className="text-xs text-gray-500">まだコードはありません。</p>
             ) : (
               <div className={pc ? "grid grid-cols-2 gap-3" : "space-y-3"}>
                 {codes.map((c) => {
@@ -431,7 +431,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                     <div key={c.id} className={`${card} space-y-1.5 min-w-0`}>
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-sm">{c.code}</span>
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={s.style}>{s.label}</span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={s.style}>{s.label}</span>
                         <span className="ml-auto text-xs text-gray-500 tabular-nums">{n}件</span>
                       </div>
                       <p className="text-xs text-gray-500 truncate">{c.label || "（経路メモなし）"}・期限 {c.expiresAt ? c.expiresAt.replace(/-/g, "/") : "なし"}</p>
@@ -448,8 +448,8 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         {confirmDel === c.id ? (
                           <span className="ml-auto flex items-center gap-2">
                             <button onClick={() => { setConfirmDel(null); safe(() => deleteTemplate(c.id), "削除に失敗しました"); }}
-                              className="px-2 py-0.5 rounded text-white" style={{ background: "#DC2626" }}>削除する</button>
-                            <button onClick={() => setConfirmDel(null)} className="text-gray-400 font-normal">取消</button>
+                              className="px-2 py-0.5 rounded text-white" style={{ background: "#C81E1E" }}>削除する</button>
+                            <button onClick={() => setConfirmDel(null)} className="text-gray-500 font-normal">取消</button>
                           </span>
                         ) : (
                           <button onClick={() => setConfirmDel(c.id)} className="ml-auto text-gray-300 font-normal" title={n ? "エントリーは残ります" : undefined}>削除</button>
@@ -502,7 +502,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                     placeholder="オンライン（Zoom）" className="w-full border border-gray-300 rounded-lg px-2.5 py-2 text-sm" />
                 </div>
               </div>
-              {slotErr && <p className="text-xs" style={{ color: "#B91C1C" }}>{slotErr}</p>}
+              {slotErr && <p className="text-xs" style={{ color: "#C81E1E" }}>{slotErr}</p>}
               <button type="submit" disabled={busy} className={`${pc ? "px-6" : "w-full"} text-sm font-bold py-2 rounded-lg text-white disabled:opacity-50`} style={{ background: kindStyle(ns.kind).accent }}>
                 {busy ? "追加中…" : `${SLOT_KINDS[ns.kind]}の日程を追加`}
               </button>
@@ -527,9 +527,9 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         {s.note && <p className="text-xs text-gray-500 truncate">{s.note}</p>}
                       </div>
                       <div className="shrink-0 flex flex-col items-end gap-1">
-                        {s.active === false && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">停止中</span>}
-                        {isPast && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">終了</span>}
-                        {full && !isPast && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "#FEE2E2", color: "#B91C1C" }}>満員</span>}
+                        {s.active === false && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">停止中</span>}
+                        {isPast && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">終了</span>}
+                        {full && !isPast && <span className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "#FDE8E8", color: "#C81E1E" }}>満員</span>}
                       </div>
                     </div>
                     <div className="flex items-center gap-3 text-xs">
@@ -547,7 +547,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         名
                       </label>
                     </div>
-                    <div className="flex items-center gap-3 text-[11px] font-bold pt-0.5">
+                    <div className="flex items-center gap-3 text-xs font-bold pt-0.5">
                       <button onClick={() => safe(() => updateTemplate(s.id, { active: s.active === false }), "日程の更新に失敗しました")} className="text-gray-500">
                         {s.active === false ? "再開する" : "停止する"}
                       </button>
@@ -555,8 +555,8 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                         <span className="ml-auto flex items-center gap-2 font-normal">
                           {(c.wish > 0 || c.fixed > 0) && <span className="text-gray-500">希望{c.wish}・確定{c.fixed}件あり</span>}
                           <button onClick={() => { setConfirmDel(null); safe(() => deleteTemplate(s.id), "削除に失敗しました"); }}
-                            className="px-2 py-0.5 rounded text-white font-bold" style={{ background: "#DC2626" }}>削除する</button>
-                          <button onClick={() => setConfirmDel(null)} className="text-gray-400">取消</button>
+                            className="px-2 py-0.5 rounded text-white font-bold" style={{ background: "#C81E1E" }}>削除する</button>
+                          <button onClick={() => setConfirmDel(null)} className="text-gray-500">取消</button>
                         </span>
                       ) : (
                         <button onClick={() => setConfirmDel(s.id)} className="ml-auto text-gray-300 font-normal">削除</button>
@@ -568,7 +568,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
               return (
                 <>
                   {slots.length === 0 ? (
-                    <p className="text-xs text-gray-400">まだ日程はありません。</p>
+                    <p className="text-xs text-gray-500">まだ日程はありません。</p>
                   ) : (
                     <div className={pc ? "grid grid-cols-2 gap-4 items-start" : "space-y-4"}>
                       {Object.entries(SLOT_KINDS).map(([k, label]) => {
@@ -604,7 +604,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
           <div className="space-y-3">
             <SectionTitle>スカウト文面の例</SectionTitle>
             {activeCodes.length === 0 ? (
-              <p className="text-xs text-gray-400">受付中のコードを発行すると、そのコードとURLを入れた文面がここに出ます。</p>
+              <p className="text-xs text-gray-500">受付中のコードを発行すると、そのコードとURLを入れた文面がここに出ます。</p>
             ) : (
               <div className={`${card} space-y-2.5`}>
                 <div className="flex items-center gap-2">
@@ -619,7 +619,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                 <pre className="text-xs whitespace-pre-wrap rounded-lg p-3 bg-gray-50 border border-gray-100" style={{ fontFamily: "inherit" }}>
                   {scoutText(scoutTarget.code, scoutTarget.expiresAt)}
                 </pre>
-                <p className="text-[11px] text-gray-400">「〇〇」は送信前に書き換えてください。URLを開くとコード欄が入力済みの状態でLPが開きます。</p>
+                <p className="text-xs text-gray-500">「〇〇」は送信前に書き換えてください。URLを開くとコード欄が入力済みの状態でLPが開きます。</p>
               </div>
             )}
           </div>
@@ -634,7 +634,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">{confirmDlg.slotId ? "日程の確定" : "確定の取り消し"}</p>
+                  <p className="text-xs text-gray-500">{confirmDlg.slotId ? "日程の確定" : "確定の取り消し"}</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{confirmDlg.entry.name}</p>
                 </div>
                 <button onClick={() => setConfirmDlg(null)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
@@ -646,9 +646,9 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
                     {s && s.note && <p className="text-xs text-gray-500">{s.note}</p>}
                     <label className="flex items-start gap-2 text-sm">
                       <input type="checkbox" checked={confirmDlg.sendMail} onChange={(e) => setConfirmDlg({ ...confirmDlg, sendMail: e.target.checked })} className="mt-1" />
-                      <span>確定後に学生へメールで案内を送る<span className="block text-xs text-gray-400">{confirmDlg.entry.email}</span></span>
+                      <span>確定後に学生へメールで案内を送る<span className="block text-xs text-gray-500">{confirmDlg.entry.email}</span></span>
                     </label>
-                    <p className="text-[11px] text-gray-400">対応状況が「未対応」「連絡済」の場合は「日程調整済」に進みます。残り人数は自動では減りません。</p>
+                    <p className="text-xs text-gray-500">対応状況が「未対応」「連絡済」の場合は「日程調整済」に進みます。残り人数は自動では減りません。</p>
                   </>
                 ) : (
                   <p className="text-xs text-gray-500">この学生の確定日程を「未確定」に戻します。メールは送られません。</p>

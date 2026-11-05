@@ -1,4 +1,31 @@
-import { BRAND, GOLD, HAIR, MUTE, caps } from "../theme";
+import { BRAND, GOLD, HAIR, MUTE, TONE, BTN_LINE, BTN_INK, caps } from "../theme";
+
+// 管理画面：状態ラベル（tone = ok / warn / danger / info / idle。色の意味は theme.js の TONE）
+export function StatusChip({ tone = "idle", children, className = "" }) {
+  const t = TONE[tone] || TONE.idle;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${className}`}
+      style={{ background: t.bg, color: t.fg }}>
+      {children}
+    </span>
+  );
+}
+
+// 管理画面：ボタン3種（primary=主ボタン＝ブランド色の塗り／secondary=副ボタン＝灰色の枠／ghost=補助＝枠なし）
+export function Btn({ variant = "secondary", size = "sm", className = "", style, children, ...rest }) {
+  const sz = size === "md" ? "text-sm px-4 py-2.5 rounded-xl" : "text-xs px-3 py-1.5 rounded-lg";
+  const look = variant === "primary"
+    ? { background: BRAND, color: "#fff", border: `1px solid ${BRAND}` }
+    : variant === "ghost"
+    ? { background: "transparent", color: "#6B7280", border: "1px solid transparent" }
+    : { background: "#fff", color: BTN_INK, border: `1px solid ${BTN_LINE}` };
+  return (
+    <button {...rest} className={`inline-flex items-center justify-center gap-1 font-bold whitespace-nowrap disabled:opacity-40 ${sz} ${className}`}
+      style={{ ...look, ...style }}>
+      {children}
+    </button>
+  );
+}
 
 // 管理画面：セクション見出し
 export function SectionTitle({ children }) {

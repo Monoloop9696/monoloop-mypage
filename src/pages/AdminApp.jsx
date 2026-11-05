@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
-  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket, CalendarRange, MoreHorizontal,
+  BarChart3, Users, Send, CheckCircle2, ChevronRight, ChevronLeft, Download, X, Trash2, LogOut, Eye, Newspaper, ImagePlus, RefreshCw, Search, GripVertical, HelpCircle, Monitor, Smartphone, CalendarDays, TrendingUp, Ticket, CalendarRange, MoreHorizontal, Home,
 } from "lucide-react";
 import SpecialAdmin from "../components/SpecialAdmin";
 import AnnualPlan from "../components/AnnualPlan";
 import { useAuth } from "../auth/AuthContext";
-import { SectionTitle, TimeSelect } from "../components/common";
+import { SectionTitle, TimeSelect, StatusChip, Btn } from "../components/common";
 import { StudentInner } from "./StudentApp";
-import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER } from "../theme";
+import { BRAND, BRAND_LIGHT, LINE_GREEN, INK, PAPER, TONE } from "../theme";
+import { buildAdminTodos, buildUpcoming } from "../lib/adminHome";
+import { dueText } from "../lib/studentTasks";
 import { downloadCsv } from "../lib/csv";
 import { AREAS, areaLabel, matchesAreas, addressArea } from "../lib/area";
 import { useBodyScrollLock } from "../lib/scrollLock";
@@ -96,8 +99,8 @@ const TARGET_CAT = {
   pick: { key: "pick", label: "個別選択", color: "#7C3AED", bg: "#F3E8FF" },
 };
 // 出欠グループ／回答状況の色（出席・回答済み=緑、到着=青、欠席=赤、未回答=灰／橙）
-const EVENT_GROUP_COLOR = { yes: "#059947", arrived: "#0891B2", no: "#DC2626", none: "#6B7280" };
-const SURVEY_GROUP_COLOR = { answered: "#059947", unanswered: "#D97706" };
+const EVENT_GROUP_COLOR = { yes: "#0A8F4D", arrived: "#0891B2", no: "#C81E1E", none: "#6B7280" };
+const SURVEY_GROUP_COLOR = { answered: "#0A8F4D", unanswered: "#D97706" };
 const newQuestion = (type = "single") => ({
   id: `q_${Math.random().toString(36).slice(2, 9)}`,
   type,
@@ -120,6 +123,7 @@ export default function AdminApp() {
   const [cohorts, setCohorts] = useState([]);
   const [notices, setNotices] = useState([]);
   const [banner, setBanner] = useState("");
+  const [headerSlot, setHeaderSlot] = useState(null); // ヘッダー中央の枠（年度切替・検索の差し込み先）
 
   const journeysRef = useRef(journeys);
   useEffect(() => { journeysRef.current = journeys; }, [journeys]);
@@ -180,30 +184,10 @@ export default function AdminApp() {
   return (
     <div className="min-h-screen" style={{ background: "#F4F7F6" }}>
       <div className={`${pcMode ? "max-w-[1600px]" : "max-w-md"} mx-auto min-h-screen relative`}>
-        <header className="sticky top-0 z-40 px-5 py-3.5 flex items-center justify-between"
-          style={{ background: "#fff", borderBottom: "1px solid #E5E7EB" }}>
-          <div className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 22, width: "auto" }} />
-            <div>
-              <p className="text-sm font-bold leading-none">モノループ</p>
-              <p className="text-xs text-gray-400 leading-none mt-0.5">採用管理コンソール</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={togglePcMode}
-              className="flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-lg border"
-              style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}
-              aria-label={pcMode ? "スマホ表示に切り替える" : "PC表示に切り替える"}>
-              {pcMode ? <Smartphone size={13} /> : <Monitor size={13} />} {pcMode ? "スマホ表示" : "PC表示"}
-            </button>
-            <button onClick={signOut} className="flex items-center gap-1 text-xs font-bold text-gray-500" aria-label="ログアウト">
-              <LogOut size={14} /> ログアウト
-            </button>
-          </div>
-        </header>
+        <AdminHeader pcMode={pcMode} togglePcMode={togglePcMode} signOut={signOut} setSlot={setHeaderSlot} />
 
         {banner && (
-          <div className="mx-4 mt-3 rounded-lg px-3 py-2 text-xs font-bold" style={{ background: "#FEF2F2", color: "#B91C1C" }}>
+          <div className="mx-4 mt-3 rounded-lg px-3 py-2 text-xs font-bold" style={{ background: "#FDE8E8", color: "#C81E1E" }}>
             {banner}
           </div>
         )}
@@ -213,21 +197,52 @@ export default function AdminApp() {
           savedTemplates={savedTemplates} journeys={journeys} setJourneys={setJourneys}
           journeysRef={journeysRef} rsvps={rsvps} responses={responses}
           refreshAnswers={refreshAnswers} cohorts={cohorts} notices={notices}
-          setBanner={setBanner} pc={pcMode}
+          setBanner={setBanner} pc={pcMode} headerSlot={headerSlot}
         />
       </div>
     </div>
   );
 }
 
-function AdminBody({
+// 管理画面の上部バー。PC表示では高さを64pxに固定し（左メニュー・年間計画の固定帯が top:64 を前提にしている）、
+// 中央の枠（setSlot で受け取る要素）に AdminBody が年度切替と内定者検索を差し込む（createPortal）
+export function AdminHeader({ pcMode, togglePcMode, signOut, setSlot }) {
+  return (
+    <header className={`sticky top-0 z-40 px-5 flex items-center justify-between gap-3 ${pcMode ? "" : "py-3.5"}`}
+      style={{ background: "#fff", borderBottom: "1px solid #E5E7EB", ...(pcMode ? { height: 64 } : {}) }}>
+      <div className="flex items-center gap-2.5 shrink-0">
+        <img src="/logo.png" alt="モノ・ループ" className="shrink-0" style={{ height: 22, width: "auto" }} />
+        <div>
+          <p className="text-sm font-bold leading-none">モノループ</p>
+          <p className="text-xs text-gray-500 leading-none mt-0.5">採用管理コンソール</p>
+        </div>
+      </div>
+      {pcMode && <div ref={setSlot} className="flex-1 min-w-0 flex items-center gap-2.5 pl-3" />}
+      <div className="flex items-center gap-2 shrink-0">
+        <button onClick={togglePcMode}
+          className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border"
+          style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}
+          aria-label={pcMode ? "スマホ表示に切り替える" : "PC表示に切り替える"}>
+          {pcMode ? <Smartphone size={13} /> : <Monitor size={13} />} {pcMode ? "スマホ表示" : "PC表示"}
+        </button>
+        <button onClick={signOut} className="flex items-center gap-1 text-xs font-bold text-gray-500" aria-label="ログアウト">
+          <LogOut size={14} /> ログアウト
+        </button>
+      </div>
+    </header>
+  );
+}
+
+export function AdminBody({
   students, events, surveys, savedTemplates, journeys, setJourneys, journeysRef,
-  rsvps, responses, refreshAnswers, cohorts, notices, setBanner, pc,
+  rsvps, responses, refreshAnswers, cohorts, notices, setBanner, pc, headerSlot = null,
 }) {
-  const [tab, setTab] = useState("dash");
+  const [tab, setTab] = useState("home");
   const [selectedYear, setSelectedYear] = useState(null);
   const [preview, setPreview] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false); // スマホ表示の下部ナビ「その他」のメニュー
+  const [gq, setGq] = useState(""); // ヘッダーの内定者検索
+  const [gqOpen, setGqOpen] = useState(false);
   const [showAddCohort, setShowAddCohort] = useState(false);
   const [newYear, setNewYear] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -301,6 +316,8 @@ function AdminBody({
   useEffect(() => { if (tab === "line") { refreshBroadcasts(); refreshQuota(); setBcLimit(10); setExpandedBc(null); } }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
   // 年間計画タブの「LINE配信」レーンは broadcasts を使うので、開いたときに読み込む
   useEffect(() => { if (tab === "plan") refreshBroadcasts(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ホームの「今月のLINE送信」用
+  useEffect(() => { if (tab === "home") refreshQuota(); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onPickImages = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -533,7 +550,7 @@ function AdminBody({
   useEffect(() => { setEditDetail(false); }, [detailStudent]);
   // 内定者タブを最初に開いたときに、最終ログインを一度だけ取得
   useEffect(() => {
-    if ((tab !== "students" && tab !== "stats") || loginsState !== "idle" || !students.length) return;
+    if ((tab !== "students" && tab !== "stats" && tab !== "home") || loginsState !== "idle" || !students.length) return;
     loadLogins();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, students.length]);
@@ -1744,15 +1761,15 @@ function AdminBody({
     .map((st) => ({ st, f: followUpOf(st) }))
     .filter((r) => r.f.reasons.length > 0)
     .sort((a, b) => b.f.point - a.f.point || (a.st.kana || a.st.name || "").localeCompare(b.st.kana || b.st.name || "", "ja"));
-  const followColor = (lv) => (lv === "高" ? "#DC2626" : lv === "中" ? "#B45309" : "#6B7280");
-  const followBg = (lv) => (lv === "高" ? "#FEF2F2" : lv === "中" ? "#FFF7E6" : "#F6F7F9");
+  const followColor = (lv) => (lv === "高" ? "#C81E1E" : lv === "中" ? "#B45309" : "#6B7280");
+  const followBg = (lv) => (lv === "高" ? "#FDE8E8" : lv === "中" ? "#FEF1DC" : "#F6F7F9");
   const renderFollowRow = ({ st, f }) => (
     <div key={st.id} className="border rounded-xl p-3" style={{ borderColor: "#E5E7EB", background: followBg(f.level) }}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-bold truncate">
             {st.name}
-            <span className="ml-1.5 text-[11px] font-bold px-2 py-0.5 rounded-full align-middle"
+            <span className="ml-1.5 text-xs font-bold px-2 py-0.5 rounded-full align-middle"
               style={{ background: "#fff", color: followColor(f.level), border: `1px solid ${followColor(f.level)}` }}>
               要フォロー {f.level}
             </span>
@@ -1764,7 +1781,7 @@ function AdminBody({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button onClick={() => openMeetForm(null, st.id)}
-            className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+            className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
             面談を記録
           </button>
           <button onClick={() => setDetailStudent(st.id)}
@@ -2049,20 +2066,22 @@ function AdminBody({
   );
 
   // メニューは3グループ（2026-11）。PCは左サイドバーにグループ見出しつきで並べ、
-  // スマホは下部ナビに MOBILE_MAIN の4つ＋「その他」（残りはグループ見出しつきのシートから選ぶ）
+  // スマホは下部ナビに MOBILE_MAIN の4つ＋「その他」（残りはグループ見出しつきのシートから選ぶ）。
+  // 「ホーム」＝今日やること（tab="home"）。従来の「概況」（tab="dash"）は中身どおり「イベント・アンケート」に改名
   const tabs = [
-    { key: "dash", label: "概況", icon: BarChart3, group: "毎日の業務" },
+    { key: "home", label: "ホーム", icon: Home, group: "毎日の業務" },
     { key: "students", label: "内定者", icon: Users, group: "毎日の業務" },
     { key: "meet", label: "面談", icon: CalendarDays, group: "毎日の業務" },
     { key: "line", label: "LINE配信", icon: Send, group: "毎日の業務" },
     { key: "qbox", label: "質問箱", icon: HelpCircle, group: "毎日の業務" },
+    { key: "dash", label: "イベント・アンケート", icon: BarChart3, group: "企画・発信" },
     { key: "news", label: "記事", icon: Newspaper, group: "企画・発信" },
     { key: "plan", label: "年間計画", icon: CalendarRange, group: "企画・発信" },
     { key: "special", label: "特別選考", icon: Ticket, group: "採用・分析" },
     { key: "stats", label: "分析", icon: TrendingUp, group: "採用・分析" },
   ];
   const TAB_GROUPS = ["毎日の業務", "企画・発信", "採用・分析"];
-  const MOBILE_MAIN = ["dash", "students", "meet", "line"];
+  const MOBILE_MAIN = ["home", "students", "meet", "line"];
   // 特別選考LPからの未対応エントリー数（タブのバッジ用）
   const specialNew = savedTemplates.filter((t) => t._type === "specialEntry" && (t.status || "未対応") === "未対応").length;
   const tabBadge = (key) => (key === "qbox" ? unansweredQ : key === "special" ? specialNew : 0);
@@ -2070,17 +2089,169 @@ function AdminBody({
   const moreBadge = moreTabs.reduce((n, t) => n + tabBadge(t.key), 0);
   const badgeDot = (n, size = 17) => (
     <span className="text-white rounded-full font-bold flex items-center justify-center"
-      style={{ background: "#DC2626", fontSize: 11, minWidth: size, height: size, padding: "0 4px", lineHeight: 1 }}>{n}</span>
+      style={{ background: "#C81E1E", fontSize: 11, minWidth: size, height: size, padding: "0 4px", lineHeight: 1 }}>{n}</span>
   );
+
+  // ---- ホーム（今日やること・数字・受付中の一覧・今週の予定）。集計はホームを開いているときだけ行う ----
+  const home = tab === "home" ? (() => {
+    const eventRows = yearEvents.filter((e) => !eventIsClosed(e)).map((e) => {
+      const yes = eventGroupList(e, "yes").length;
+      const no = eventGroupList(e, "no").length;
+      const un = eventGroupList(e, "none").length;
+      return { id: e.id, kind: "event", title: e.title, deadlineDate: e.deadlineDate || "", dateStr: e.dateStr || "", time: e.time || "", place: e.place || "", target: yes + no + un, yes, no, unanswered: un };
+    });
+    const surveyRows = yearSurveys.filter((s) => !surveyIsClosed(s)).map((s) => {
+      const yes = surveyGroupList(s, "answered").length;
+      const un = surveyGroupList(s, "unanswered").length;
+      return { id: s.id, kind: "survey", title: s.title, dueDate: s.dueDate || "", target: yes + un, yes, no: 0, unanswered: un };
+    });
+    // 面談：学生が希望日時を出していて、まだ確定していない人数
+    const activeIds = new Set(activeStudents.map((s) => s.id));
+    const proposalsWaiting = interviewReqs.reduce((n, r) => (
+      n + Object.keys(r.proposals || {}).filter((uid) => activeIds.has(uid) && !(r.bookings || {})[uid]).length
+    ), 0);
+    const todos = buildAdminTodos({
+      unansweredQ, specialNew, proposalsWaiting, events: eventRows, surveys: surveyRows,
+      followHigh: followRows().filter((r) => r.f.level === "高").length,
+      lineUnlinked: totalActive - linked, todayStr: adminTodayStr,
+    });
+    // 今週の予定（今日から7日間）
+    const bookings = [];
+    interviewReqs.forEach((r) => Object.entries(r.bookings || {}).forEach(([uid, b]) => {
+      if (!b || !b.date || bookingRecorded(uid, b.date)) return;
+      bookings.push({ date: b.date, start: b.start, end: b.end, name: b.name || (students.find((x) => x.id === uid) || {}).name || "", interviewer: b.interviewer || "" });
+    }));
+    const p2 = (n) => String(n).padStart(2, "0");
+    const scheduled = articles
+      .filter((a) => a.publishAt && (a.grad == null || a.grad === selectedYear))
+      .map((a) => ({ a, d: a.publishAt.toDate ? a.publishAt.toDate() : new Date(a.publishAt) }))
+      .filter(({ d }) => !Number.isNaN(d.getTime()) && d.getTime() > Date.now())
+      .map(({ a, d }) => ({ title: a.title || "（無題）", date: `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`, time: `${p2(d.getHours())}:${p2(d.getMinutes())}` }));
+    const upcoming = buildUpcoming({
+      bookings,
+      events: yearEvents.map((e) => ({ title: e.title, dateStr: e.dateStr || "", time: e.time || "", place: e.place || "" })),
+      deadlines: [
+        ...eventRows.filter((r) => r.deadlineDate).map((r) => ({ title: r.title, kind: "event", date: r.deadlineDate, unanswered: r.unanswered })),
+        ...surveyRows.filter((r) => r.dueDate).map((r) => ({ title: r.title, kind: "survey", date: r.dueDate, unanswered: r.unanswered })),
+      ],
+      articles: scheduled, todayStr: adminTodayStr,
+    });
+    const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+    const kpis = [
+      { label: "内定者", value: totalActive, unit: "名" },
+      { label: "承諾済", value: accepted, unit: `名（${pct(accepted, totalActive)}%）`, pct: pct(accepted, totalActive), tone: "ok" },
+      { label: "LINE連携", value: linked, unit: `/ ${totalActive}名`, pct: pct(linked, totalActive), tone: linked === totalActive ? "ok" : "warn" },
+      quota && quota.limit != null
+        ? { label: "今月のLINE送信", value: quota.used, unit: `/ ${quota.limit}通`, pct: Math.min(100, pct(quota.used, quota.limit)), tone: quota.remaining <= 0 ? "danger" : quota.remaining <= 20 ? "warn" : "ok" }
+        : { label: "今月のLINE送信", value: quota ? "無制限" : "—", unit: "" },
+    ];
+    const today = dueText(adminTodayStr, adminTodayStr);
+    return {
+      todos, upcoming, kpis, rows: [...eventRows, ...surveyRows],
+      dateLabel: `${adminTodayStr.slice(0, 4)}年${Number(adminTodayStr.slice(5, 7))}月${Number(adminTodayStr.slice(8, 10))}日${today ? today.date.replace(/^[^（]*/, "") : ""}`,
+    };
+  })() : null;
+  const runTodo = (a) => {
+    if (a.type === "tab") setTab(a.tab);
+    else if (a.type === "line") { setTarget(a.target); setTab("line"); }
+    else if (a.type === "follow") setFollowDrawer(true);
+  };
+  // 受付中の行の状態ラベル（3日以内=赤／10日以内=橙／それ以外=青「受付中」）
+  const dueChip = (dateStr) => {
+    const d = dueText(dateStr, adminTodayStr);
+    if (!d) return { tone: "info", text: "受付中" };
+    if (d.left <= 1) return { tone: "danger", text: `期限 ${d.leftText}` };
+    return { tone: d.urgent ? "danger" : d.left <= 10 ? "warn" : "info", text: `期限まで${d.left}日` };
+  };
+
+  // ---- ヘッダーの内定者検索（PC表示。選択中の年度から名前・フリガナ・大学・メールで探す）----
+  const gqText = gq.trim().toLowerCase();
+  const gqResults = gqText
+    ? yearStudents.filter((s) => [s.name, s.kana, s.univ, s.email].some((v) => (v || "").toLowerCase().includes(gqText))).slice(0, 8)
+    : [];
+  const pickSearchResult = (s) => { setDetailStudent(s.id); setGq(""); setGqOpen(false); };
+  const submitSearch = () => {
+    if (!gqText) return;
+    if (gqResults.length === 1) { pickSearchResult(gqResults[0]); return; }
+    setSearchQuery(gq.trim()); setTab("students"); setGq(""); setGqOpen(false);
+  };
 
   return (
     <div className={pc ? "flex gap-5 px-5 py-4 items-start" : "pb-20"}>
+      {/* PC表示：年度切替・内定者検索・学生画面ボタンをヘッダーに差し込む（どのタブでも同じ場所） */}
+      {pc && headerSlot && createPortal(
+        <>
+          {tab !== "plan" && cohorts.length === 0 && <span className="text-xs text-gray-500 shrink-0">卒年度未登録</span>}
+          {tab !== "plan" && olderCohorts.length > 0 && (
+            <select value={olderSelected ? selectedYear : ""}
+              onChange={(e) => { if (e.target.value) selectYear(Number(e.target.value)); }}
+              aria-label="過去の卒年度" title="過去の卒年度"
+              className="text-xs font-bold rounded-lg border py-2 shrink-0"
+              style={{
+                width: 74, paddingLeft: 8, paddingRight: 4,
+                ...(olderSelected
+                  ? { borderColor: BRAND, color: "#fff", background: BRAND }
+                  : { borderColor: "#E5E7EB", color: "#6B7280", background: "#fff" }),
+              }}>
+              <option value="">past</option>
+              {olderCohorts.map((c) => (
+                <option key={c.year} value={c.year}>{c.year}卒{!c.active ? "（停止）" : ""}</option>
+              ))}
+            </select>
+          )}
+          {tab !== "plan" && newestCohorts.length > 0 && (
+            <div className="flex bg-gray-100 rounded-lg p-0.5 gap-0.5 text-sm font-bold shrink-0" role="group" aria-label="卒年度">
+              {newestCohorts.map((c) => (
+                <button key={c.year} onClick={() => selectYear(c.year)} aria-pressed={selectedYear === c.year}
+                  className="px-3 py-1.5 rounded-md whitespace-nowrap"
+                  style={selectedYear === c.year ? { background: BRAND, color: "#fff" } : { color: c.active ? "#4B5563" : "#9CA3AF" }}>
+                  {c.year}卒{!c.active && "（停止）"}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="relative flex-1 min-w-0" style={{ maxWidth: 340 }}>
+            <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+            <input value={gq} onChange={(e) => { setGq(e.target.value); setGqOpen(true); }}
+              onFocus={() => setGqOpen(true)} onBlur={() => setTimeout(() => setGqOpen(false), 150)}
+              onKeyDown={(e) => { if (e.key === "Enter") submitSearch(); if (e.key === "Escape") { setGq(""); setGqOpen(false); } }}
+              placeholder={`${selectedYear || ""}卒の内定者を名前・大学で検索`} aria-label="内定者を検索"
+              className="w-full border border-gray-300 rounded-lg pl-8 pr-3 py-2 text-sm bg-gray-50 focus:bg-white" />
+            {gqOpen && gqText && (
+              <div className="absolute left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden z-50">
+                {gqResults.length === 0 ? (
+                  <p className="px-3 py-3 text-xs text-gray-500">該当する内定者がいません。</p>
+                ) : gqResults.map((s) => (
+                  <button key={s.id} onMouseDown={(e) => { e.preventDefault(); pickSearchResult(s); }}
+                    className="w-full text-left px-3 py-2 flex items-center gap-2 border-t border-gray-100 first:border-t-0 hover:bg-gray-50">
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold truncate">{s.name || "（名前なし）"}</span>
+                      <span className="block text-xs text-gray-500 truncate">{s.univ || "大学未登録"}</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-gray-500">{statusLabel(s)}</span>
+                  </button>
+                ))}
+                {gqResults.length > 1 && (
+                  <button onMouseDown={(e) => { e.preventDefault(); submitSearch(); }}
+                    className="w-full text-left px-3 py-2 text-xs font-bold border-t border-gray-100 hover:bg-gray-50" style={{ color: BRAND }}>
+                    内定者の一覧で「{gq.trim()}」を探す
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {tab !== "plan" && (
+            <Btn onClick={() => setPreview(true)} className="ml-auto shrink-0"><Eye size={14} /> 学生画面</Btn>
+          )}
+        </>,
+        headerSlot
+      )}
       {pc && (
         <aside className="shrink-0 sticky" style={{ width: 208, top: 64 }}>
           <nav className="bg-white border border-gray-200 rounded-xl p-2 space-y-3" aria-label="管理メニュー">
             {TAB_GROUPS.map((g) => (
               <div key={g}>
-                <p className="px-2 pt-1 pb-1 text-[11px] font-bold text-gray-500">{g}</p>
+                <p className="px-2 pt-1 pb-1 text-xs font-bold text-gray-500">{g}</p>
                 {tabs.filter((t) => t.group === g).map((t) => {
                   const Icon = t.icon;
                   const active = tab === t.key;
@@ -2101,12 +2272,12 @@ function AdminBody({
         </aside>
       )}
       <div className={pc ? "flex-1 min-w-0" : ""}>
-      {/* 共通の年度スイッチャー（年間計画タブは独自の年度切替を持つので出さない） */}
-      {tab !== "plan" && (
+      {/* スマホ表示の年度スイッチャー（PC表示はヘッダーに出す。年間計画タブは独自の年度切替を持つので出さない） */}
+      {!pc && tab !== "plan" && (
       <div className="px-4 pt-3">
         <div className="flex items-center gap-2">
           <div className="flex-1 flex items-center gap-1.5 min-w-0">
-            {cohorts.length === 0 && <span className="px-3 py-2 text-xs text-gray-400">卒年度未登録</span>}
+            {cohorts.length === 0 && <span className="px-3 py-2 text-xs text-gray-500">卒年度未登録</span>}
             {olderCohorts.length > 0 && (
               <select value={olderSelected ? selectedYear : ""}
                 onChange={(e) => { if (e.target.value) selectYear(Number(e.target.value)); }}
@@ -2138,11 +2309,129 @@ function AdminBody({
           </div>
           <button onClick={() => setPreview(true)}
             className="flex items-center gap-1 text-xs font-bold px-2.5 py-2 rounded-xl border shrink-0"
-            style={{ borderColor: "#E5E7EB", color: BRAND, background: "#fff" }}>
+            style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
             <Eye size={15} /> 学生画面
           </button>
         </div>
       </div>
+      )}
+
+      {/* ホーム：今日やること → 数字 → 受付中のイベント・アンケート／今週の予定 */}
+      {tab === "home" && home && (
+        <div className={pc ? "pt-1 space-y-5" : "px-4 pt-4 space-y-5"}>
+          <div>
+            <h1 className="text-xl font-bold">ホーム</h1>
+            <p className="text-xs text-gray-500 mt-0.5">{home.dateLabel}・{selectedYear}卒</p>
+          </div>
+
+          <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+              <h2 className="text-sm font-bold">今日やること</h2>
+              {home.todos.length > 0 && badgeDot(home.todos.length, 19)}
+            </div>
+            {home.todos.length === 0 ? (
+              <p className="px-4 py-5 text-sm font-bold flex items-center gap-2" style={{ color: TONE.ok.fg }}>
+                <CheckCircle2 size={17} /> いま対応が必要なものはありません
+              </p>
+            ) : home.todos.map((t, i) => (
+              <div key={t.key} className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? "border-t border-gray-100" : ""}`}
+                style={{ borderLeft: `4px solid ${TONE[t.tone].solid}` }}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold">{t.title}</p>
+                  {t.sub && <p className="text-xs text-gray-500 mt-0.5">{t.sub}</p>}
+                </div>
+                <Btn onClick={() => runTodo(t.action)} className="shrink-0">{t.action.label}</Btn>
+              </div>
+            ))}
+          </section>
+
+          <div className={pc ? "grid grid-cols-4 gap-3" : "grid grid-cols-2 gap-2"}>
+            {home.kpis.map((k) => (
+              <div key={k.label} className="bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <p className="text-xs text-gray-500">{k.label}</p>
+                <p className="text-2xl font-bold mt-0.5" style={{ color: INK, fontVariantNumeric: "tabular-nums" }}>
+                  {k.value}<span className="text-xs font-normal text-gray-500 ml-1">{k.unit}</span>
+                </p>
+                {k.pct != null && (
+                  <div className="mt-1.5 h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${k.pct}%`, background: TONE[k.tone].solid }} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className={pc ? "grid gap-5 items-start" : "space-y-5"} style={pc ? { gridTemplateColumns: "minmax(0, 1.6fr) minmax(0, 1fr)" } : undefined}>
+            <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-2">
+                <h2 className="text-sm font-bold">受付中のイベント・アンケート</h2>
+                <Btn variant="ghost" onClick={() => setTab("dash")} className="ml-auto">すべて見る <ChevronRight size={14} /></Btn>
+              </div>
+              {home.rows.length === 0 ? (
+                <p className="px-4 py-5 text-xs text-gray-500">受付中のイベント・アンケートはありません。</p>
+              ) : home.rows.map((r, i) => {
+                const chip = dueChip(r.kind === "event" ? (r.deadlineDate || r.dateStr) : r.dueDate);
+                const w = (n) => `${r.target ? (n / r.target) * 100 : 0}%`;
+                return (
+                  <button key={`${r.kind}:${r.id}`}
+                    onClick={() => { if (r.kind === "event") setExpandedEvent(r.id); else setExpandedSurvey(r.id); setTab("dash"); }}
+                    className={`w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-gray-50 ${i > 0 ? "border-t border-gray-100" : ""} ${pc ? "" : "flex-wrap"}`}>
+                    <span className="min-w-0 flex-1" style={pc ? undefined : { flexBasis: "100%" }}>
+                      <span className="block text-sm font-bold truncate">{r.title}</span>
+                      <span className="block text-xs text-gray-500 truncate">
+                        {r.kind === "event" ? `イベント・${r.dateStr || "日付未定"}${r.time ? ` ${r.time}` : ""}` : "アンケート"}・対象 {r.target}名
+                      </span>
+                    </span>
+                    <span className="shrink-0" style={{ width: pc ? 190 : "auto", flex: pc ? "none" : "1 1 0" }}>
+                      <span className="flex h-2 rounded-full overflow-hidden bg-gray-100">
+                        <span style={{ width: w(r.yes), background: TONE.ok.solid }} />
+                        <span style={{ width: w(r.no), background: TONE.idle.solid }} />
+                        <span style={{ width: w(r.unanswered), background: "#F2C078" }} />
+                      </span>
+                      <span className="block text-xs text-gray-500 mt-1" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        {r.kind === "event" ? `出席 ${r.yes}・欠席 ${r.no}・未回答 ${r.unanswered}` : `回答済み ${r.yes}・未回答 ${r.unanswered}`}
+                      </span>
+                    </span>
+                    <StatusChip tone={chip.tone} className="shrink-0">{chip.text}</StatusChip>
+                  </button>
+                );
+              })}
+              {home.rows.length > 0 && (
+                <div className="px-4 py-2.5 border-t border-gray-100 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                  {[["出席・回答済み", TONE.ok.solid], ["欠席", TONE.idle.solid], ["未回答", "#F2C078"]].map(([label, color]) => (
+                    <span key={label} className="inline-flex items-center gap-1.5">
+                      <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: color }} />{label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-200">
+                <h2 className="text-sm font-bold">今週の予定<span className="ml-1.5 text-xs font-normal text-gray-500">今日から7日間</span></h2>
+              </div>
+              {home.upcoming.length === 0 ? (
+                <p className="px-4 py-5 text-xs text-gray-500">この先7日間の予定はありません。</p>
+              ) : home.upcoming.map((u, i) => (
+                <button key={`${u.kind}:${u.date}:${u.title}:${i}`}
+                  onClick={() => setTab(u.kind === "meet" ? "meet" : u.kind === "article" ? "news" : "dash")}
+                  className={`w-full text-left px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 ${i > 0 ? "border-t border-gray-100" : ""}`}>
+                  <span className="shrink-0 text-xs font-bold" style={{ width: 74, color: u.today ? BRAND : INK, fontVariantNumeric: "tabular-nums" }}>
+                    {u.today ? "今日" : u.label}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold truncate">{u.title}</span>
+                    {u.sub && <span className="block text-xs text-gray-500 truncate">{u.sub}</span>}
+                  </span>
+                  <StatusChip tone={u.kind === "meet" ? "info" : u.kind === "deadline" ? "warn" : u.kind === "article" ? "idle" : "ok"} className="shrink-0">
+                    {u.kind === "meet" ? "面談" : u.kind === "deadline" ? "締切" : u.kind === "article" ? "記事" : "イベント"}
+                  </StatusChip>
+                </button>
+              ))}
+            </section>
+          </div>
+        </div>
       )}
 
       {tab === "dash" && (
@@ -2151,8 +2440,8 @@ function AdminBody({
             {[["内定者", totalActive], ["承諾済", accepted], ["LINE連携", linked], ["内定辞退", declinedPre], ["承諾後辞退", declinedPost]].map(([k, v]) => (
               <div key={k} className="bg-white border border-gray-200 rounded-xl p-2.5 text-center">
                 <p className="text-xs text-gray-500">{k}</p>
-                <p className="text-lg font-bold mt-0.5" style={{ color: BRAND }}>
-                  {v}<span className="text-xs font-normal text-gray-400">名</span>
+                <p className="text-lg font-bold mt-0.5" style={{ color: INK }}>
+                  {v}<span className="text-xs font-normal text-gray-500">名</span>
                 </p>
               </div>
             ))}
@@ -2164,7 +2453,7 @@ function AdminBody({
               <SectionTitle>イベント出欠状況</SectionTitle>
               <div className="flex items-center gap-1.5 mb-3">
                 <button onClick={() => openHistory("event")}
-                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                   履歴から作成
                 </button>
                 <button onClick={() => (showEventForm ? resetForm() : setShowEventForm(true))}
@@ -2175,7 +2464,7 @@ function AdminBody({
               </div>
             </div>
             <div className="flex justify-end -mt-1 mb-2">
-              <button onClick={refreshAnswers} className="flex items-center gap-1 text-xs font-bold text-gray-400">
+              <button onClick={refreshAnswers} className="flex items-center gap-1 text-xs font-bold text-gray-500">
                 <RefreshCw size={12} /> 到着・出欠を更新
               </button>
             </div>
@@ -2228,7 +2517,7 @@ function AdminBody({
                       className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                     <TimeSelect value={ev.deadlineTime} onChange={(v) => setEv({ ...ev, deadlineTime: v })} disabled={!ev.deadlineDate} />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     {ev.deadlineDate && ev.deadlineTime
                       ? `${ev.deadlineDate} ${ev.deadlineTime} を過ぎると出欠を回答・変更できなくなります。`
                       : "時刻を空欄にするとその日いっぱい（23:59）まで回答できます。日付も未設定なら開催日まで回答可。"}
@@ -2241,7 +2530,7 @@ function AdminBody({
                   <div className="flex gap-1.5 mb-2">
                     {[[true, "表示する"], [false, "表示しない"]].map(([v, label]) => (
                       <button key={String(v)} onClick={() => setEv({ ...ev, arrivalOn: v })}
-                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        className="flex-1 py-1.5 rounded-lg text-xs font-bold border"
                         style={(ev.arrivalOn !== false) === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
                         {label}
                       </button>
@@ -2251,7 +2540,7 @@ function AdminBody({
                     <input value={ev.arrivalLabel} onChange={(e) => setEv({ ...ev, arrivalLabel: e.target.value })}
                       placeholder={ARRIVAL_LABEL_DEFAULT} className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                   )}
-                  <p className="text-[11px] text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     {ev.arrivalOn === false
                       ? "出席者の画面に到着ボタンを出しません（受付が不要なイベント向け）。"
                       : `出席者が開催日以降に押せるボタンの文言です。未入力なら「${ARRIVAL_LABEL_DEFAULT}」になります。`}
@@ -2264,7 +2553,7 @@ function AdminBody({
                   <div className="flex gap-1.5 mb-2">
                     {[["current", "現住所"], ["home", "実家"], ["either", "どちらも"]].map(([v, label]) => (
                       <button key={v} onClick={() => setEv({ ...ev, areaBasis: v })}
-                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        className="flex-1 py-1.5 rounded-lg text-xs font-bold border"
                         style={(ev.areaBasis || "either") === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
                         {label}
                       </button>
@@ -2283,19 +2572,19 @@ function AdminBody({
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     {(ev.areas || []).length === 0
                       ? "未選択＝全員に表示（エリアで絞りません）。"
                       : `選択したエリアに住む学生だけに表示・集計されます（住所は登録の${(ev.areaBasis || "either") === "current" ? "現住所" : (ev.areaBasis || "either") === "home" ? "実家住所" : "現住所または実家住所"}で判定）。`}
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <button onClick={openTargetModal}
-                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                       対象者を確認・個別調整
                     </button>
                     <span className="text-xs text-gray-500">対象 {formTargetCount}名{Array.isArray(ev.targetUids) ? "（個別指定＝以後に登録した学生は対象外）" : ""}</span>
                     {Array.isArray(ev.targetUids) && (
-                      <button onClick={() => setEv({ ...ev, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
+                      <button onClick={() => setEv({ ...ev, targetUids: null })} className="text-xs font-bold text-gray-500">個別指定を解除</button>
                     )}
                   </div>
                 </div>
@@ -2305,7 +2594,7 @@ function AdminBody({
                     <div className="flex gap-2">
                       {!editingEventId && (
                         <button disabled={!ev.title} onClick={saveDraft}
-                          className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 border bg-white" style={{ borderColor: BRAND, color: BRAND }}>
+                          className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-40 border bg-white" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                           下書き保存
                         </button>
                       )}
@@ -2314,7 +2603,7 @@ function AdminBody({
                         {editingEventId ? "更新して保存" : "公開する"}
                       </button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">
+                    <p className="text-xs text-gray-500 mt-2">
                       {editingEventId
                         ? "変更は学生画面に即時反映されます。すでに回答された出欠・到着はそのまま残ります。"
                         : "公開すると学生画面に即時反映されます。下書きは学生には表示されません。"}
@@ -2332,7 +2621,7 @@ function AdminBody({
                     <div key={dft.id} className="py-2.5 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-bold truncate">{dft.title}</p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-500">
                           {dft.dateStr ? `${dft.dateStr} ${dft.time}` : "開催日未定"}
                           ・出欠期限 {dft.deadlineDate ? deadlineText(dft.deadlineDate, dft.deadlineTime) : "開催日まで"}
                         </p>
@@ -2340,7 +2629,7 @@ function AdminBody({
                       <div className="flex gap-1.5 shrink-0">
                         <button onClick={() => editDraft(dft)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">編集</button>
                         <button onClick={() => publishDraft(dft)} disabled={!dft.dateStr} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>公開</button>
-                        <button onClick={() => deleteEvent(dft.id)} className="text-xs font-bold px-2 py-1.5 rounded-lg text-gray-400">削除</button>
+                        <button onClick={() => deleteEvent(dft.id)} className="text-xs font-bold px-2 py-1.5 rounded-lg text-gray-500">削除</button>
                       </div>
                     </div>
                   ))}
@@ -2366,7 +2655,7 @@ function AdminBody({
                           {e.title}
                           {e.closed && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#F3F4F6", color: "#6B7280" }}>受付終了済み</span>}
                         </p>
-                        <p className="text-xs text-gray-400 mt-0.5">{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}・{e.place}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{e.dateStr || "日付未定"}{e.time ? ` ${e.time}` : ""}・{e.place}</p>
                         <p className="text-xs mt-0.5" style={{ color: eventIsClosed(e) ? "#B45309" : "#6B7280" }}>
                           出欠期限：{e.deadlineDate ? deadlineText(e.deadlineDate, e.deadlineTime) : "開催日まで"}
                           {eventIsClosed(e) ? "（受付終了）" : ""}
@@ -2375,7 +2664,7 @@ function AdminBody({
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-xs text-gray-500">参加 {yes}/{audTotal}</p>
-                        {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#1E874B" }}>到着 {arrivedCount}/{yes}</p>}
+                        {yes > 0 && <p className="text-xs mt-0.5" style={{ color: "#0A8F4D" }}>到着 {arrivedCount}/{yes}</p>}
                         {changedCount > 0 && <p className="text-xs mt-0.5 font-bold" style={{ color: "#B45309" }}>回答変更 {changedCount}件</p>}
                         <p className="text-xs mt-0.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "回答者を見る ▼"}</p>
                       </div>
@@ -2393,7 +2682,7 @@ function AdminBody({
                             <p className="text-xs font-bold text-gray-500 mb-1">
                               {k}（{g.length}名）
                               {k === "出席" && g.length > 0 && (
-                                <span className="ml-1.5" style={{ color: "#1E874B" }}>／到着 {arrivedCount}名・未到着 {g.length - arrivedCount}名</span>
+                                <span className="ml-1.5" style={{ color: "#0A8F4D" }}>／到着 {arrivedCount}名・未到着 {g.length - arrivedCount}名</span>
                               )}
                             </p>
                             <div className="flex flex-wrap gap-1.5">
@@ -2403,35 +2692,35 @@ function AdminBody({
                                 const chg = (k === "出席" || k === "欠席") && changedOf(x.st, e);
                                 const reason = k === "欠席" && reasonOf(x.st, e);
                                 const style = k === "出席"
-                                  ? (arr ? { background: "#EAF7EE", color: "#1E874B" } : { background: BRAND_LIGHT, color: BRAND })
-                                  : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FFF7E6", color: "#B45309" };
+                                  ? (arr ? { background: "#E4F6EC", color: "#0A8F4D" } : { background: BRAND_LIGHT, color: BRAND })
+                                  : k === "欠席" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FEF1DC", color: "#B45309" };
                                 return (
                                   <button key={x.st.id} onClick={() => { setAttendAns(x.r); setCancelReason(reasonOf(x.st, e)); setAttendEdit({ e, st: x.st }); }}
                                     className="text-xs font-bold px-2 py-1 rounded-full inline-flex items-center gap-1" style={style}
                                     title={reason ? `キャンセル理由：${reason}` : "タップで変更"}>
                                     {arr && <CheckCircle2 size={11} />}{recName(x.st)}
-                                    {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 9 }}>変更</span>}
-                                    {reason && <span className="ml-0.5" style={{ fontSize: 10 }}>📝</span>}
+                                    {chg && <span className="ml-0.5 px-1 rounded" style={{ background: "#B45309", color: "#fff", fontSize: 11 }}>変更</span>}
+                                    {reason && <span className="ml-0.5" style={{ fontSize: 11 }}>📝</span>}
                                   </button>
                                 );
                               })}
                             </div>
                             {k === "出席" && g.length > 0 && (
-                              <p className="text-[11px] text-gray-400 mt-1">名前をタップで出欠・到着を変更できます（緑＝到着済み／ピンク＝未到着）。</p>
+                              <p className="text-xs text-gray-500 mt-1">名前をタップで出欠・到着を変更できます（緑＝到着済み／ピンク＝未到着）。</p>
                             )}
                           </div>
                         );
                       })}
                       {changedCount > 0 && (
-                        <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
+                        <p className="text-xs font-bold" style={{ color: "#B45309" }}>「変更」＝回答済みの学生が出欠を変更しました。内容を確認したら「変更を確認」を押すと表示が消えます。</p>
                       )}
                       <div className="flex items-center gap-2 flex-wrap mt-1 rounded-lg p-2" style={{ background: "#F6F7F9" }}>
-                        <span className="text-[11px] font-bold text-gray-500 shrink-0">会場到着ボタン</span>
+                        <span className="text-xs font-bold text-gray-500 shrink-0">会場到着ボタン</span>
                         <button onClick={() => updateEvent(e.id, { arrivalOn: e.arrivalOn === false })}
                           className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0"
                           style={e.arrivalOn === false
                             ? { borderColor: "#D1D5DB", color: "#6B7280", background: "#fff" }
-                            : { borderColor: "#1E874B", color: "#fff", background: "#1E874B" }}>
+                            : { borderColor: "#0A8F4D", color: "#fff", background: "#0A8F4D" }}>
                           {e.arrivalOn === false ? "表示しない" : "表示する"}
                         </button>
                         {e.arrivalOn !== false && (
@@ -2446,29 +2735,29 @@ function AdminBody({
                         <button onClick={() => exportAttendanceCsv(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                           <Download size={12} /> 出欠をCSV出力
                         </button>
-                        <button onClick={() => editEvent(e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                        <button onClick={() => editEvent(e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                           編集
                         </button>
-                        <button onClick={() => openDocTargetModal("event", e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                        <button onClick={() => openDocTargetModal("event", e)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                           対象者を調整{Array.isArray(e.targetUids) ? `（個別 ${e.targetUids.length}名）` : ""}
                         </button>
                         {e.closed ? (
                           <button onClick={() => updateEvent(e.id, { closed: false })} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">受付を再開</button>
                         ) : (
-                          <button onClick={() => updateEvent(e.id, { closed: true })} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FFF7E6" }}>最終受付終了（到着も締切）</button>
+                          <button onClick={() => updateEvent(e.id, { closed: true })} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FEF1DC" }}>最終受付終了（到着も締切）</button>
                         )}
                         {changedCount > 0 && (
-                          <button onClick={() => ackEventChanges(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FFF7E6" }}>
+                          <button onClick={() => ackEventChanges(e)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#F5D08C", color: "#B45309", background: "#FEF1DC" }}>
                             変更を確認（{changedCount}）
                           </button>
                         )}
                         {confirmDel === `event:${e.id}` ? (
                           <>
-                            <button onClick={() => doDeleteEvent(e.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（出欠も消去）</button>
+                            <button onClick={() => doDeleteEvent(e.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する（出欠も消去）</button>
                             <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                           </>
                         ) : (
-                          <button onClick={() => setConfirmDel(`event:${e.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#DC2626", borderColor: "#FECACA", background: "#fff" }}>
+                          <button onClick={() => setConfirmDel(`event:${e.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#C81E1E", borderColor: "#FECACA", background: "#fff" }}>
                             <Trash2 size={12} /> このイベントを削除
                           </button>
                         )}
@@ -2481,7 +2770,7 @@ function AdminBody({
             {yearEvents.length > VISIBLE_ITEMS && (
               <button onClick={() => setShowAllEvents((v) => !v)}
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {showAllEvents ? "最新3件だけ表示する ▲" : `過去のイベントをすべて表示（残り ${yearEvents.length - VISIBLE_ITEMS}件）▼`}
               </button>
             )}
@@ -2493,7 +2782,7 @@ function AdminBody({
               <SectionTitle>アンケート回答率</SectionTitle>
               <div className="flex items-center gap-1.5 mb-3">
                 <button onClick={() => openHistory("survey")}
-                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                   履歴から作成
                 </button>
                 <button onClick={() => { if (showSurveyForm) resetSurveyForm(); setShowSurveyForm(!showSurveyForm); }}
@@ -2524,7 +2813,7 @@ function AdminBody({
                     placeholder="例）研修内容についての希望調査" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">説明<span className="font-normal text-gray-400 ml-1">（任意・学生のアンケート画面でタイトルの下に表示）</span></p>
+                  <p className="text-xs font-bold text-gray-500 mb-1">説明<span className="font-normal text-gray-500 ml-1">（任意・学生のアンケート画面でタイトルの下に表示）</span></p>
                   <textarea value={sv.desc} onChange={(e) => setSv({ ...sv, desc: e.target.value })} rows={3}
                     placeholder="例）研修の内容を決めるためのアンケートです。所要3分ほどで終わります。回答は選考には影響しません。"
                     className="w-full border border-gray-300 rounded-lg p-2.5 text-sm leading-relaxed" />
@@ -2537,7 +2826,7 @@ function AdminBody({
                         className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                       <TimeSelect value={sv.dueTime} onChange={(v) => setSv({ ...sv, dueTime: v })} disabled={!sv.dueDate} />
                     </div>
-                    <p className="text-[11px] text-gray-400 mt-1">時刻は任意（空欄ならその日いっぱい）。</p>
+                    <p className="text-xs text-gray-500 mt-1">時刻は任意（空欄ならその日いっぱい）。</p>
                   </div>
                   <div>
                     <p className="text-xs font-bold text-gray-500 mb-1">所要時間の目安</p>
@@ -2574,7 +2863,7 @@ function AdminBody({
                           </button>
                         ))}
                       </div>
-                      <p className="text-[11px] text-gray-400">選んだイベントの参加者だけに、このアンケートが表示・集計されます。</p>
+                      <p className="text-xs text-gray-500">選んだイベントの参加者だけに、このアンケートが表示・集計されます。</p>
                     </div>
                   )}
                 </div>
@@ -2585,7 +2874,7 @@ function AdminBody({
                   <div className="flex gap-1.5 mb-2">
                     {[["current", "現住所"], ["home", "実家"], ["either", "どちらも"]].map(([v, label]) => (
                       <button key={v} onClick={() => setSv({ ...sv, areaBasis: v })}
-                        className="flex-1 py-1.5 rounded-lg text-[11px] font-bold border"
+                        className="flex-1 py-1.5 rounded-lg text-xs font-bold border"
                         style={(sv.areaBasis || "either") === v ? { background: BRAND, color: "#fff", borderColor: BRAND } : { borderColor: "#D7DEDB", color: "#6B7280", background: "#fff" }}>
                         {label}
                       </button>
@@ -2604,19 +2893,19 @@ function AdminBody({
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     {(sv.areas || []).length === 0
                       ? "未選択＝対象者全員に表示（エリアで絞りません）。"
                       : `選択したエリアに住む学生だけに表示・集計されます（住所は登録の${(sv.areaBasis || "either") === "current" ? "現住所" : (sv.areaBasis || "either") === "home" ? "実家住所" : "現住所または実家住所"}で判定）。`}
                   </p>
                   <div className="flex items-center gap-2 mt-2">
                     <button onClick={openSvTargetModal}
-                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                      className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                       対象者を確認・個別調整
                     </button>
                     <span className="text-xs text-gray-500">対象 {svFormTargetCount}名{Array.isArray(sv.targetUids) ? "（個別指定＝以後に登録した学生は対象外）" : ""}</span>
                     {Array.isArray(sv.targetUids) && (
-                      <button onClick={() => setSv({ ...sv, targetUids: null })} className="text-xs font-bold text-gray-400">個別指定を解除</button>
+                      <button onClick={() => setSv({ ...sv, targetUids: null })} className="text-xs font-bold text-gray-500">個別指定を解除</button>
                     )}
                   </div>
                 </div>
@@ -2625,11 +2914,11 @@ function AdminBody({
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-bold text-gray-500">設問{svSections().length > 0 ? `（${svSections().length}セクション）` : ""}</p>
                     <button onClick={addSvSection} className="text-xs font-bold px-2.5 py-1 rounded-lg border"
-                      style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                      style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                       {svSections().length === 0 ? "＋ セクションに分ける" : "＋ セクションを追加"}
                     </button>
                   </div>
-                  {sv.questions.length === 0 && <p className="text-xs text-gray-400">下のボタンから設問を追加してください。セクションに分けると、回答によって次に進む先を変えられます。</p>}
+                  {sv.questions.length === 0 && <p className="text-xs text-gray-500">下のボタンから設問を追加してください。セクションに分けると、回答によって次に進む先を変えられます。</p>}
                   <div className={svSections().length ? "space-y-3" : "space-y-2"}>
                   {svGroups.map((g, gi) => (
                     <div key={g.section ? g.section.id : "_flat"}
@@ -2638,7 +2927,7 @@ function AdminBody({
                       {g.section && (
                         <div className="px-2.5 py-2 space-y-1.5" style={{ background: BRAND_LIGHT }}>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 text-white" style={{ background: BRAND }}>セクション{gi + 1}</span>
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0 text-white" style={{ background: BRAND }}>セクション{gi + 1}</span>
                             <input value={g.section.title} onChange={(e) => updateSvSection(g.section.id, { title: e.target.value })}
                               placeholder="セクション名（学生にも表示・任意）" className="flex-1 min-w-0 border-0 rounded-lg px-2 py-1 text-xs font-bold bg-white" />
                             <button onClick={() => moveSvSection(gi, -1)} disabled={gi === 0} className="disabled:opacity-25 text-xs" style={{ color: BRAND }}>▲</button>
@@ -2653,7 +2942,7 @@ function AdminBody({
                       {g.items.map(({ q, no }, gp) => (
                         <div key={q.id} className="border rounded-lg p-3 space-y-2" style={{ background: g.section ? "#fff" : "#FAFBFC", borderColor: "#E5E7EB" }}>
                           <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "#EEF1F4", color: "#6B7280" }}>Q{no}</span>
+                            <span className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0" style={{ background: "#EEF1F4", color: "#6B7280" }}>Q{no}</span>
                             <select value={q.type} onChange={(e) => {
                                 const t = e.target.value;
                                 updateSvQuestion(q.id, {
@@ -2671,8 +2960,8 @@ function AdminBody({
                             <label className="flex items-center gap-1 text-xs text-gray-500 ml-auto">
                               <input type="checkbox" checked={q.required !== false} onChange={(e) => updateSvQuestion(q.id, { required: e.target.checked })} />必須
                             </label>
-                            <button onClick={() => moveSvQuestion(q.id, -1)} disabled={gp === 0} className="text-gray-400 disabled:opacity-25 text-xs">▲</button>
-                            <button onClick={() => moveSvQuestion(q.id, 1)} disabled={gp === g.items.length - 1} className="text-gray-400 disabled:opacity-25 text-xs">▼</button>
+                            <button onClick={() => moveSvQuestion(q.id, -1)} disabled={gp === 0} className="text-gray-500 disabled:opacity-25 text-xs">▲</button>
+                            <button onClick={() => moveSvQuestion(q.id, 1)} disabled={gp === g.items.length - 1} className="text-gray-500 disabled:opacity-25 text-xs">▼</button>
                             <button onClick={() => removeSvQuestion(q.id)} aria-label="設問を削除" className="text-gray-300"><Trash2 size={14} /></button>
                           </div>
                           <input value={q.label} onChange={(e) => updateSvQuestion(q.id, { label: e.target.value })}
@@ -2680,12 +2969,12 @@ function AdminBody({
                           {q.type === "scale" && (
                             <div className="grid grid-cols-2 gap-1.5">
                               <div>
-                                <p className="text-[11px] text-gray-400 mb-1">1 のラベル</p>
+                                <p className="text-xs text-gray-500 mb-1">1 のラベル</p>
                                 <input value={q.minLabel || ""} onChange={(e) => updateSvQuestion(q.id, { minLabel: e.target.value })}
                                   placeholder="とても低い" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
                               </div>
                               <div>
-                                <p className="text-[11px] text-gray-400 mb-1">5 のラベル</p>
+                                <p className="text-xs text-gray-500 mb-1">5 のラベル</p>
                                 <input value={q.maxLabel || ""} onChange={(e) => updateSvQuestion(q.id, { maxLabel: e.target.value })}
                                   placeholder="とても高い" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
                               </div>
@@ -2705,14 +2994,14 @@ function AdminBody({
                           )}
                           {q.type === "single" && svSections().length > 0 && (
                             <div className="rounded-lg p-2 space-y-1" style={{ background: "#FFFBEB", border: "1px solid #FDE68A" }}>
-                              <p className="text-[11px] font-bold" style={{ color: "#B45309" }}>回答による分岐（このセクションの次に進む先）</p>
+                              <p className="text-xs font-bold" style={{ color: "#B45309" }}>回答による分岐（このセクションの次に進む先）</p>
                               {(q.options || []).filter((o) => o.trim()).length === 0 ? (
-                                <p className="text-[11px] text-gray-400">選択肢を入力すると分岐を設定できます。</p>
+                                <p className="text-xs text-gray-500">選択肢を入力すると分岐を設定できます。</p>
                               ) : (q.options || []).filter((o) => o.trim()).map((o) => (
                                 <div key={o} className="flex items-center gap-1.5">
-                                  <span className="text-[11px] text-gray-600 truncate shrink-0" style={{ width: 88 }}>{o}</span>
+                                  <span className="text-xs text-gray-600 truncate shrink-0" style={{ width: 88 }}>{o}</span>
                                   <select value={(q.branch || {})[o] || ""} onChange={(e) => setSvBranch(q.id, o, e.target.value)}
-                                    className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-[11px] bg-white">
+                                    className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2 py-1 text-xs bg-white">
                                     <option value="">次のセクションへ（既定）</option>
                                     {svSections().map((sec, si) => (
                                       <option key={sec.id} value={sec.id}>→ セクション{si + 1}{sec.title ? `：${sec.title}` : ""}</option>
@@ -2721,14 +3010,14 @@ function AdminBody({
                                   </select>
                                 </div>
                               ))}
-                              <p className="text-[11px] text-gray-400">同じセクションに分岐設定が複数あるときは、上の設問の設定が優先されます。</p>
+                              <p className="text-xs text-gray-500">同じセクションに分岐設定が複数あるときは、上の設問の設定が優先されます。</p>
                             </div>
                           )}
                         </div>
                       ))}
                         <div className="flex flex-wrap gap-2">
                           {[["single", "＋ 単一選択"], ["multi", "＋ 複数選択"], ["scale", "＋ 5段階評価"], ["text", "＋ 自由記述"]].map(([t, label]) => (
-                            <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-white" style={{ borderColor: BRAND, color: BRAND }}>{label}</button>
+                            <button key={t} onClick={() => addSvQuestion(t, g.section ? g.section.id : null)} className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-white" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>{label}</button>
                           ))}
                         </div>
                       </div>
@@ -2747,7 +3036,7 @@ function AdminBody({
                         {editingSurveyId ? "更新して公開" : "公開する"}
                       </button>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">
+                    <p className="text-xs text-gray-500 mt-2">
                       {editingSurveyId
                         ? "変更は学生画面に即時反映されます。すでに送信された回答はそのまま残ります。"
                         : "公開すると学生画面に即時反映されます。下書きは学生には表示されません。"}
@@ -2765,10 +3054,10 @@ function AdminBody({
                   <div key={s.id} className="bg-white border rounded-xl p-3 flex items-center justify-between gap-2" style={{ borderColor: "#F5D08C" }}>
                     <div className="min-w-0">
                       <p className="text-sm font-bold truncate">{s.title || "（無題）"}</p>
-                      <p className="text-xs text-gray-400">設問 {surveyQuestions(s).length}問・下書き</p>
+                      <p className="text-xs text-gray-500">設問 {surveyQuestions(s).length}問・下書き</p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => editSurvey(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>編集</button>
+                      <button onClick={() => editSurvey(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                       <button onClick={() => publishSurveyDraft(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>公開</button>
                       <button onClick={() => doDeleteSurvey(s.id)} className="text-gray-300 p-1"><Trash2 size={15} /></button>
                     </div>
@@ -2793,7 +3082,7 @@ function AdminBody({
                       <div className="min-w-0">
                         <p className="font-bold truncate">
                           {s.title}
-                          {s.pulse && <span className="ml-1.5 text-[11px] font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>パルス調査</span>}
+                          {s.pulse && <span className="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full align-middle" style={{ background: "#EEF2FF", color: "#4F46E5" }}>パルス調査</span>}
                         </p>
                         <p className="text-xs mt-0.5" style={{ color: surveyIsClosed(s) ? "#B45309" : "#6B7280" }}>
                           回答期限：{s.dueDate ? deadlineText(s.dueDate, s.dueTime) : "期限なし"}
@@ -2824,13 +3113,13 @@ function AdminBody({
                       if (qi > 0 && secIdOf(qs[qi - 1]) === secIdOf(qs[qi])) return null;
                       const si = secs.findIndex((x) => x.id === secIdOf(qs[qi]));
                       const sec = secs[si];
-                      return <p className="text-[11px] font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
+                      return <p className="text-xs font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
                     };
                     return (
                       <div className="px-4 pb-4 pt-3 border-t border-gray-100 space-y-3">
                         {/* 未回答は先に見たいので上に出す */}
-                        <div className="rounded-lg p-2.5" style={{ background: unanswered.length ? "#FFF7E6" : "#F1F8F3", border: `1px solid ${unanswered.length ? "#F5D08C" : "#CDE8D6"}` }}>
-                          <p className="text-xs font-bold mb-1" style={{ color: unanswered.length ? "#B45309" : "#1E874B" }}>
+                        <div className="rounded-lg p-2.5" style={{ background: unanswered.length ? "#FEF1DC" : "#E4F6EC", border: `1px solid ${unanswered.length ? "#F5D08C" : "#CDE8D6"}` }}>
+                          <p className="text-xs font-bold mb-1" style={{ color: unanswered.length ? "#B45309" : "#0A8F4D" }}>
                             {unanswered.length ? `未回答（${unanswered.length}名）` : "全員が回答済みです"}
                           </p>
                           {unanswered.length > 0 && (
@@ -2856,7 +3145,7 @@ function AdminBody({
                                     {texts.slice(0, 3).map((x) => (
                                       <div key={x.st.id} className="bg-white rounded-lg p-2.5 mb-1.5" style={{ border: "1px solid #EEF1F4" }}>
                                         <p className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap line-clamp-3">{x.a[q.id]}</p>
-                                        <p className="text-xs text-gray-400 mt-1.5">— {recName(x.st)}（{x.st.univ}）</p>
+                                        <p className="text-xs text-gray-500 mt-1.5">— {recName(x.st)}（{x.st.univ}）</p>
                                       </div>
                                     ))}
                                     <button onClick={() => setTextAnswers({
@@ -2880,11 +3169,11 @@ function AdminBody({
                                 {secHead(qi)}
                                 <p className="text-xs font-bold text-gray-500 mb-2">
                                   Q{qi + 1}. {q.label}
-                                  <span className="font-normal text-gray-400 ml-1">（5段階評価）</span>
+                                  <span className="font-normal text-gray-500 ml-1">（5段階評価）</span>
                                 </p>
                                 <p className="text-sm font-bold mb-1.5" style={{ color: "#4F46E5" }}>
                                   平均 {avg != null ? avg.toFixed(2) : "—"} / 5.00
-                                  <span className="text-xs font-normal text-gray-400 ml-1.5">回答 {vals.length}名</span>
+                                  <span className="text-xs font-normal text-gray-500 ml-1.5">回答 {vals.length}名</span>
                                 </p>
                                 {[5, 4, 3, 2, 1].map((v) => {
                                   const c = vals.filter((x) => x === v).length;
@@ -2892,7 +3181,7 @@ function AdminBody({
                                     <div key={v} className="mb-1.5">
                                       <div className="flex justify-between text-xs mb-0.5">
                                         <span className="text-gray-700">{v}{v === 5 ? `（${q.maxLabel || "高い"}）` : v === 1 ? `（${q.minLabel || "低い"}）` : ""}</span>
-                                        <span className="text-gray-400">{c}名</span>
+                                        <span className="text-gray-500">{c}名</span>
                                       </div>
                                       <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                                         <div className="h-full rounded-full" style={{ width: `${vals.length ? (c / vals.length) * 100 : 0}%`, background: "#4F46E5" }} />
@@ -2907,7 +3196,7 @@ function AdminBody({
                             <div key={q.id} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
                               {secHead(qi)}
                               <p className="text-xs font-bold text-gray-500 mb-2">
-                                Q{qi + 1}. {q.label}<span className="font-normal text-gray-400 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
+                                Q{qi + 1}. {q.label}<span className="font-normal text-gray-500 ml-1">{q.type === "multi" ? "（複数選択可）" : ""}</span>
                               </p>
                               {(q.options || []).map((o) => {
                                 const picked = answered.filter((x) => toArr(x.a[q.id]).includes(o));
@@ -2921,7 +3210,7 @@ function AdminBody({
                                     className="block w-full text-left mb-2">
                                     <div className="flex justify-between text-xs mb-0.5">
                                       <span className="text-gray-700">{o}</span>
-                                      <span className="text-gray-400">{cnt}名</span>
+                                      <span className="text-gray-500">{cnt}名</span>
                                     </div>
                                     <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                                       <div className="h-full rounded-full" style={{ width: `${answered.length ? (cnt / answered.length) * 100 : 0}%`, background: "#5B8DEF" }} />
@@ -2937,17 +3226,17 @@ function AdminBody({
                           <button onClick={() => exportSurveyCsv(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#5B8DEF" }}>
                             <Download size={12} /> 回答をCSV出力
                           </button>
-                          <button onClick={() => openDocTargetModal("survey", s)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                          <button onClick={() => openDocTargetModal("survey", s)} className="text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                             対象者を調整{Array.isArray(s.targetUids) ? `（個別 ${s.targetUids.length}名）` : ""}
                           </button>
-                          <button onClick={() => editSurvey(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                          <button onClick={() => editSurvey(s)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                           {confirmDel === `survey:${s.id}` ? (
                             <>
-                              <button onClick={() => doDeleteSurvey(s.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>
+                              <button onClick={() => doDeleteSurvey(s.id)} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する（回答も消去）</button>
                               <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                             </>
                           ) : (
-                            <button onClick={() => setConfirmDel(`survey:${s.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#DC2626", borderColor: "#FECACA", background: "#fff" }}>
+                            <button onClick={() => setConfirmDel(`survey:${s.id}`)} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg border" style={{ color: "#C81E1E", borderColor: "#FECACA", background: "#fff" }}>
                               <Trash2 size={12} /> このアンケートを削除
                             </button>
                           )}
@@ -2961,11 +3250,11 @@ function AdminBody({
             {yearSurveys.length > VISIBLE_ITEMS && (
               <button onClick={() => setShowAllSurveys((v) => !v)}
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {showAllSurveys ? "最新3件だけ表示する ▲" : `過去のアンケートをすべて表示（残り ${yearSurveys.length - VISIBLE_ITEMS}件）▼`}
               </button>
             )}
-            <button onClick={refreshAnswers} className="text-xs font-bold text-gray-400 mt-1">回答状況を更新</button>
+            <button onClick={refreshAnswers} className="text-xs font-bold text-gray-500 mt-1">回答状況を更新</button>
           </div>
 
           {/* Journey */}
@@ -2988,11 +3277,11 @@ function AdminBody({
                       onPointerUp={onJDragEnd}
                       onPointerCancel={onJDragEnd}
                       aria-label={`ステップ「${m.label}」をドラッグして並び替え`}
-                      className="text-gray-400 cursor-grab active:cursor-grabbing p-0.5"
+                      className="text-gray-500 cursor-grab active:cursor-grabbing p-0.5"
                       style={{ touchAction: "none" }}>
                       <GripVertical size={16} />
                     </button>
-                    <span className="text-xs font-bold text-gray-400 w-5 text-center mt-0.5">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="text-xs font-bold text-gray-500 w-5 text-center mt-0.5">{String(i + 1).padStart(2, "0")}</span>
                   </div>
                   <div className="flex-1 space-y-1.5 min-w-0">
                     <input value={m.label} onChange={(e) => updateJourneyLocal(m.id, { label: e.target.value })} onBlur={persistJourney}
@@ -3000,13 +3289,13 @@ function AdminBody({
                     <input value={m.desc} onChange={(e) => updateJourneyLocal(m.id, { desc: e.target.value })} onBlur={persistJourney}
                       placeholder="説明（学生画面に表示）" className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] font-bold text-gray-400 shrink-0">期日</span>
+                      <span className="text-xs font-bold text-gray-500 shrink-0">期日</span>
                       <input type="date" value={m.date || ""} onChange={(e) => updateJourneyAndSave(m.id, { date: e.target.value || "" })}
                         className="border border-gray-300 rounded-lg px-2 py-1 text-xs" />
                       {m.date && (
-                        <button onClick={() => updateJourneyAndSave(m.id, { date: "" })} className="text-[11px] font-bold text-gray-400">解除</button>
+                        <button onClick={() => updateJourneyAndSave(m.id, { date: "" })} className="text-xs font-bold text-gray-500">解除</button>
                       )}
-                      <span className="text-[11px] text-gray-400 truncate">この日を過ぎると未対応でも通過し、次のステップが Now になります</span>
+                      <span className="text-xs text-gray-500 truncate">この日を過ぎると未対応でも通過し、次のステップが Now になります</span>
                     </div>
                     <div className="flex gap-1.5">
                       <select value={linkKindOf(m)}
@@ -3045,7 +3334,7 @@ function AdminBody({
                       )}
                     </div>
                     {(linkKindOf(m) === "event" || linkKindOf(m) === "survey") && m.refId && (
-                      <p className="text-[11px] text-gray-400">
+                      <p className="text-xs text-gray-500">
                         指定した{linkKindOf(m) === "event" ? "イベント" : "アンケート"}の対象者にだけ、このステップが表示されます。回答するとこのステップが完了になります。
                       </p>
                     )}
@@ -3064,7 +3353,7 @@ function AdminBody({
                 className="w-full py-2 rounded-lg text-xs font-bold border border-dashed border-gray-300 text-gray-500">
                 + ステップを追加
               </button>
-              <p className="text-xs text-gray-400">左の <span className="align-middle">⠿</span> を掴んで上下にドラッグすると並び替えできます（PCは長押しドラッグ、スマホはドラッグ）。変更は学生画面のホームに即時反映されます。</p>
+              <p className="text-xs text-gray-500">左の <span className="align-middle">⠿</span> を掴んで上下にドラッグすると並び替えできます（PCは長押しドラッグ、スマホはドラッグ）。変更は学生画面のホームに即時反映されます。</p>
             </div>
           </div>
 
@@ -3081,13 +3370,13 @@ function AdminBody({
                   追加
                 </button>
               </div>
-              <p className="text-xs text-gray-400">追加すると学生ホームの「お知らせ」に即時表示されます（日付は自動）。SNS更新のお知らせなどにどうぞ。</p>
+              <p className="text-xs text-gray-500">追加すると学生ホームの「お知らせ」に即時表示されます（日付は自動）。SNS更新のお知らせなどにどうぞ。</p>
               {notices.length > 0 && (
                 <div className="divide-y divide-gray-100">
                   {notices.map((n) => (
                     <div key={n.id} className="py-2 flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-500">
                           {n.createdAt?.toDate ? `${n.createdAt.toDate().getMonth() + 1}.${n.createdAt.toDate().getDate()}` : "—"}
                         </p>
                         <p className="text-sm whitespace-pre-wrap break-words">{n.text}</p>
@@ -3111,7 +3400,7 @@ function AdminBody({
             <div className="flex items-center gap-1.5 mb-3">
             <button onClick={() => setShowInvite((v) => !v)}
               className="text-xs font-bold px-3 py-1.5 rounded-lg border"
-              style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+              style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
               {showInvite ? "配布情報を隠す ▲" : "配布情報を表示 ▼"}
             </button>
             <button onClick={() => { setShowAddCohort(!showAddCohort); setCohortErr(""); }}
@@ -3135,12 +3424,12 @@ function AdminBody({
                   <div className="flex gap-1.5">
                     <input value={newPw} onChange={(e) => setNewPw(e.target.value)}
                       placeholder="配布用パスワード" className="flex-1 min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
-                    <button onClick={genPw} className="text-xs font-bold px-2.5 rounded-lg border shrink-0" style={{ borderColor: BRAND, color: BRAND }}>自動生成</button>
+                    <button onClick={genPw} className="text-xs font-bold px-2.5 rounded-lg border shrink-0" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>自動生成</button>
                   </div>
                 </div>
               </div>
-              {cohortErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{cohortErr}</p>}
-              <p className="text-xs text-gray-400">追加すると、登録URLの発行・年度スイッチャーへの追加・直近年度のJourney複製が自動で行われます。</p>
+              {cohortErr && <p className="text-xs font-bold" style={{ color: "#C81E1E" }}>{cohortErr}</p>}
+              <p className="text-xs text-gray-500">追加すると、登録URLの発行・年度スイッチャーへの追加・直近年度のJourney複製が自動で行われます。</p>
               <button onClick={addCohort} className="w-full py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: BRAND }}>
                 この卒年度を作成する
               </button>
@@ -3152,7 +3441,7 @@ function AdminBody({
             if (!c) {
               return (
                 <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5">
-                  <p className="text-xs text-gray-400">卒年度が未登録です。「+ 卒年度を追加」から作成してください。</p>
+                  <p className="text-xs text-gray-500">卒年度が未登録です。「+ 卒年度を追加」から作成してください。</p>
                 </div>
               );
             }
@@ -3163,10 +3452,10 @@ function AdminBody({
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-bold flex items-center gap-1.5">
                     {g.year} の登録情報
-                    {!g.active && <span className="px-1.5 py-0.5 rounded-full" style={{ background: "#F3F4F6", color: "#6B7280", fontSize: 10 }}>受付停止</span>}
+                    {!g.active && <span className="px-1.5 py-0.5 rounded-full" style={{ background: "#F3F4F6", color: "#6B7280", fontSize: 11 }}>受付停止</span>}
                   </p>
                   <button onClick={() => toggleCohort(g)} className="text-xs font-bold px-2.5 py-1 rounded-lg border shrink-0"
-                    style={{ borderColor: "#D1D5DB", color: g.active ? "#B45309" : "#059947", background: "#fff" }}>
+                    style={{ borderColor: "#D1D5DB", color: g.active ? "#B45309" : "#0A8F4D", background: "#fff" }}>
                     {g.active ? "受付停止" : "受付再開"}
                   </button>
                 </div>
@@ -3193,11 +3482,11 @@ function AdminBody({
                       className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-mono" />
                     <button disabled={!pwDraft.trim()} onClick={async () => { await setCohortPassword(c.year, pwDraft.trim()); setPwEditing(false); }}
                       className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 shrink-0" style={{ background: BRAND }}>保存</button>
-                    <button onClick={() => setPwEditing(false)} className="text-xs text-gray-400 px-1 shrink-0">取消</button>
+                    <button onClick={() => setPwEditing(false)} className="text-xs text-gray-500 px-1 shrink-0">取消</button>
                   </div>
                 )}
 
-                <p className="text-xs text-gray-400 mt-3 leading-relaxed">
+                <p className="text-xs text-gray-500 mt-3 leading-relaxed">
                   この年度の学生には上のURLと初期パスワードを配布してください。他の年度は上部の年度スイッチャーで切り替えると表示されます。受付停止中はURLからの新規登録ができません。パスワードを変更しても、登録時に各自が設定したパスワードには影響しません。
                 </p>
               </div>
@@ -3209,21 +3498,21 @@ function AdminBody({
               <p className="text-xs font-bold text-gray-500">流入経路（媒体・紹介会社）</p>
               <button onClick={() => setShowSourceMgr((v) => !v)}
                 className="text-xs font-bold px-2.5 py-1 rounded-lg border"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {showSourceMgr ? "閉じる ▲" : `管理する（${sourceOptions.length}件）▼`}
               </button>
             </div>
             {showSourceMgr && (
               <div className="bg-white border border-gray-200 rounded-xl p-3">
                 <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                  <span className="text-[11px] font-bold text-gray-400">自動で並び替え</span>
+                  <span className="text-xs font-bold text-gray-500">自動で並び替え</span>
                   <button onClick={() => autoSortSources("kana")} disabled={srcBusy}
                     className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">あいうえお順</button>
                   <button onClick={() => autoSortSources("usage")} disabled={srcBusy}
                     className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">使用人数の多い順</button>
                 </div>
                 <div className="divide-y divide-gray-100 border-t border-gray-100">
-                  {sourceOptions.length === 0 && <p className="text-xs text-gray-400 py-3">まだ登録がありません。下の欄から追加してください。</p>}
+                  {sourceOptions.length === 0 && <p className="text-xs text-gray-500 py-3">まだ登録がありません。下の欄から追加してください。</p>}
                   {sourceOptions.map((o, i) => (
                     <div key={o.id} className="py-2 flex items-center gap-1.5">
                       {srcEditId === o.id ? (
@@ -3240,18 +3529,18 @@ function AdminBody({
                         <>
                           <p className="flex-1 min-w-0 text-xs text-gray-600 truncate">「{o.name}」を削除しますか？</p>
                           <button onClick={() => removeSource(o)} disabled={srcBusy}
-                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#DC2626" }}>削除する</button>
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#C81E1E" }}>削除する</button>
                           <button onClick={() => setSrcDelId(null)}
                             className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                         </>
                       ) : (
                         <>
                           <p className="flex-1 min-w-0 text-sm truncate">{o.name}</p>
-                          <span className="shrink-0 text-[11px] text-gray-400">{sourceUsage(o.name)}名</span>
+                          <span className="shrink-0 text-xs text-gray-500">{sourceUsage(o.name)}名</span>
                           <button onClick={() => moveSource(i, -1)} disabled={i === 0 || srcBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▲</button>
                           <button onClick={() => moveSource(i, 1)} disabled={i === sourceOptions.length - 1 || srcBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▼</button>
                           <button onClick={() => { setSrcEditId(o.id); setSrcEditName(o.name); setSrcDelId(null); }}
-                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                           <button onClick={() => { setSrcDelId(o.id); setSrcEditId(null); }} aria-label={`${o.name}を削除`} className="shrink-0 text-gray-300 p-1"><Trash2 size={14} /></button>
                         </>
                       )}
@@ -3266,7 +3555,7 @@ function AdminBody({
                     disabled={!srcNewName.trim() || srcBusy}
                     className="shrink-0 text-xs font-bold px-3 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>追加</button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                   名称を変更すると、その経路が設定されている学生の値も自動で書き換わります。削除しても学生に設定済みの値は残ります（プルダウンでは「（登録外）」と表示されます）。並び順は編集画面のプルダウンや並び替えに反映されます。
                 </p>
               </div>
@@ -3276,13 +3565,13 @@ function AdminBody({
           <div className="mb-3">
             <p className="text-xs font-bold text-gray-500 mb-1.5">検索</p>
             <div className="relative">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="名前・大学・住所・メール・電話など"
                 className="w-full border border-gray-300 rounded-lg pl-9 pr-9 py-2.5 text-sm" />
               {searchQuery && (
                 <button onClick={() => setSearchQuery("")} aria-label="検索をクリア"
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 p-0.5"><X size={15} /></button>
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 p-0.5"><X size={15} /></button>
               )}
             </div>
           </div>
@@ -3303,7 +3592,7 @@ function AdminBody({
               </select>
               <button onClick={() => setSortAsc((v) => !v)}
                 className="shrink-0 text-xs font-bold px-3 rounded-lg border"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {sortAsc ? "▲ 昇順" : "▼ 降順"}
               </button>
             </div>
@@ -3332,7 +3621,7 @@ function AdminBody({
                 <option value="unknown">判定できない住所（{areaCount("unknown")}名）</option>
               </select>
               {areaFilter !== "all" && (
-                <p className="text-[11px] text-gray-400 mt-1">現住所の先頭の都道府県名で判定しています。{areaFilter === "unknown" ? "住所に都道府県が入っていない学生です。「まとめて編集」で住所を整えると判定できます。" : ""}</p>
+                <p className="text-xs text-gray-500 mt-1">現住所の先頭の都道府県名で判定しています。{areaFilter === "unknown" ? "住所に都道府県が入っていない学生です。「まとめて編集」で住所を整えると判定できます。" : ""}</p>
               )}
             </div>
           </div>
@@ -3347,7 +3636,7 @@ function AdminBody({
               </button>
               <button onClick={loadLogins} disabled={loginsState === "loading"}
                 className="flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border disabled:opacity-50"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 <RefreshCw size={12} /> ログイン状況を更新
               </button>
               <button onClick={exportStudentsCsv} className="flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
@@ -3360,7 +3649,7 @@ function AdminBody({
             <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
               {pc && filteredActive.length > 0 && (
                 <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ background: "#F6F7F9" }}>
-                  <div className="min-w-0 flex-1 grid gap-3 items-center text-[11px] font-bold text-gray-400"
+                  <div className="min-w-0 flex-1 grid gap-3 items-center text-xs font-bold text-gray-500"
                     style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
                     <span>氏名 / LINE</span>
                     <span>大学</span>
@@ -3368,10 +3657,10 @@ function AdminBody({
                     <span>電話番号</span>
                     <span>タスク / 最終ログイン</span>
                   </div>
-                  <span className="shrink-0 text-[11px] font-bold text-gray-400" style={{ width: 196 }}>ステータス</span>
+                  <span className="shrink-0 text-xs font-bold text-gray-500" style={{ width: 196 }}>ステータス</span>
                 </div>
               )}
-              {filteredActive.length === 0 && <p className="p-4 text-xs text-gray-400">該当する学生がいません</p>}
+              {filteredActive.length === 0 && <p className="p-4 text-xs text-gray-500">該当する学生がいません</p>}
               {filteredActive.map((s) => {
                 const p = progressOf(s);
                 return (
@@ -3381,8 +3670,8 @@ function AdminBody({
                         <div className="grid gap-3 items-center" style={{ gridTemplateColumns: "minmax(150px,1.1fr) minmax(130px,1fr) minmax(230px,1.9fr) 130px 150px" }}>
                           <div className="min-w-0">
                             <p className="text-sm font-bold flex items-center gap-1 truncate">{s.name}<ChevronRight size={13} style={{ color: BRAND }} className="shrink-0" /></p>
-                            <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full"
-                              style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                            <span className="inline-block mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full"
+                              style={s.lineUserId ? { background: TONE.ok.bg, color: TONE.ok.fg } : { background: TONE.danger.bg, color: TONE.danger.fg }}>
                               {s.lineUserId ? "LINE連携済" : "未連携"}
                             </span>
                           </div>
@@ -3393,16 +3682,16 @@ function AdminBody({
                           <p className="text-xs text-gray-600 truncate">{s.phone || "-"}</p>
                           <div className="min-w-0">
                             <p className="text-xs text-gray-500">タスク {p.done}/{p.total}</p>
-                            <p className="text-xs text-gray-400 truncate">{lastLoginText(s.id)}</p>
+                            <p className="text-xs text-gray-500 truncate">{lastLoginText(s.id)}</p>
                           </div>
                         </div>
                       ) : (
                         <>
                           <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} style={{ color: BRAND }} /></p>
                           <p className="text-xs text-gray-500">{s.univ}・タスク {p.done}/{p.total}</p>
-                          <p className="text-xs text-gray-400">最終ログイン {lastLoginText(s.id)}</p>
+                          <p className="text-xs text-gray-500">最終ログイン {lastLoginText(s.id)}</p>
                           <span className="inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded-full"
-                            style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                            style={s.lineUserId ? { background: TONE.ok.bg, color: TONE.ok.fg } : { background: TONE.danger.bg, color: TONE.danger.fg }}>
                             {s.lineUserId ? "LINE連携済" : "未連携"}
                           </span>
                         </>
@@ -3411,14 +3700,14 @@ function AdminBody({
                     <div className="flex items-center gap-1.5 shrink-0">
                       {confirmDeleteId === s.id ? (
                         <>
-                          <button onClick={() => trashDelete(s.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => trashDelete(s.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
                           <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                         </>
                       ) : (
                         <>
                           <select value={s.status} onChange={(e) => changeStatus(s.id, e.target.value)} aria-label={`${s.name}のステータス`}
                             className="text-xs font-bold rounded-lg border px-2 py-1.5"
-                            style={s.status === "承諾" ? { borderColor: BRAND, background: BRAND_LIGHT, color: BRAND } : s.status === "内定" ? { borderColor: "#F5D08C", background: "#FFF7E6", color: "#B45309" } : s.status === "テスト" ? { borderColor: "#C7B8DE", background: "#F3EEFA", color: "#7C5FB0" } : { borderColor: "#D1D5DB", background: "#F3F4F6", color: "#6B7280" }}>
+                            style={s.status === "承諾" ? { borderColor: "#A7DDBF", background: TONE.ok.bg, color: TONE.ok.fg } : s.status === "内定" ? { borderColor: "#B9CDF3", background: TONE.info.bg, color: TONE.info.fg } : s.status === "テスト" ? { borderColor: "#C7B8DE", background: "#F3EEFA", color: "#7C5FB0" } : { borderColor: "#D1D5DB", background: "#F3F4F6", color: "#6B7280" }}>
                             <option value="内定">内定（承諾前）</option>
                             <option value="承諾">内定承諾済</option>
                             <option value="辞退">内定辞退</option>
@@ -3439,7 +3728,7 @@ function AdminBody({
             <div className="mt-5">
               <SectionTitle>テストアカウント</SectionTitle>
               <div className="bg-white border rounded-xl divide-y divide-gray-100" style={{ borderColor: "#E4D9F2" }}>
-                {filteredTest.length === 0 && <p className="p-4 text-xs text-gray-400">該当する学生がいません</p>}
+                {filteredTest.length === 0 && <p className="p-4 text-xs text-gray-500">該当する学生がいません</p>}
                 {filteredTest.map((s) => (
                   <div key={s.id} className="p-3 flex items-center justify-between gap-2">
                     <button onClick={() => setDetailStudent(s.id)} className="min-w-0 text-left">
@@ -3450,7 +3739,7 @@ function AdminBody({
                     <div className="flex items-center gap-1.5 shrink-0">
                       {confirmDeleteId === s.id ? (
                         <>
-                          <button onClick={() => trashDelete(s.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                          <button onClick={() => trashDelete(s.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
                           <button onClick={() => setConfirmDeleteId(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                         </>
                       ) : (
@@ -3470,7 +3759,7 @@ function AdminBody({
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-2 leading-relaxed">テストアカウントは内定者数・LINE一括配信・出欠集計の対象外です。動作確認用にお使いください。</p>
+              <p className="text-xs text-gray-500 mt-2 leading-relaxed">テストアカウントは内定者数・LINE一括配信・出欠集計の対象外です。動作確認用にお使いください。</p>
             </div>
           )}
 
@@ -3478,16 +3767,16 @@ function AdminBody({
             <div className="mt-5">
               <SectionTitle>辞退者・削除済み一覧</SectionTitle>
               <div className="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
-                {filteredRetired.length === 0 && <p className="p-4 text-xs text-gray-400">該当する学生がいません</p>}
+                {filteredRetired.length === 0 && <p className="p-4 text-xs text-gray-500">該当する学生がいません</p>}
                 {filteredRetired.map((s) => (
                   <div key={s.id} className="p-3 flex items-center justify-between gap-2" style={{ opacity: 0.65 }}>
                     <button onClick={() => setDetailStudent(s.id)} className="min-w-0 text-left">
-                      <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} className="text-gray-400" /></p>
+                      <p className="text-sm font-bold flex items-center gap-1">{s.name}<ChevronRight size={13} className="text-gray-500" /></p>
                       <p className="text-xs text-gray-500">{s.univ}</p>
                     </button>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <span className="text-xs font-bold px-2 py-1 rounded-full"
-                        style={s.status === "辞退" || s.status === "承諾後辞退" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FEE2E2", color: "#B91C1C" }}>
+                        style={s.status === "辞退" || s.status === "承諾後辞退" ? { background: "#F3F4F6", color: "#6B7280" } : { background: "#FDE8E8", color: "#C81E1E" }}>
                         {s.status === "辞退" ? "内定辞退" : s.status === "承諾後辞退" ? "承諾後辞退" : "アカウント削除済"}
                       </span>
                       <button onClick={() => restoreStudent(s)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white">復元</button>
@@ -3495,7 +3784,7 @@ function AdminBody({
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+              <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                 辞退・削除済みの学生はログイン不可・LINE配信の対象外です。「復元」でアカウントとステータス（辞退→内定、承諾後辞退→承諾）が元に戻ります。
               </p>
             </div>
@@ -3518,21 +3807,21 @@ function AdminBody({
               <p className="text-xs font-bold text-gray-500">面談の担当者</p>
               <button onClick={() => setShowIvMgr((v) => !v)}
                 className="text-xs font-bold px-2.5 py-1 rounded-lg border"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {showIvMgr ? "閉じる ▲" : `管理する（${interviewerOptions.length}名）▼`}
               </button>
             </div>
             {showIvMgr && (
               <div className="bg-white border border-gray-200 rounded-xl p-3">
                 <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                  <span className="text-[11px] font-bold text-gray-400">自動で並び替え</span>
+                  <span className="text-xs font-bold text-gray-500">自動で並び替え</span>
                   <button onClick={() => autoSortInterviewers("kana")} disabled={ivBusy}
                     className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">あいうえお順</button>
                   <button onClick={() => autoSortInterviewers("usage")} disabled={ivBusy}
                     className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white disabled:opacity-40">面談数の多い順</button>
                 </div>
                 <div className="divide-y divide-gray-100 border-t border-gray-100">
-                  {interviewerOptions.length === 0 && <p className="text-xs text-gray-400 py-3">まだ登録がありません。下の欄から追加してください。</p>}
+                  {interviewerOptions.length === 0 && <p className="text-xs text-gray-500 py-3">まだ登録がありません。下の欄から追加してください。</p>}
                   {interviewerOptions.map((o, i) => (
                     <div key={o.id} className="py-2 flex items-center gap-1.5">
                       {ivEditId === o.id ? (
@@ -3546,7 +3835,7 @@ function AdminBody({
                             <button onClick={() => { setIvEditId(null); setIvEditName(""); }}
                               className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">閉じる</button>
                           </div>
-                          <p className="text-[11px] font-bold text-gray-400">この担当者のZOOM情報（面談確定の案内に使います）</p>
+                          <p className="text-xs font-bold text-gray-500">この担当者のZOOM情報（面談確定の案内に使います）</p>
                           <input defaultValue={o.zoomUrl || ""} onBlur={(e) => saveInterviewerZoom(o, { ...o, zoomUrl: e.target.value })}
                             placeholder="https://zoom.us/j/..." className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs" />
                           <div className="grid grid-cols-2 gap-1.5">
@@ -3555,13 +3844,13 @@ function AdminBody({
                             <input defaultValue={o.zoomPass || ""} onBlur={(e) => saveInterviewerZoom(o, { ...o, zoomPass: e.target.value })}
                               placeholder="パスコード" className="w-full border border-gray-300 rounded-lg px-2 py-1 text-xs" />
                           </div>
-                          <p className="text-[11px] text-gray-400">ZOOM情報は入力欄からフォーカスを外した時点で保存されます。</p>
+                          <p className="text-xs text-gray-500">ZOOM情報は入力欄からフォーカスを外した時点で保存されます。</p>
                         </div>
                       ) : ivDelId === o.id ? (
                         <>
                           <p className="flex-1 min-w-0 text-xs text-gray-600 truncate">「{o.name}」を削除しますか？</p>
                           <button onClick={() => removeInterviewer(o)} disabled={ivBusy}
-                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#DC2626" }}>削除する</button>
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg text-white disabled:opacity-40" style={{ background: "#C81E1E" }}>削除する</button>
                           <button onClick={() => setIvDelId(null)}
                             className="shrink-0 text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                         </>
@@ -3569,15 +3858,15 @@ function AdminBody({
                         <>
                           <p className="flex-1 min-w-0 text-sm truncate">
                             {o.name}
-                            <span className="ml-1.5 text-[11px] font-bold" style={{ color: o.zoomUrl ? "#1E874B" : "#B45309" }}>
+                            <span className="ml-1.5 text-xs font-bold" style={{ color: o.zoomUrl ? "#0A8F4D" : "#B45309" }}>
                               {o.zoomUrl ? "ZOOM設定済み" : "ZOOM未設定"}
                             </span>
                           </p>
-                          <span className="shrink-0 text-[11px] text-gray-400">{interviewerUsage(o.name)}件</span>
+                          <span className="shrink-0 text-xs text-gray-500">{interviewerUsage(o.name)}件</span>
                           <button onClick={() => moveInterviewer(i, -1)} disabled={i === 0 || ivBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▲</button>
                           <button onClick={() => moveInterviewer(i, 1)} disabled={i === interviewerOptions.length - 1 || ivBusy} className="shrink-0 text-xs disabled:opacity-25" style={{ color: BRAND }}>▼</button>
                           <button onClick={() => { setIvEditId(o.id); setIvEditName(o.name); setIvDelId(null); }}
-                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                           <button onClick={() => { setIvDelId(o.id); setIvEditId(null); }} aria-label={`${o.name}を削除`} className="shrink-0 text-gray-300 p-1"><Trash2 size={14} /></button>
                         </>
                       )}
@@ -3592,7 +3881,7 @@ function AdminBody({
                     disabled={!ivNewName.trim() || ivBusy}
                     className="shrink-0 text-xs font-bold px-3 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>追加</button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                   名前を変更すると、その担当者の面談記録も自動で書き換わります。削除しても記録に残っている担当者名はそのままです。
                 </p>
               </div>
@@ -3606,7 +3895,7 @@ function AdminBody({
                 <div className="flex rounded-lg border border-gray-300 overflow-hidden">
                   {[["list", "一覧"], ["calendar", "カレンダー"]].map(([v, label]) => (
                     <button key={v} onClick={() => setIvView(v)}
-                      className="text-[11px] font-bold px-2.5 py-1"
+                      className="text-xs font-bold px-2.5 py-1"
                       style={ivView === v ? { background: BRAND, color: "#fff" } : { background: "#fff", color: "#6B7280" }}>
                       {label}
                     </button>
@@ -3629,7 +3918,7 @@ function AdminBody({
               const p2 = (n) => String(n).padStart(2, "0");
               const dayKey = (d) => `${cy}-${p2(cm)}-${p2(d)}`;
               const shift = (delta) => { const d = new Date(cy, cm - 1 + delta, 1); setIvCalMonth(`${d.getFullYear()}-${p2(d.getMonth() + 1)}`); setIvCalDay(""); };
-              const color = (k) => (k === "booked" ? { background: "#EAF7EE", color: "#1E874B" } : k === "proposal" ? { background: "#FFF7E6", color: "#B45309" } : { background: "#F3F4F6", color: "#6B7280" });
+              const color = (k) => (k === "booked" ? { background: "#E4F6EC", color: "#0A8F4D" } : k === "proposal" ? { background: "#FEF1DC", color: "#B45309" } : { background: "#F3F4F6", color: "#6B7280" });
               const cells = [];
               for (let i = 0; i < lead; i++) cells.push(null);
               for (let d = 1; d <= daysInMonth; d++) cells.push(d);
@@ -3645,7 +3934,7 @@ function AdminBody({
                     <p className="text-sm font-bold">{cy}年{cm}月</p>
                     <button onClick={() => shift(1)} aria-label="次の月" className="p-1 rounded-lg hover:bg-gray-100 text-gray-500"><ChevronRight size={16} /></button>
                   </div>
-                  <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-gray-400 mb-1">
+                  <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-gray-500 mb-1">
                     {["日", "月", "火", "水", "木", "金", "土"].map((w) => (<div key={w}>{w}</div>))}
                   </div>
                   {/* 日付セル：押すとその日の予定・記録を下の一覧に表示（スマホは枠が狭いので点だけ、PCは3件まで文字で表示） */}
@@ -3668,25 +3957,25 @@ function AdminBody({
                             boxShadow: selected ? `inset 0 0 0 1px ${BRAND}` : "none",
                             background: selected || isToday ? BRAND_LIGHT : list.length ? "#fff" : "#FAFBFC",
                           }}>
-                          <p className="text-[11px] font-bold" style={{ color: selected || isToday ? BRAND : "#6B7280" }}>{d}</p>
+                          <p className="text-xs font-bold" style={{ color: selected || isToday ? BRAND : "#6B7280" }}>{d}</p>
                           {pc ? (
                             <>
                               {list.slice(0, limit).map((it, j) => (
                                 <button key={j} onClick={(e) => { e.stopPropagation(); onItem(it); }}
-                                  className="block w-full text-left text-[10px] font-bold truncate rounded px-1 mt-0.5 hover:opacity-80"
+                                  className="block w-full text-left text-xs font-bold truncate rounded px-1 mt-0.5 hover:opacity-80"
                                   style={color(it.kind)}
                                   title={`${it.kind === "booked" ? "予定" : "記録"}：${it.name}${it.sub ? `／${it.sub}` : ""}`}>
                                   {it.start ? `${it.start} ` : ""}{it.name}{it.sub ? `／${it.sub}` : ""}
                                 </button>
                               ))}
-                              {list.length > limit && <p className="text-[10px] text-gray-400 mt-0.5">+{list.length - limit}件</p>}
+                              {list.length > limit && <p className="text-xs text-gray-500 mt-0.5">+{list.length - limit}件</p>}
                             </>
                           ) : list.length > 0 && (
                             <div className="flex flex-wrap items-center gap-0.5 mt-1">
                               {list.slice(0, 4).map((it, j) => (
-                                <span key={j} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: it.kind === "booked" ? "#1E874B" : "#9CA3AF" }} />
+                                <span key={j} className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: it.kind === "booked" ? "#0A8F4D" : "#9CA3AF" }} />
                               ))}
-                              {list.length > 4 && <span className="text-[9px] text-gray-400 leading-none">+{list.length - 4}</span>}
+                              {list.length > 4 && <span className="text-xs text-gray-500 leading-none">+{list.length - 4}</span>}
                             </div>
                           )}
                         </div>
@@ -3706,24 +3995,24 @@ function AdminBody({
                             {Number(ivCalDay.slice(5, 7))}月{Number(ivCalDay.slice(8, 10))}日（{wd}）
                             <span className="ml-1.5 text-xs font-normal text-gray-500">{list.length}件</span>
                           </p>
-                          <button onClick={() => setIvCalDay("")} className="text-xs text-gray-400">閉じる</button>
+                          <button onClick={() => setIvCalDay("")} className="text-xs text-gray-500">閉じる</button>
                         </div>
                         {list.length === 0 ? (
-                          <p className="text-xs text-gray-400">この日の予定・記録はありません。</p>
+                          <p className="text-xs text-gray-500">この日の予定・記録はありません。</p>
                         ) : (
                           <div className="space-y-1.5">
                             {list.map((it, j) => (
                               <button key={j} onClick={() => onItem(it)}
                                 className="w-full flex items-center gap-2.5 bg-white border border-gray-200 rounded-lg px-3 py-2.5 text-left hover:shadow-sm">
-                                <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded" style={color(it.kind)}>{it.kind === "booked" ? "予定" : "記録"}</span>
+                                <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded" style={color(it.kind)}>{it.kind === "booked" ? "予定" : "記録"}</span>
                                 <span className="shrink-0 text-sm font-bold tabular-nums" style={{ minWidth: 44 }}>{it.start || "--:--"}</span>
                                 <span className="min-w-0 flex-1">
                                   <span className="block text-sm font-bold truncate">{it.name || "（名前なし）"}</span>
-                                  <span className="block text-[11px] text-gray-500 truncate">
+                                  <span className="block text-xs text-gray-500 truncate">
                                     {it.sub ? `担当 ${it.sub}` : "担当 未設定"}{it.kind === "booked" && it.end ? `・${it.start}〜${it.end}` : ""}
                                   </span>
                                 </span>
-                                <span className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>{it.kind === "booked" ? "詳細 ›" : "記録を開く ›"}</span>
+                                <span className="shrink-0 text-xs font-bold" style={{ color: BRAND }}>{it.kind === "booked" ? "詳細 ›" : "記録を開く ›"}</span>
                               </button>
                             ))}
                           </div>
@@ -3732,15 +4021,15 @@ function AdminBody({
                     );
                   })()}
 
-                  <div className="flex flex-wrap gap-2 mt-2 text-[11px]">
+                  <div className="flex flex-wrap gap-2 mt-2 text-xs">
                     <span className="px-1.5 py-0.5 rounded" style={color("booked")}>確定した面談（予定）</span>
                     <span className="px-1.5 py-0.5 rounded" style={color("record")}>実施後の面談記録</span>
-                    <span className="text-gray-400">日付を押すと、その日の予定・記録を下に一覧表示します。予定を押すと詳細、記録を押すと記録画面が開きます。実施後に記録を付けると予定は記録に置き換わります。</span>
+                    <span className="text-gray-500">日付を押すと、その日の予定・記録を下に一覧表示します。予定を押すと詳細、記録を押すと記録画面が開きます。実施後に記録を付けると予定は記録に置き換わります。</span>
                   </div>
                 </div>
               );
             })() : interviewReqs.length === 0 ? (
-              <p className="text-xs text-gray-400">まだ依頼はありません。候補日時を登録して学生に選んでもらえます。</p>
+              <p className="text-xs text-gray-500">まだ依頼はありません。候補日時を登録して学生に選んでもらえます。</p>
             ) : (
               <div className="space-y-2">
                 {interviewReqs.map((r) => {
@@ -3753,24 +4042,24 @@ function AdminBody({
                         <button onClick={() => setIvOpenReq(ivOpenReq === r.id ? null : r.id)} className="min-w-0 flex-1 text-left">
                           <p className="text-sm font-bold truncate">
                             {r.title || "面談の日程調整"}
-                            <span className="ml-1.5 text-[11px] font-normal" style={{ color: BRAND }}>{ivOpenReq === r.id ? "閉じる ▲" : "開く ▼"}</span>
+                            <span className="ml-1.5 text-xs font-normal" style={{ color: BRAND }}>{ivOpenReq === r.id ? "閉じる ▲" : "開く ▼"}</span>
                           </p>
-                          <p className="text-xs text-gray-400 mt-0.5">
+                          <p className="text-xs text-gray-500 mt-0.5">
                             対象 {targets.length}名・
                             <span style={{ color: "#B45309" }}>候補提出 {targets.filter((st) => (r.proposals || {})[st.id]).length}名</span>・
-                            <span style={{ color: bookedN === targets.length ? "#1E874B" : "#6B7280" }}>確定 {bookedN}名</span>
+                            <span style={{ color: bookedN === targets.length ? "#0A8F4D" : "#6B7280" }}>確定 {bookedN}名</span>
                             {r.dueDate ? `・提出期限 ${Number(r.dueDate.slice(5, 7))}/${Number(r.dueDate.slice(8, 10))}` : ""}
                           </p>
                         </button>
                         <div className="flex items-center gap-1.5 shrink-0">
                           {ivReqDelId === r.id ? (
                             <>
-                              <button onClick={() => deleteIvReq(r.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                              <button onClick={() => deleteIvReq(r.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
                               <button onClick={() => setIvReqDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                             </>
                           ) : (
                             <>
-                              <button onClick={() => openIvReq(r)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                              <button onClick={() => openIvReq(r)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                               <button onClick={() => setIvReqDelId(r.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
                             </>
                           )}
@@ -3787,16 +4076,16 @@ function AdminBody({
                                 <span className="text-xs font-bold truncate flex-1 min-w-0">{st.name}</span>
                                 {b ? (
                                   <span className="flex items-center gap-1.5 shrink-0">
-                                    <span className="text-xs font-bold" style={{ color: bookingRecorded(st.id, b.date) ? "#6B7280" : "#1E874B" }}>
+                                    <span className="text-xs font-bold" style={{ color: bookingRecorded(st.id, b.date) ? "#6B7280" : "#0A8F4D" }}>
                                       {bookingRecorded(st.id, b.date) ? "実施済み" : "確定"} {slotText(b, true)}{b.interviewer ? `・${b.interviewer}` : ""}
                                     </span>
                                     {!bookingRecorded(st.id, b.date) && (
                                       <button onClick={() => openMeetForm(null, st.id, { date: b.date, time: b.start, interviewer: b.interviewer })}
-                                        className="text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: BRAND }}>記録</button>
+                                        className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: BRAND }}>記録</button>
                                     )}
                                     {!bookingRecorded(st.id, b.date) && (
                                       <button onClick={() => openIvConfirm(r.id, st.id, { reschedule: true })}
-                                        className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
+                                        className="text-xs font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#B45309", color: "#B45309", background: "#fff" }}>リスケ</button>
                                     )}
                                   </span>
                                 ) : p ? (
@@ -3808,15 +4097,15 @@ function AdminBody({
                                   <span className="flex items-center gap-1.5 shrink-0">
                                     <span className="text-xs" style={{ color: "#B45309" }}>候補の提出待ち</span>
                                     <button onClick={() => openIvConfirm(r.id, st.id)}
-                                      className="text-[11px] font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                                      className="text-xs font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                                       日時を指定して確定
                                     </button>
                                   </span>
                                 )}
                                 {ivRemove && ivRemove.reqId === r.id && ivRemove.uid === st.id ? (
                                   <span className="flex items-center gap-1 shrink-0">
-                                    <button onClick={removeIvStudent} className="text-[11px] font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>外す</button>
-                                    <button onClick={() => setIvRemove(null)} className="text-[11px] font-bold px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                                    <button onClick={removeIvStudent} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>外す</button>
+                                    <button onClick={() => setIvRemove(null)} className="text-xs font-bold px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                                   </span>
                                 ) : (
                                   <button onClick={() => setIvRemove({ reqId: r.id, uid: st.id })} aria-label={`${st.name}をこの日程調整から外す`}
@@ -3826,15 +4115,15 @@ function AdminBody({
                               {!b && p && (
                                 <div className="mt-1 pl-1">
                                   {(p.slots || []).map((x) => (
-                                    <p key={x.id} className="text-[11px] text-gray-500">・{slotText(x)}</p>
+                                    <p key={x.id} className="text-xs text-gray-500">・{slotText(x)}</p>
                                   ))}
-                                  {p.note && <p className="text-[11px] text-gray-500 mt-0.5 whitespace-pre-wrap">{p.note}</p>}
+                                  {p.note && <p className="text-xs text-gray-500 mt-0.5 whitespace-pre-wrap">{p.note}</p>}
                                 </div>
                               )}
                             </div>
                           );
                         })}
-                        {targets.length === 0 && <p className="text-xs text-gray-400 py-1.5">対象の内定者が見つかりません（削除された可能性があります）。</p>}
+                        {targets.length === 0 && <p className="text-xs text-gray-500 py-1.5">対象の内定者が見つかりません（削除された可能性があります）。</p>}
                       </div>
                       )}
                     </div>
@@ -3856,13 +4145,13 @@ function AdminBody({
           </div>
 
           <div className="relative mb-3">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input value={meetSearch} onChange={(e) => setMeetSearch(e.target.value)}
               placeholder="氏名・面談者・内容で検索"
               className="w-full border border-gray-300 rounded-lg pl-9 pr-9 py-2.5 text-sm" />
             {meetSearch && (
               <button onClick={() => setMeetSearch("")} aria-label="検索をクリア"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 p-0.5"><X size={15} /></button>
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 p-0.5"><X size={15} /></button>
             )}
           </div>
 
@@ -3882,12 +4171,12 @@ function AdminBody({
                   <div className="flex items-center gap-1.5 shrink-0">
                     {meetDelId === m.id ? (
                       <>
-                        <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                        <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
                         <button onClick={() => setMeetDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                       </>
                     ) : (
                       <>
-                        <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                        <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                         <button onClick={() => setMeetDelId(m.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
                       </>
                     )}
@@ -3895,7 +4184,7 @@ function AdminBody({
                 </div>
                 {meetingBody(m).map((b) => (
                   <div key={b.key} className="mt-2">
-                    <p className="text-[11px] font-bold" style={{ color: BRAND }}>{b.label}</p>
+                    <p className="text-xs font-bold" style={{ color: BRAND }}>{b.label}</p>
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                   </div>
                 ))}
@@ -3905,7 +4194,7 @@ function AdminBody({
             );
             if (meetView === "recent") {
               return list.length === 0
-                ? <p className="text-xs text-gray-400">面談の記録はまだありません。</p>
+                ? <p className="text-xs text-gray-500">面談の記録はまだありません。</p>
                 : <div className={pc ? "grid grid-cols-2 gap-2.5 items-start" : "space-y-2"}>{list.map(MeetCard)}</div>;
             }
             // 内定者別：未実施の学生も出す。カードをタップすると過去の面談履歴をモーダルで表示
@@ -3916,11 +4205,11 @@ function AdminBody({
             return (
               <div>
                 {rows.length > 0 && (
-                  <p className="text-[11px] text-gray-400 mb-2">
+                  <p className="text-xs text-gray-500 mb-2">
                     {rows.length}名{noMeet ? `・未実施 ${noMeet}名` : ""}。カードをタップすると過去の面談履歴を表示します。
                   </p>
                 )}
-                {rows.length === 0 && <p className="text-xs text-gray-400">該当する内定者がいません。</p>}
+                {rows.length === 0 && <p className="text-xs text-gray-500">該当する内定者がいません。</p>}
                 <div className={pc ? "grid grid-cols-3 gap-2.5" : "space-y-2"}>
                   {rows.map(({ st, ms }) => {
                     const last = ms[0];
@@ -3932,9 +4221,9 @@ function AdminBody({
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-sm font-bold truncate">{st.name}</p>
-                            <p className="text-[11px] text-gray-400 truncate">{st.univ || "大学未登録"}</p>
+                            <p className="text-xs text-gray-500 truncate">{st.univ || "大学未登録"}</p>
                           </div>
-                          <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                          <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full"
                             style={ms.length ? { background: BRAND_LIGHT, color: BRAND } : { background: "#FFF3E0", color: "#B45309" }}>
                             {ms.length ? `面談 ${ms.length}回` : "未実施"}
                           </span>
@@ -3944,11 +4233,11 @@ function AdminBody({
                             ? `最終 ${last.date}${last.time ? ` ${last.time}` : ""}・${last.kind || "面談"}${last.interviewer ? `・${last.interviewer}` : ""}`
                             : "面談の記録なし"}
                         </p>
-                        {last && last.next && <p className="text-[11px] font-bold mt-1 truncate" style={{ color: "#B45309" }}>次回：{last.next}</p>}
+                        {last && last.next && <p className="text-xs font-bold mt-1 truncate" style={{ color: "#B45309" }}>次回：{last.next}</p>}
                         <div className="flex items-center justify-between gap-2 mt-auto pt-2.5">
-                          <span className="text-[11px] font-bold" style={{ color: BRAND }}>履歴を見る ›</span>
+                          <span className="text-xs font-bold" style={{ color: BRAND }}>履歴を見る ›</span>
                           <button onClick={(e) => { e.stopPropagation(); openMeetForm(null, st.id); }}
-                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                            className="shrink-0 text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                             ＋ 記録
                           </button>
                         </div>
@@ -4028,7 +4317,7 @@ function AdminBody({
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <p className="text-xs font-bold text-gray-500 mb-2">{title}</p>
             {children}
-            {note && <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">{note}</p>}
+            {note && <p className="text-xs text-gray-500 mt-2 leading-relaxed">{note}</p>}
           </div>
         );
         const maxOf = (rows) => rows.reduce((m, r) => Math.max(m, r.count), 0);
@@ -4039,7 +4328,7 @@ function AdminBody({
               <SectionTitle>分析{statsAllYears ? "（全年度）" : `（${selectedYear - 2000}卒）`}</SectionTitle>
               <button onClick={() => setStatsAllYears((v) => !v)}
                 className="text-xs font-bold px-3 py-1.5 rounded-lg border mb-3"
-                style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                 {statsAllYears ? "この卒年度だけ" : "全年度で見る"}
               </button>
             </div>
@@ -4053,13 +4342,13 @@ function AdminBody({
                       className="text-xs font-bold px-3 py-1.5 rounded-lg text-white" style={{ background: BRAND }}>
                       ＋ 今回の調査をつくる
                     </button>
-                    <span className="text-xs text-gray-400">設問4問＋自由記述が入った状態で作成画面が開きます。対象者・期限は通常のアンケートと同じように指定できます。</span>
+                    <span className="text-xs text-gray-500">設問4問＋自由記述が入った状態で作成画面が開きます。対象者・期限は通常のアンケートと同じように指定できます。</span>
                   </div>
                   {pulseRounds.length === 0 ? (
-                    <p className="text-xs text-gray-400">まだ実施していません。「＋ 今回の調査を実施する」で1回目を作成してください。</p>
+                    <p className="text-xs text-gray-500">まだ実施していません。「＋ 今回の調査を実施する」で1回目を作成してください。</p>
                   ) : (
                     <>
-                      <p className="text-[11px] font-bold text-gray-400 mb-1">全体平均スコアの推移（5点満点）</p>
+                      <p className="text-xs font-bold text-gray-500 mb-1">全体平均スコアの推移（5点満点）</p>
                       {pulseRounds.map((r) => {
                         const avg = pulseAvg(r);
                         const answeredN = activeStudents.filter((st) => pulseScore(r, st.id) != null).length;
@@ -4076,12 +4365,12 @@ function AdminBody({
                               <div className="h-full rounded-full" style={{ width: `${avg ? (avg / 5) * 100 : 0}%`, background: "#4F46E5" }} />
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[11px] text-gray-400 flex-1 truncate">対象：{surveyAreaText(r) || (r.audience && r.audience.type === "event" ? audienceLabel(r) : "全員")}</span>
-                              <button onClick={() => { setTab("dash"); editSurvey(r); }} className="shrink-0 text-[11px] font-bold" style={{ color: BRAND }}>編集</button>
+                              <span className="text-xs text-gray-500 flex-1 truncate">対象：{surveyAreaText(r) || (r.audience && r.audience.type === "event" ? audienceLabel(r) : "全員")}</span>
+                              <button onClick={() => { setTab("dash"); editSurvey(r); }} className="shrink-0 text-xs font-bold" style={{ color: BRAND }}>編集</button>
                               {pulseDelId === r.id ? (
                                 <>
-                                  <button onClick={() => deletePulseRound(r.id)} className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する（回答も消去）</button>
-                                  <button onClick={() => setPulseDelId(null)} className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
+                                  <button onClick={() => deletePulseRound(r.id)} className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する（回答も消去）</button>
+                                  <button onClick={() => setPulseDelId(null)} className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                                 </>
                               ) : (
                                 <button onClick={() => setPulseDelId(r.id)} aria-label={`${r.title}を削除`} className="shrink-0 text-gray-300 p-0.5"><Trash2 size={13} /></button>
@@ -4099,22 +4388,22 @@ function AdminBody({
                 note="調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化しています。あくまで目安です。">
                 {(() => {
                   const rows = followRows();
-                  if (rows.length === 0) return <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>;
+                  if (rows.length === 0) return <p className="text-xs text-gray-500">気になる兆候のある内定者はいません。</p>;
                   const cnt = (lv) => rows.filter((r) => r.f.level === lv).length;
                   return (
                     <>
                       <div className="grid grid-cols-3 gap-2 mb-3">
                         {["高", "中", "低"].map((lv) => (
                           <div key={lv} className="rounded-lg p-2.5" style={{ background: followBg(lv) }}>
-                            <p className="text-[11px] font-bold" style={{ color: followColor(lv) }}>要フォロー {lv}</p>
-                            <p className="text-lg font-bold">{cnt(lv)}<span className="text-xs font-normal text-gray-400 ml-0.5">名</span></p>
+                            <p className="text-xs font-bold" style={{ color: followColor(lv) }}>要フォロー {lv}</p>
+                            <p className="text-lg font-bold">{cnt(lv)}<span className="text-xs font-normal text-gray-500 ml-0.5">名</span></p>
                           </div>
                         ))}
                       </div>
-                      <p className="text-[11px] font-bold text-gray-400 mb-1">優先度の高い3名</p>
+                      <p className="text-xs font-bold text-gray-500 mb-1">優先度の高い3名</p>
                       {rows.slice(0, 3).map(({ st, f }) => (
                         <div key={st.id} className="flex items-center gap-2 py-1.5 border-b border-gray-100 last:border-b-0">
-                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0"
                             style={{ background: "#fff", color: followColor(f.level), border: `1px solid ${followColor(f.level)}` }}>{f.level}</span>
                           <span className="text-sm font-bold truncate flex-1">{st.name}</span>
                           <span className="text-xs text-gray-500 truncate shrink-0" style={{ maxWidth: 160 }}>{f.reasons[0] ? f.reasons[0].t : ""}</span>
@@ -4133,76 +4422,76 @@ function AdminBody({
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   {[["内定を出した", n], ["承諾", cAccepted], ["検討中（内定）", cPending], ["辞退", cDeclinedPre + cDeclinedPost]].map(([k, v]) => (
                     <div key={k} className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <p className="text-[11px] text-gray-500">{k}</p>
-                      <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-400 ml-0.5">名</span></p>
+                      <p className="text-xs text-gray-500">{k}</p>
+                      <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-500 ml-0.5">名</span></p>
                     </div>
                   ))}
                 </div>
                 <Bar label="承諾率" value={cAccepted} max={n} sub={`${pct(cAccepted, n)}%`} />
-                <Bar label="辞退率" value={cDeclinedPre + cDeclinedPost} max={n} sub={`${pct(cDeclinedPre + cDeclinedPost, n)}%`} color="#DC2626" />
-                <p className="text-[11px] text-gray-500 mt-1">
+                <Bar label="辞退率" value={cDeclinedPre + cDeclinedPost} max={n} sub={`${pct(cDeclinedPre + cDeclinedPost, n)}%`} color="#C81E1E" />
+                <p className="text-xs text-gray-500 mt-1">
                   内訳：承諾前の辞退 {cDeclinedPre}名／承諾後の辞退 {cDeclinedPost}名
                 </p>
               </Card>
 
               <Card title="内定 → 承諾までの日数" note="内定出し日と内定承諾日の両方が入力されている人だけを集計しています。">
                 {days.length === 0 ? (
-                  <p className="text-xs text-gray-400">内定出し日・内定承諾日を入力すると集計されます。</p>
+                  <p className="text-xs text-gray-500">内定出し日・内定承諾日を入力すると集計されます。</p>
                 ) : (
                   <div className="grid grid-cols-3 gap-2">
                     {[["平均", avgDays], ["中央値", medDays], ["最短", days[0]], ].map(([k, v]) => (
                       <div key={k} className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                        <p className="text-[11px] text-gray-500">{k}</p>
-                        <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-400 ml-0.5">日</span></p>
+                        <p className="text-xs text-gray-500">{k}</p>
+                        <p className="text-lg font-bold">{v}<span className="text-xs font-normal text-gray-500 ml-0.5">日</span></p>
                       </div>
                     ))}
                   </div>
                 )}
-                {days.length > 0 && <p className="text-[11px] text-gray-400 mt-2">対象 {days.length}名・最長 {days[days.length - 1]}日</p>}
+                {days.length > 0 && <p className="text-xs text-gray-500 mt-2">対象 {days.length}名・最長 {days[days.length - 1]}日</p>}
               </Card>
 
               <Card title="エリア別（現住所）" note="住所の先頭の都道府県名から判定しています。都道府県が入っていない住所は「不明」になります。">
-                {areaRows.length === 0 ? <p className="text-xs text-gray-400">データがありません。</p> : areaRows.map((r) => (
+                {areaRows.length === 0 ? <p className="text-xs text-gray-500">データがありません。</p> : areaRows.map((r) => (
                   <Bar key={r.label} label={r.label} value={r.count} max={maxOf(areaRows)} sub={`${r.count}名・承諾${r.accepted}`} />
                 ))}
               </Card>
 
               <Card title="流入経路別" note="承諾率＝その経路の承諾者 ÷ その経路の内定者。母数が小さいときは参考値としてご覧ください。">
-                {sourceRows.length === 0 ? <p className="text-xs text-gray-400">データがありません。</p> : sourceRows.map((r) => (
+                {sourceRows.length === 0 ? <p className="text-xs text-gray-500">データがありません。</p> : sourceRows.map((r) => (
                   <Bar key={r.label} label={r.label} value={r.count} max={maxOf(sourceRows)}
                     sub={`${r.count}名・承諾${r.accepted}（${pct(r.accepted, r.count)}%）`} />
                 ))}
               </Card>
 
               <Card title="内定を出した時期（月別）">
-                {offerMonths.length === 0 ? <p className="text-xs text-gray-400">内定出し日を入力すると集計されます。</p> : offerMonths.map((r) => (
+                {offerMonths.length === 0 ? <p className="text-xs text-gray-500">内定出し日を入力すると集計されます。</p> : offerMonths.map((r) => (
                   <Bar key={r.label} label={r.label.replace("-", "/")} value={r.count} max={maxOf(offerMonths)} sub={`${r.count}名`} />
                 ))}
               </Card>
 
               <Card title="承諾された時期（月別）">
-                {acceptMonths.length === 0 ? <p className="text-xs text-gray-400">内定承諾日を入力すると集計されます。</p> : acceptMonths.map((r) => (
-                  <Bar key={r.label} label={r.label.replace("-", "/")} value={r.count} max={maxOf(acceptMonths)} sub={`${r.count}名`} color="#1E874B" />
+                {acceptMonths.length === 0 ? <p className="text-xs text-gray-500">内定承諾日を入力すると集計されます。</p> : acceptMonths.map((r) => (
+                  <Bar key={r.label} label={r.label.replace("-", "/")} value={r.count} max={maxOf(acceptMonths)} sub={`${r.count}名`} color="#0A8F4D" />
                 ))}
               </Card>
 
               <Card title="大学別（上位8校）">
-                {univRows.length === 0 ? <p className="text-xs text-gray-400">大学が未登録です。</p> : univRows.map((r) => (
+                {univRows.length === 0 ? <p className="text-xs text-gray-500">大学が未登録です。</p> : univRows.map((r) => (
                   <Bar key={r.label} label={r.label} value={r.count} max={maxOf(univRows)} sub={`${r.count}名・承諾${r.accepted}`} />
                 ))}
               </Card>
 
               <Card title={`エンゲージメント（${selectedYear - 2000}卒）`} note="出席率・回答率は、それぞれの対象者を母数にしています。">
                 <Bar label="LINE連携率" value={lineRate} max={100} sub={`${lineRate}%`} color={LINE_GREEN} />
-                <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">イベント出席率</p>
-                {evRates.length === 0 ? <p className="text-xs text-gray-400">イベントがありません。</p> : evRates.map((r) => (
+                <p className="text-xs font-bold text-gray-500 mt-3 mb-1">イベント出席率</p>
+                {evRates.length === 0 ? <p className="text-xs text-gray-500">イベントがありません。</p> : evRates.map((r) => (
                   <Bar key={r.label} label={r.label} value={r.count} max={r.total} sub={`${r.count}/${r.total}（${pct(r.count, r.total)}%）`} />
                 ))}
-                <p className="text-[11px] font-bold text-gray-400 mt-3 mb-1">アンケート回答率</p>
-                {svRates.length === 0 ? <p className="text-xs text-gray-400">アンケートがありません。</p> : svRates.map((r) => (
+                <p className="text-xs font-bold text-gray-500 mt-3 mb-1">アンケート回答率</p>
+                {svRates.length === 0 ? <p className="text-xs text-gray-500">アンケートがありません。</p> : svRates.map((r) => (
                   <Bar key={r.label} label={r.label} value={r.count} max={r.total} sub={`${r.count}/${r.total}（${pct(r.count, r.total)}%）`} color="#5B8DEF" />
                 ))}
-                <button onClick={refreshAnswers} className="text-xs font-bold text-gray-400 mt-2">回答状況を更新</button>
+                <button onClick={refreshAnswers} className="text-xs font-bold text-gray-500 mt-2">回答状況を更新</button>
               </Card>
 
               <Card title="面談の実施状況" note="面談タブで記録した内容を集計しています。">
@@ -4214,12 +4503,12 @@ function AdminBody({
                     <>
                       <div className="grid grid-cols-2 gap-2 mb-2">
                         <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                          <p className="text-[11px] text-gray-500">面談の記録数</p>
-                          <p className="text-lg font-bold">{totalMeet}<span className="text-xs font-normal text-gray-400 ml-0.5">件</span></p>
+                          <p className="text-xs text-gray-500">面談の記録数</p>
+                          <p className="text-lg font-bold">{totalMeet}<span className="text-xs font-normal text-gray-500 ml-0.5">件</span></p>
                         </div>
                         <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                          <p className="text-[11px] text-gray-500">実施済みの内定者</p>
-                          <p className="text-lg font-bold">{withMeet}<span className="text-xs font-normal text-gray-400 ml-0.5">/{target.length}名</span></p>
+                          <p className="text-xs text-gray-500">実施済みの内定者</p>
+                          <p className="text-lg font-bold">{withMeet}<span className="text-xs font-normal text-gray-500 ml-0.5">/{target.length}名</span></p>
                         </div>
                       </div>
                       <Bar label="面談実施率" value={withMeet} max={target.length} sub={`${pct(withMeet, target.length)}%`} color="#B45309" />
@@ -4282,18 +4571,18 @@ function AdminBody({
               <input type="datetime-local" value={artPublishAt} onChange={(e) => setArtPublishAt(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
               <div className="flex items-center gap-2 mt-1">
-                <p className="text-[11px] text-gray-400 flex-1">
+                <p className="text-xs text-gray-500 flex-1">
                   {artPublishAt
                     ? "指定した日時になると学生のNEWSに表示されます。予約投稿ではLINE通知は送られません（公開後に「LINE配信」から手動でお知らせできます）。"
                     : "未指定＝すぐに公開します。日時を入れると予約投稿になります。"}
                 </p>
                 {artPublishAt && (
-                  <button onClick={() => setArtPublishAt("")} className="shrink-0 text-[11px] font-bold text-gray-400">予約を解除</button>
+                  <button onClick={() => setArtPublishAt("")} className="shrink-0 text-xs font-bold text-gray-500">予約を解除</button>
                 )}
               </div>
             </div>
-            {artErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{artErr}</p>}
-            {artBusy && <p className="text-xs text-gray-400">処理中…</p>}
+            {artErr && <p className="text-xs font-bold" style={{ color: "#C81E1E" }}>{artErr}</p>}
+            {artBusy && <p className="text-xs text-gray-500">処理中…</p>}
             <div className="flex gap-2">
               <button disabled={!artTitle.trim() || artBusy} onClick={submitArticle}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
@@ -4315,7 +4604,7 @@ function AdminBody({
           <div className="space-y-3">
           <SectionTitle>投稿済みの記事</SectionTitle>
           {articles.length === 0 ? (
-            <p className="text-xs text-gray-400">まだ記事はありません。</p>
+            <p className="text-xs text-gray-500">まだ記事はありません。</p>
           ) : (
             <div className="space-y-2">
               {articles.map((a) => (
@@ -4329,19 +4618,19 @@ function AdminBody({
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold truncate">{a.title}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-500">
                       {a.createdAt?.toDate ? `${a.createdAt.toDate().getFullYear()}.${a.createdAt.toDate().getMonth() + 1}.${a.createdAt.toDate().getDate()}` : ""}
                       ・{a.grad ? `${a.grad}卒` : "全学年"}・{a.published ? "公開中" : "非公開"}
                     </p>
                     {isScheduled(a) && (
-                      <span className="inline-block mt-0.5 text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: "#FFF7E6", color: "#B45309" }}>
+                      <span className="inline-block mt-0.5 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "#FEF1DC", color: "#B45309" }}>
                         予約公開 {fmtScheduled(a.publishAt)}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button onClick={() => startEditArticle(a)}
-                      className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                      className="text-xs font-bold px-2.5 py-1.5 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                       編集
                     </button>
                     <button onClick={() => updateArticle(a.id, { published: !a.published })}
@@ -4350,8 +4639,8 @@ function AdminBody({
                     </button>
                     {artDelId === a.id ? (
                       <>
-                        <button onClick={() => doDeleteArticle(a.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
-                        <button onClick={() => setArtDelId(null)} className="text-xs text-gray-400 px-1">取消</button>
+                        <button onClick={() => doDeleteArticle(a.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除</button>
+                        <button onClick={() => setArtDelId(null)} className="text-xs text-gray-500 px-1">取消</button>
                       </>
                     ) : (
                       <button onClick={() => setArtDelId(a.id)} aria-label="記事を削除" className="text-gray-300 p-1"><Trash2 size={15} /></button>
@@ -4378,7 +4667,7 @@ function AdminBody({
         <div className={pc ? "space-y-3 pt-5" : "px-4 pt-4 space-y-3"}>
           <div className="flex items-center justify-between">
             <SectionTitle>質問箱</SectionTitle>
-            <button onClick={loadQuestions} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
+            <button onClick={loadQuestions} className="flex items-center gap-1 text-xs font-bold text-gray-500 mb-3">
               <RefreshCw size={12} /> 更新
             </button>
           </div>
@@ -4386,7 +4675,7 @@ function AdminBody({
             未回答 <span className="font-bold" style={{ color: "#B45309" }}>{unansweredQ}</span> 件／全 {questions.length} 件。回答すると質問者の公式LINEへ通知します（連携時）。「公開」にすると学生全員の「みんなのQ&A」に匿名で表示されます。
           </p>
           {questions.length === 0 ? (
-            <p className="text-xs text-gray-400">まだ質問はありません。</p>
+            <p className="text-xs text-gray-500">まだ質問はありません。</p>
           ) : (
             questions.map((q) => (
               <QuestionAdminCard key={q.id} q={q} reload={loadQuestions} setBanner={setBanner} />
@@ -4404,12 +4693,12 @@ function AdminBody({
           {quota && quota.limit != null && (() => {
             const pct = quota.limit ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
             const low = quota.remaining <= 20;
-            const color = quota.remaining <= 0 ? "#DC2626" : low ? "#B45309" : LINE_GREEN;
+            const color = quota.remaining <= 0 ? "#C81E1E" : low ? "#B45309" : LINE_GREEN;
             return (
               <div className="bg-white border rounded-xl p-3" style={{ borderColor: low ? "#F5D08C" : "#E5E7EB" }}>
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-gray-600">今月のLINE送信数（無料枠）</p>
-                  <button onClick={refreshQuota} className="flex items-center gap-1 text-xs font-bold text-gray-400"><RefreshCw size={11} /> 更新</button>
+                  <button onClick={refreshQuota} className="flex items-center gap-1 text-xs font-bold text-gray-500"><RefreshCw size={11} /> 更新</button>
                 </div>
                 <p className="text-sm font-bold mt-1" style={{ color }}>
                   {quota.used} / {quota.limit} 通<span className="text-xs font-normal text-gray-500 ml-1.5">（残り {quota.remaining} 通）</span>
@@ -4417,12 +4706,12 @@ function AdminBody({
                 <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
                   <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1">毎月リセットされます。枠を超えると送信できません。未連携者へのメールは枠の対象外です。</p>
+                <p className="text-xs text-gray-500 mt-1">毎月リセットされます。枠を超えると送信できません。未連携者へのメールは枠の対象外です。</p>
               </div>
             );
           })()}
           {quota && quota.limit == null && (
-            <p className="text-xs text-gray-400">送信数の上限は設定されていません（無制限プラン）。</p>
+            <p className="text-xs text-gray-500">送信数の上限は設定されていません（無制限プラン）。</p>
           )}
 
           <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
@@ -4432,7 +4721,7 @@ function AdminBody({
                 className="w-full flex items-center justify-between gap-2 border rounded-xl p-3 text-left"
                 style={{ borderColor: targetCat.color, background: targetCat.bg }}>
                 <span className="min-w-0">
-                  <span className="inline-block text-[10px] font-bold px-1.5 py-0.5 rounded mb-1 text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
+                  <span className="inline-block text-xs font-bold px-1.5 py-0.5 rounded mb-1 text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
                   <span className="block text-sm font-bold truncate" style={{ color: targetCat.color }}>{targetLabel}</span>
                   <span className="block text-xs text-gray-500 mt-0.5">{targetCount}名が対象</span>
                 </span>
@@ -4442,7 +4731,7 @@ function AdminBody({
                 <div className="mt-2 rounded-lg p-2.5 text-xs" style={{ background: "#F4F7F6", color: INK }}>
                   <span className="font-bold text-gray-500">送信先：</span>
                   {pickList.length === 0
-                    ? <span className="text-gray-400">まだ選ばれていません。「変更」から選んでください。</span>
+                    ? <span className="text-gray-500">まだ選ばれていません。「変更」から選んでください。</span>
                     : pickList.map((s) => s.name || "（名前なし）").join("、")}
                 </div>
               )}
@@ -4455,7 +4744,7 @@ function AdminBody({
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-bold text-gray-500">テンプレート</p>
                 <button onClick={() => setShowTplManager((v) => !v)}
-                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                  className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                   {showTplManager ? "編集を閉じる" : "種別・テンプレを編集"}
                 </button>
               </div>
@@ -4485,11 +4774,11 @@ function AdminBody({
                   </button>
                 </div>
                 <div className="rounded-lg p-2.5 overflow-y-auto" style={{ background: "#8CABCE", maxHeight: 190, minHeight: 96 }}>
-                  <p className="text-white font-bold mb-1.5" style={{ fontSize: 10 }}>受信プレビュー</p>
+                  <p className="text-white font-bold mb-1.5" style={{ fontSize: 11 }}>受信プレビュー</p>
                   {tplBody ? (
                     <div className="bg-white rounded-xl rounded-tl-sm p-2 text-gray-800 whitespace-pre-wrap shadow" style={{ fontSize: 11, lineHeight: 1.5 }}>{tplBody}</div>
                   ) : (
-                    <p className="text-white" style={{ fontSize: 10, opacity: 0.85 }}>テンプレを選ぶと、ここにLINEでの見え方が表示されます</p>
+                    <p className="text-white" style={{ fontSize: 11, opacity: 0.85 }}>テンプレを選ぶと、ここにLINEでの見え方が表示されます</p>
                   )}
                 </div>
               </div>
@@ -4504,11 +4793,11 @@ function AdminBody({
                 <p className="text-xs font-bold text-gray-500">メッセージ</p>
                 <div className="flex items-center gap-1.5">
                   <button onClick={() => setMsg((m) => m + "{name}")}
-                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                     ＋ 名前を差し込む
                   </button>
                   <button onClick={() => setMsg((m) => (m && !/\s$/.test(m) ? `${m}\n` : m) + mypageUrl)}
-                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                     ＋URL差し込む
                   </button>
                 </div>
@@ -4541,7 +4830,7 @@ function AdminBody({
                         {sortedCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
                       </select>
                       <button onClick={saveTemplate} className="text-xs font-bold px-3 py-2 rounded-lg text-white" style={{ background: BRAND }}>保存</button>
-                      <button onClick={() => { setShowTplSave(false); setTplName(""); setTplSaveCat(""); }} className="text-xs text-gray-400 px-1">取消</button>
+                      <button onClick={() => { setShowTplSave(false); setTplName(""); setTplSaveCat(""); }} className="text-xs text-gray-500 px-1">取消</button>
                     </div>
                   </div>
                 )}
@@ -4549,7 +4838,7 @@ function AdminBody({
             </div>
             <div>
               {quota && quota.limit != null && (
-                <p className="text-xs mb-1.5" style={{ color: overQuota ? "#DC2626" : "#6B7280" }}>
+                <p className="text-xs mb-1.5" style={{ color: overQuota ? "#C81E1E" : "#6B7280" }}>
                   この配信でLINE <span className="font-bold">{lineTargetCount}通</span> を使用予定（今月の残り {quota.remaining} 通）
                   {overQuota && <span className="font-bold">／残り枠が不足しています。対象を分けるか翌月に送信してください。</span>}
                 </p>
@@ -4558,7 +4847,7 @@ function AdminBody({
                 className="w-full py-3 rounded-xl font-bold text-white text-sm disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: LINE_GREEN }}>
                 <Send size={16} /> {sending ? "送信中…" : overQuota ? "送信枠が不足しています" : "送信先と内容を確認して送信"}
               </button>
-              <p className="text-[11px] text-gray-400 mt-1.5">押すと送信先の名簿と本文の確認画面が出ます。確認画面の「送信する」で送られます。</p>
+              <p className="text-xs text-gray-500 mt-1.5">押すと送信先の名簿と本文の確認画面が出ます。確認画面の「送信する」で送られます。</p>
             </div>
           </div>
 
@@ -4582,15 +4871,15 @@ function AdminBody({
           <div>
             <div className="flex items-center justify-between">
               <SectionTitle>配信履歴</SectionTitle>
-              <button onClick={refreshBroadcasts} className="flex items-center gap-1 text-xs font-bold text-gray-400 mb-3">
+              <button onClick={refreshBroadcasts} className="flex items-center gap-1 text-xs font-bold text-gray-500 mb-3">
                 <RefreshCw size={12} /> 更新
               </button>
             </div>
-            <div className="rounded-xl p-3 text-xs mb-2" style={{ background: "#FFF7E6", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
+            <div className="rounded-xl p-3 text-xs mb-2" style={{ background: "#FEF1DC", color: "#8A6D3B", border: "1px solid #F5E0B8" }}>
               このアプリから送った一括配信の記録です。ここから送った内容は、<span className="font-bold">LINE公式アカウントManagerの「メッセージ配信」履歴には表示されません</span>（API送信のため）。各受信者のトークには通常どおり届きます。
             </div>
             {broadcasts.length === 0 ? (
-              <p className="text-xs text-gray-400">まだ配信はありません。</p>
+              <p className="text-xs text-gray-500">まだ配信はありません。</p>
             ) : (
               <div className="space-y-2">
                 {broadcasts.slice(0, bcLimit).map((b) => {
@@ -4601,10 +4890,10 @@ function AdminBody({
                       <button onClick={() => setExpandedBc(open ? null : b.id)} className="w-full text-left p-3">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-sm font-bold truncate">{b.target || "全員"}</p>
-                          <p className="text-xs text-gray-400 shrink-0">{b.sentAt?.toDate ? b.sentAt.toDate().toLocaleString("ja-JP") : "—"}</p>
+                          <p className="text-xs text-gray-500 shrink-0">{b.sentAt?.toDate ? b.sentAt.toDate().toLocaleString("ja-JP") : "—"}</p>
                         </div>
                         <p className="text-xs mt-1" style={{ color: LINE_GREEN }}>
-                          LINE {b.lineCount ?? 0}件<span className="text-gray-400"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
+                          LINE {b.lineCount ?? 0}件<span className="text-gray-500"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
                         </p>
                         {b.body && <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 whitespace-pre-wrap">{b.body}</p>}
                         <p className="text-xs mt-1.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "内容・宛先を見る ▼"}</p>
@@ -4613,7 +4902,7 @@ function AdminBody({
                         <div className="px-3 pb-3 border-t border-gray-100 pt-2.5 space-y-2.5">
                           {b.body && (
                             <div>
-                              <p className="text-[11px] font-bold text-gray-400 mb-1">本文</p>
+                              <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
                               <p className="text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-2.5">{b.body}</p>
                             </div>
                           )}
@@ -4621,17 +4910,17 @@ function AdminBody({
                             <>
                               {b.lineNames && b.lineNames.length > 0 && (
                                 <div>
-                                  <p className="text-[11px] font-bold mb-1" style={{ color: LINE_GREEN }}>LINE送信（{b.lineNames.length}名）</p>
+                                  <p className="text-xs font-bold mb-1" style={{ color: LINE_GREEN }}>LINE送信（{b.lineNames.length}名）</p>
                                   <div className="flex flex-wrap gap-1 overflow-y-auto" style={{ maxHeight: 132 }}>
                                     {b.lineNames.map((n, i) => (
-                                      <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#E7F9EE", color: "#059947" }}>{n}</span>
+                                      <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#E4F6EC", color: "#0A8F4D" }}>{n}</span>
                                     ))}
                                   </div>
                                 </div>
                               )}
                               {b.mailNames && b.mailNames.length > 0 && (
                                 <div>
-                                  <p className="text-[11px] font-bold text-gray-500 mb-1">メール送信（{b.mailNames.length}名）</p>
+                                  <p className="text-xs font-bold text-gray-500 mb-1">メール送信（{b.mailNames.length}名）</p>
                                   <div className="flex flex-wrap gap-1 overflow-y-auto" style={{ maxHeight: 132 }}>
                                     {b.mailNames.map((n, i) => (
                                       <span key={i} className="text-xs px-2 py-0.5 rounded-full" style={{ background: "#F3F4F6", color: "#6B7280" }}>{n}</span>
@@ -4641,16 +4930,16 @@ function AdminBody({
                               )}
                             </>
                           ) : (
-                            <p className="text-xs text-gray-400">この配信は宛先の記録がありません（機能追加より前の配信）。</p>
+                            <p className="text-xs text-gray-500">この配信は宛先の記録がありません（機能追加より前の配信）。</p>
                           )}
                           <div className="flex justify-end pt-1">
                             {confirmDel === `bc:${b.id}` ? (
                               <div className="flex items-center gap-1.5">
-                                <button onClick={() => removeBroadcast(b.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>この履歴を削除</button>
+                                <button onClick={() => removeBroadcast(b.id)} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>この履歴を削除</button>
                                 <button onClick={() => setConfirmDel(null)} className="text-xs font-bold px-2 py-1.5 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                               </div>
                             ) : (
-                              <button onClick={() => setConfirmDel(`bc:${b.id}`)} className="flex items-center gap-1 text-xs font-bold" style={{ color: "#DC2626" }}>
+                              <button onClick={() => setConfirmDel(`bc:${b.id}`)} className="flex items-center gap-1 text-xs font-bold" style={{ color: "#C81E1E" }}>
                                 <Trash2 size={13} /> この履歴を削除
                               </button>
                             )}
@@ -4681,7 +4970,7 @@ function AdminBody({
             <div className="ml-drawer relative h-full w-full max-w-xl bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
               <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">フォローが必要そうな内定者</p>
+                  <p className="text-xs text-gray-500">フォローが必要そうな内定者</p>
                   <p className="text-base font-bold">
                     {rows.length}名
                     <span className="text-xs font-normal text-gray-500 ml-2">
@@ -4692,9 +4981,9 @@ function AdminBody({
                 <button onClick={() => setFollowDrawer(false)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
-                {rows.length === 0 && <p className="text-xs text-gray-400">気になる兆候のある内定者はいません。</p>}
+                {rows.length === 0 && <p className="text-xs text-gray-500">気になる兆候のある内定者はいません。</p>}
                 {rows.map(renderFollowRow)}
-                <p className="text-[11px] text-gray-400 leading-relaxed pt-2">
+                <p className="text-xs text-gray-500 leading-relaxed pt-2">
                   調査スコアの推移に加えて、ログイン間隔・イベントの反応・アンケート回答・面談間隔・LINE連携を点数化しています。あくまで目安なので、最終的な判断は担当者の方でお願いします。
                 </p>
               </div>
@@ -4714,7 +5003,7 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">面談の予定</p>
+                  <p className="text-xs text-gray-500">面談の予定</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{(st && st.name) || b.name || "内定者"}</p>
                 </div>
                 <button onClick={() => setIvBookedView(null)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
@@ -4763,7 +5052,7 @@ function AdminBody({
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">{ivResched ? "面談日程の変更（リスケ）" : "面談日程の確定"}</p>
+                  <p className="text-xs text-gray-500">{ivResched ? "面談日程の変更（リスケ）" : "面談日程の確定"}</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{st ? st.name : "内定者"}</p>
                 </div>
                 <button onClick={closeIvConfirm} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
@@ -4780,25 +5069,25 @@ function AdminBody({
                 </div>
                 {ivManual ? (
                   <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                    <p className="text-[11px] font-bold text-gray-500 mb-1.5">面談の日時を指定</p>
+                    <p className="text-xs font-bold text-gray-500 mb-1.5">面談の日時を指定</p>
                     <div className="grid grid-cols-2 gap-1.5">
                       <div className="min-w-0">
-                        <p className="text-[11px] text-gray-400 mb-0.5">日付</p>
+                        <p className="text-xs text-gray-500 mb-0.5">日付</p>
                         <input type="date" value={ivManualDate} onChange={(e) => setIvManualDate(e.target.value)}
                           className="w-full min-w-0 border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white" style={{ maxWidth: "100%" }} />
                       </div>
                       <div>
-                        <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
+                        <p className="text-xs text-gray-500 mb-0.5">所要時間</p>
                         <select value={ivConfirmDur} onChange={(e) => setIvConfirmDur(Number(e.target.value))}
                           className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                           {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
                         </select>
                       </div>
                     </div>
-                    <p className="text-[11px] text-gray-400 mt-1.5 mb-0.5">開始時刻</p>
+                    <p className="text-xs text-gray-500 mt-1.5 mb-0.5">開始時刻</p>
                     <TimeSelect value={ivConfirmStart} onChange={setIvConfirmStart} allowEmpty={false} />
                     {prop && (prop.slots || []).length > 0 && (
-                      <p className="text-[11px] text-gray-400 mt-1.5">学生の希望：{(prop.slots || []).map((x) => slotText(x)).join("、")}</p>
+                      <p className="text-xs text-gray-500 mt-1.5">学生の希望：{(prop.slots || []).map((x) => slotText(x)).join("、")}</p>
                     )}
                     {slot && <p className="text-xs font-bold mt-2" style={{ color: BRAND }}>確定する時間：{slotText(slot, true)}</p>}
                   </div>
@@ -4813,18 +5102,18 @@ function AdminBody({
                         {slotText(x)}
                       </button>
                     ))}
-                    {(!prop || !(prop.slots || []).length) && <p className="text-xs text-gray-400">候補がまだ提出されていません。</p>}
+                    {(!prop || !(prop.slots || []).length) && <p className="text-xs text-gray-500">候補がまだ提出されていません。</p>}
                   </div>
                   {win && (
                     <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <p className="text-[11px] font-bold text-gray-500 mb-1.5">この時間帯の中で実施する時間</p>
+                      <p className="text-xs font-bold text-gray-500 mb-1.5">この時間帯の中で実施する時間</p>
                       <div className="grid grid-cols-2 gap-1.5">
                         <div>
-                          <p className="text-[11px] text-gray-400 mb-0.5">開始時刻（{win.start}〜{win.end} の間・5分刻み）</p>
+                          <p className="text-xs text-gray-500 mb-0.5">開始時刻（{win.start}〜{win.end} の間・5分刻み）</p>
                           <TimeSelect value={ivConfirmStart} onChange={setIvConfirmStart} min={win.start} max={win.end} allowEmpty={false} />
                         </div>
                         <div>
-                          <p className="text-[11px] text-gray-400 mb-0.5">所要時間</p>
+                          <p className="text-xs text-gray-500 mb-0.5">所要時間</p>
                           <select value={ivConfirmDur} onChange={(e) => setIvConfirmDur(Number(e.target.value))}
                             className="w-full border border-gray-300 rounded-lg px-2 py-2.5 text-sm bg-white">
                             {[15, 30, 45, 60].map((d) => (<option key={d} value={d}>{d}分</option>))}
@@ -4838,7 +5127,7 @@ function AdminBody({
                   )}
                   {prop && prop.note && (
                     <div className="mt-2 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <p className="text-[11px] font-bold text-gray-500">本人からの連絡</p>
+                      <p className="text-xs font-bold text-gray-500">本人からの連絡</p>
                       <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{prop.note}</p>
                     </div>
                   )}
@@ -4855,22 +5144,22 @@ function AdminBody({
                     ))}
                   </select>
                   {iv && !iv.zoomUrl && (
-                    <p className="text-[11px] mt-1 font-bold" style={{ color: "#B45309" }}>
+                    <p className="text-xs mt-1 font-bold" style={{ color: "#B45309" }}>
                       この担当者にZOOM情報が登録されていません。面談タブの「面談の担当者 → 管理する」から設定できます（未設定のままでも日時のみで確定できます）。
                     </p>
                   )}
                   {iv && iv.zoomUrl && (
                     <div className="mt-1.5 rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                      <a href={iv.zoomUrl} target="_blank" rel="noopener noreferrer" className="block text-[11px] break-all underline" style={{ color: "#2D8CFF" }}>{iv.zoomUrl}</a>
-                      {iv.zoomId && <p className="text-[11px] text-gray-500">ミーティング ID: {iv.zoomId}</p>}
-                      {iv.zoomPass && <p className="text-[11px] text-gray-500">パスコード: {iv.zoomPass}</p>}
+                      <a href={iv.zoomUrl} target="_blank" rel="noopener noreferrer" className="block text-xs break-all underline" style={{ color: "#2D8CFF" }}>{iv.zoomUrl}</a>
+                      {iv.zoomId && <p className="text-xs text-gray-500">ミーティング ID: {iv.zoomId}</p>}
+                      {iv.zoomPass && <p className="text-xs text-gray-500">パスコード: {iv.zoomPass}</p>}
                     </div>
                   )}
                 </div>
 
                 {slot && iv && (
-                  <div className="rounded-lg p-3" style={{ background: "#F1F8F3", border: "1px solid #CDE8D6" }}>
-                    <p className="text-[11px] font-bold mb-1" style={{ color: "#1E874B" }}>{ivSendLine ? "送信される文面" : "（LINEは送信しません）文面の参考"}</p>
+                  <div className="rounded-lg p-3" style={{ background: "#E4F6EC", border: "1px solid #CDE8D6" }}>
+                    <p className="text-xs font-bold mb-1" style={{ color: "#0A8F4D" }}>{ivSendLine ? "送信される文面" : "（LINEは送信しません）文面の参考"}</p>
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{ivConfirmText(slot, iv, ivResched)}</p>
                   </div>
                 )}
@@ -4878,12 +5167,12 @@ function AdminBody({
                   <input type="checkbox" checked={ivSendLine} onChange={(e) => setIvSendLine(e.target.checked)} className="mt-0.5" />
                   <span>
                     確定後に<span className="font-bold" style={{ color: LINE_GREEN }}>公式LINE</span>で案内を送る
-                    <span className="block text-[11px] text-gray-400 mt-0.5">
+                    <span className="block text-xs text-gray-500 mt-0.5">
                       オフにすると送信せず、マイページの表示だけ更新します（すでに口頭やLINEで日程を伝えている場合など）。
                     </span>
                   </span>
                 </label>
-                {ivConfirmErr && <p className="text-xs font-bold" style={{ color: "#DC2626" }}>{ivConfirmErr}</p>}
+                {ivConfirmErr && <p className="text-xs font-bold" style={{ color: "#C81E1E" }}>{ivConfirmErr}</p>}
               </div>
               <div className="p-3 border-t border-gray-100 shrink-0">
                 <button onClick={confirmIvBooking} disabled={ivConfirmBusy || !slot || !ivConfirmIv}
@@ -4915,7 +5204,7 @@ function AdminBody({
             <div className={pc ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"}>
               <div className={pc ? "w-1/2 overflow-y-auto px-5 py-4 space-y-3 border-r border-gray-200" : "px-5 py-4 space-y-3"}>
                 <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">タイトル<span className="font-normal text-gray-400 ml-1">（マイページに表示）</span></p>
+                  <p className="text-xs font-bold text-gray-500 mb-1">タイトル<span className="font-normal text-gray-500 ml-1">（マイページに表示）</span></p>
                   <input value={ivReq.title} onChange={(e) => setIvReq({ ...ivReq, title: e.target.value })}
                     placeholder="内定後面談の日程調整" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
                 </div>
@@ -4923,10 +5212,10 @@ function AdminBody({
                   <p className="text-xs font-bold text-gray-500 mb-1">候補提出の期限</p>
                   <input type="date" value={ivReq.dueDate} onChange={(e) => setIvReq({ ...ivReq, dueDate: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
-                  <p className="text-[11px] text-gray-400 mt-1">文面の <span className="font-bold">{"{due}"}</span> がこの日付（◯月◯日）に置き換わります。マイページにも表示されます。</p>
+                  <p className="text-xs text-gray-500 mt-1">文面の <span className="font-bold">{"{due}"}</span> がこの日付（◯月◯日）に置き換わります。マイページにも表示されます。</p>
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-gray-500 mb-1">マイページに表示する説明<span className="font-normal text-gray-400 ml-1">（任意）</span></p>
+                  <p className="text-xs font-bold text-gray-500 mb-1">マイページに表示する説明<span className="font-normal text-gray-500 ml-1">（任意）</span></p>
                   <textarea value={ivReq.desc} onChange={(e) => setIvReq({ ...ivReq, desc: e.target.value })} rows={2}
                     placeholder="例）15〜30分程度、ZOOMで実施します。" className="w-full border border-gray-300 rounded-lg p-2.5 text-sm leading-relaxed" />
                 </div>
@@ -4934,11 +5223,11 @@ function AdminBody({
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <p className="text-xs font-bold text-gray-500">LINEで送る文面</p>
                     <button onClick={() => setIvReq({ ...ivReq, body: INTERVIEW_REQUEST_TEMPLATE })}
-                      className="text-[11px] font-bold" style={{ color: BRAND }}>ひな形に戻す</button>
+                      className="text-xs font-bold" style={{ color: BRAND }}>ひな形に戻す</button>
                   </div>
                   <textarea value={ivReq.body} onChange={(e) => setIvReq({ ...ivReq, body: e.target.value })} rows={14}
                     className="w-full border border-gray-300 rounded-lg p-3 text-sm leading-relaxed" />
-                  <p className="text-[11px] text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     <span className="font-bold">{"{name}"}</span> は送信時に各内定者の登録名に、<span className="font-bold">{"{due}"}</span> は上の期限に置き換わります。
                   </p>
                   <label className="flex items-center gap-1.5 text-xs text-gray-500 mt-2">
@@ -4948,12 +5237,12 @@ function AdminBody({
                 </div>
                 {!ivReqEditId && (
                   <div className="rounded-lg p-2.5" style={{ background: "#F6F7F9" }}>
-                    <p className="text-[11px] font-bold text-gray-500 mb-1">送信プレビュー（{"{name}"} は各自の名前に置き換わります）</p>
+                    <p className="text-xs font-bold text-gray-500 mb-1">送信プレビュー（{"{name}"} は各自の名前に置き換わります）</p>
                     <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{ivRequestText()}</p>
                   </div>
                 )}
                 {ivReqEditId && (
-                  <p className="text-[11px] text-gray-400">編集で保存しても、LINEの再送信は行いません（対象者や期限の修正用）。</p>
+                  <p className="text-xs text-gray-500">編集で保存しても、LINEの再送信は行いません（対象者や期限の修正用）。</p>
                 )}
               </div>
 
@@ -4961,12 +5250,12 @@ function AdminBody({
                 <p className="text-xs font-bold text-gray-500 mb-1.5">対象の内定者<span className="text-red-500 ml-0.5">*</span>（{ivReq.uids.length}名）</p>
                 <div className="flex gap-1.5 mb-2">
                   <button onClick={() => setIvReq({ ...ivReq, uids: activeStudents.map((s) => s.id) })}
-                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>全員</button>
+                    className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>全員</button>
                   <button onClick={() => setIvReq({ ...ivReq, uids: [] })}
                     className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600 bg-white">解除</button>
                 </div>
                 <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
-                  {activeStudents.length === 0 && <p className="text-xs text-gray-400 p-3">対象になる内定者がいません。</p>}
+                  {activeStudents.length === 0 && <p className="text-xs text-gray-500 p-3">対象になる内定者がいません。</p>}
                   {activeStudents.map((st) => {
                     const on = ivReq.uids.includes(st.id);
                     return (
@@ -4976,19 +5265,19 @@ function AdminBody({
                           : <span className="inline-block shrink-0" style={{ width: 17, height: 17, borderRadius: 999, border: "1.5px solid #C9BFC3" }} />}
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-bold truncate" style={{ color: on ? INK : "#9CA3AF" }}>{st.name}</span>
-                          <span className="block text-xs text-gray-400 truncate">{st.univ || "大学未登録"}{st.lineUserId ? "" : "・LINE未連携"}</span>
+                          <span className="block text-xs text-gray-500 truncate">{st.univ || "大学未登録"}{st.lineUserId ? "" : "・LINE未連携"}</span>
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                <p className="text-xs text-gray-500 mt-2 leading-relaxed">
                   「この内容で依頼する」を押すと、対象の学生に上の文面を公式LINEで送り（未連携の方にはメール）、マイページのホームにも案内が表示されます。学生が候補日時を提出したら、この一覧から担当者と日時を選んで確定してください。
                 </p>
               </div>
             </div>
             <div className="px-5 py-3 border-t border-gray-200 shrink-0">
-              {ivReqErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{ivReqErr}</p>}
+              {ivReqErr && <p className="text-xs font-bold mb-2" style={{ color: "#C81E1E" }}>{ivReqErr}</p>}
               <button onClick={saveIvReq} disabled={ivReqBusy}
                 className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
                 {ivReqBusy ? "送信中…" : ivReqEditId ? "更新する（再送信なし）" : "この内容で依頼する（LINE送信）"}
@@ -5071,7 +5360,7 @@ function AdminBody({
                   if (!nm) return;
                   await addInterviewer(nm); setMeetForm((p) => ({ ...p, interviewer: nm })); setNewInterviewer("");
                 }} disabled={!newInterviewer.trim()}
-                  className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>追加</button>
+                  className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>追加</button>
               </div>
               <p className="text-xs font-bold text-gray-500 pt-1">面談内容</p>
               {MEETING_SECTIONS.map((sec, i) => (
@@ -5088,7 +5377,7 @@ function AdminBody({
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-sm" />
               </div>
               <div>
-                <p className="text-xs font-bold text-gray-500 mb-1">学生の様子（スクリーンショット）<span className="font-normal text-gray-400 ml-1.5">{meetShots.length}/{MEET_SHOT_MAX}</span></p>
+                <p className="text-xs font-bold text-gray-500 mb-1">学生の様子（スクリーンショット）<span className="font-normal text-gray-500 ml-1.5">{meetShots.length}/{MEET_SHOT_MAX}</span></p>
                 <div tabIndex={0} role="button"
                   onPaste={(e) => {
                     const item = [...(e.clipboardData?.items || [])].find((it) => it.type && it.type.startsWith("image/"));
@@ -5104,7 +5393,7 @@ function AdminBody({
                     ここをクリックして Ctrl+V で貼り付け
                   </p>
                   <p className="mt-0.5">Windows で Win+Shift+S を押して Zoom の画面を撮り、そのまま貼り付けられます（ドラッグ＆ドロップも可）</p>
-                  <label className="inline-block mt-2 text-[11px] font-bold px-2.5 py-1 rounded-lg border cursor-pointer bg-white" style={{ borderColor: "#D7DEDB" }}>
+                  <label className="inline-block mt-2 text-xs font-bold px-2.5 py-1 rounded-lg border cursor-pointer bg-white" style={{ borderColor: "#D7DEDB" }}>
                     ファイルを選ぶ
                     <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) addMeetShot(f); }} />
                   </label>
@@ -5117,16 +5406,16 @@ function AdminBody({
                           <img src={src} alt="" className="w-full h-full" style={{ objectFit: "cover" }} />
                         </button>
                         <button type="button" onClick={() => setMeetShots((prev) => prev.filter((_, j) => j !== i))} aria-label="削除"
-                          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow" style={{ background: "#DC2626" }}>
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full text-white flex items-center justify-center shadow" style={{ background: "#C81E1E" }}>
                           <X size={13} />
                         </button>
                       </div>
                     ))}
                   </div>
                 )}
-                <p className="text-[11px] text-gray-400 mt-1">画像は縮小して保存します（1枚あたり数十KB）。学生には表示されません。</p>
+                <p className="text-xs text-gray-500 mt-1">画像は縮小して保存します（1枚あたり数十KB）。学生には表示されません。</p>
               </div>
-              <p className="text-[11px] text-gray-400 leading-relaxed">
+              <p className="text-xs text-gray-500 leading-relaxed">
                 面談記録は管理者だけが閲覧できます（学生のマイページには表示されません）。
               </p>
             </div>
@@ -5136,13 +5425,13 @@ function AdminBody({
               {!pc && (
                 <button onClick={() => setMeetHistOpen((v) => !v)}
                   className="w-full py-2 rounded-lg text-xs font-bold border mb-2"
-                  style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                  style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                   {meetHistOpen ? "過去の記録を閉じる ▲" : "過去の記録・パルス調査を見る ▼"}
                 </button>
               )}
               {(pc || meetHistOpen) && (() => {
                 const uid = meetForm.uid;
-                if (!uid) return <p className="text-xs text-gray-400">内定者を選ぶと、その方の過去の面談記録とパルス調査の結果がここに表示されます。</p>;
+                if (!uid) return <p className="text-xs text-gray-500">内定者を選ぶと、その方の過去の面談記録とパルス調査の結果がここに表示されます。</p>;
                 const past = meetingsOf(uid).filter((m) => m.id !== meetEditId);
                 const rounds = pulseRounds.filter((r) => pulseScore(r, uid) != null);
                 return (
@@ -5150,7 +5439,7 @@ function AdminBody({
                     <div className="rounded-xl p-3" style={{ background: "#F6F7F9" }}>
                       <p className="text-xs font-bold text-gray-500 mb-1.5">パルス調査の推移</p>
                       {rounds.length === 0 ? (
-                        <p className="text-xs text-gray-400">回答がまだありません。</p>
+                        <p className="text-xs text-gray-500">回答がまだありません。</p>
                       ) : rounds.map((r) => {
                         const sc = pulseScore(r, uid);
                         const avg = pulseAvg(r);
@@ -5174,7 +5463,7 @@ function AdminBody({
                         const txt = Array.isArray(free) ? free[0] : free;
                         return txt ? (
                           <div className="mt-2 bg-white rounded-lg p-2">
-                            <p className="text-[11px] font-bold text-gray-500">直近の自由記述</p>
+                            <p className="text-xs font-bold text-gray-500">直近の自由記述</p>
                             <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{txt}</p>
                           </div>
                         ) : null;
@@ -5184,13 +5473,13 @@ function AdminBody({
                     <div>
                       <p className="text-xs font-bold text-gray-500 mb-1.5">過去の面談記録（{past.length}件）</p>
                       {past.length === 0 ? (
-                        <p className="text-xs text-gray-400">過去の記録はありません。</p>
+                        <p className="text-xs text-gray-500">過去の記録はありません。</p>
                       ) : past.map((m) => (
                         <div key={m.id} className="border border-gray-200 rounded-xl p-3 mb-2">
                           <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
                           {meetingBody(m).map((b) => (
                             <div key={b.key} className="mt-1.5">
-                              <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
+                              <p className="text-xs font-bold text-gray-500">{b.label}</p>
                               <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                             </div>
                           ))}
@@ -5205,7 +5494,7 @@ function AdminBody({
             </div>
             </div>
             <div className="px-5 py-3 border-t border-gray-200 shrink-0">
-              {meetErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{meetErr}</p>}
+              {meetErr && <p className="text-xs font-bold mb-2" style={{ color: "#C81E1E" }}>{meetErr}</p>}
               <button onClick={saveMeeting} disabled={meetBusy}
                 className="w-full py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
                 {meetBusy ? "保存中…" : meetEditId ? "更新する" : "記録する"}
@@ -5226,7 +5515,7 @@ function AdminBody({
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">面談履歴</p>
+                  <p className="text-xs text-gray-500">面談履歴</p>
                   <p className="text-base font-bold mt-0.5 truncate">{st.name}</p>
                   <p className="text-xs text-gray-500 mt-0.5 truncate">
                     {st.univ || "大学未登録"}・{st.source || "流入経路 未登録"}・{ms.length ? `面談 ${ms.length}回` : "未実施"}
@@ -5239,7 +5528,7 @@ function AdminBody({
                 {ms.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-sm font-bold text-gray-500">面談の記録はまだありません。</p>
-                    <p className="text-xs text-gray-400 mt-1">下の「記録を追加」から初回の面談を記録できます。</p>
+                    <p className="text-xs text-gray-500 mt-1">下の「記録を追加」から初回の面談を記録できます。</p>
                   </div>
                 ) : (
                   <div className="space-y-2.5">
@@ -5249,19 +5538,19 @@ function AdminBody({
                           <div className="min-w-0">
                             <p className="text-sm font-bold">
                               {m.date}{m.time ? ` ${m.time}` : ""}
-                              {i === 0 && <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>最新</span>}
+                              {i === 0 && <span className="ml-2 text-xs font-bold px-1.5 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>最新</span>}
                             </p>
                             <p className="text-xs text-gray-500 mt-0.5">{m.kind || "面談"}{m.interviewer ? `・担当 ${m.interviewer}` : ""}</p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {meetDelId === m.id ? (
                               <>
-                                <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
+                                <button onClick={() => removeMeeting(m.id)} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
                                 <button onClick={() => setMeetDelId(null)} className="text-xs font-bold px-2 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>編集</button>
+                                <button onClick={() => openMeetForm(m)} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                                 <button onClick={() => setMeetDelId(m.id)} aria-label="削除" className="text-gray-300 p-1"><Trash2 size={14} /></button>
                               </>
                             )}
@@ -5270,12 +5559,12 @@ function AdminBody({
                         <div className={pc ? "grid grid-cols-2 gap-x-4 gap-y-2 mt-2" : "mt-1"}>
                           {meetingBody(m).map((b) => (
                             <div key={b.key} className={pc ? "" : "mt-2"}>
-                              <p className="text-[11px] font-bold" style={{ color: BRAND }}>{b.label}</p>
+                              <p className="text-xs font-bold" style={{ color: BRAND }}>{b.label}</p>
                               <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                             </div>
                           ))}
                         </div>
-                        {meetingBody(m).length === 0 && <p className="text-xs text-gray-400 mt-2">内容の記入はありません。</p>}
+                        {meetingBody(m).length === 0 && <p className="text-xs text-gray-500 mt-2">内容の記入はありません。</p>}
                         {meetShotsView(m.shots)}
                         {m.next && <p className="text-xs font-bold mt-2" style={{ color: "#B45309" }}>次回予定：{m.next}</p>}
                       </div>
@@ -5346,7 +5635,7 @@ function AdminBody({
                 onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                   <div className="min-w-0">
-                    <p className="text-xs text-gray-400">送信先を個別に選ぶ</p>
+                    <p className="text-xs text-gray-500">送信先を個別に選ぶ</p>
                     <p className="text-base font-bold mt-0.5 truncate">{pickView.label}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{pickSel.size}名を選択中（{pickView.base.length}名から）</p>
                   </div>
@@ -5361,15 +5650,15 @@ function AdminBody({
                       {allOn ? "表示中をすべて外す" : "表示中をすべて選ぶ"}
                     </button>
                     {pickSel.size > 0 && (
-                      <button onClick={() => setPickSel(new Set())} className="text-gray-400">選択を解除</button>
+                      <button onClick={() => setPickSel(new Set())} className="text-gray-500">選択を解除</button>
                     )}
                   </div>
                 </div>
                 <div className="overflow-y-auto px-5 pb-3 flex-1">
                   {pickView.base.length === 0 ? (
-                    <p className="text-xs text-gray-400 py-4">選べる学生がいません。</p>
+                    <p className="text-xs text-gray-500 py-4">選べる学生がいません。</p>
                   ) : pickRows.length === 0 ? (
-                    <p className="text-xs text-gray-400 py-4">検索に一致する学生がいません。</p>
+                    <p className="text-xs text-gray-500 py-4">検索に一致する学生がいません。</p>
                   ) : (
                     <div className="divide-y divide-gray-100">
                       {pickRows.map((s) => {
@@ -5379,10 +5668,10 @@ function AdminBody({
                             <input type="checkbox" checked={on} onChange={() => togglePick(s.id)} className="w-4 h-4 shrink-0" />
                             <span className="min-w-0 flex-1">
                               <span className="block text-sm font-bold truncate">{s.name || "（名前なし）"}</span>
-                              <span className="block text-xs text-gray-400 truncate">{s.univ || "大学未登録"}</span>
+                              <span className="block text-xs text-gray-500 truncate">{s.univ || "大学未登録"}</span>
                             </span>
-                            <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full"
-                              style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
+                            <span className="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full"
+                              style={s.lineUserId ? { background: "#E4F6EC", color: "#0A8F4D" } : { background: "#F3F4F6", color: "#9CA3AF" }}>
                               {s.lineUserId ? "LINE" : "メール"}
                             </span>
                           </label>
@@ -5405,13 +5694,13 @@ function AdminBody({
         // 現在の対象を色つきで示すヘッダー（トップ／イベント／アンケートの各画面で共通）
         const currentTag = (
           <p className="text-base font-bold mt-0.5 truncate flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
+            <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded text-white" style={{ background: targetCat.color }}>{targetCat.label}</span>
             <span className="truncate" style={{ color: targetCat.color }}>{targetLabel}</span>
             <span className="shrink-0 text-xs font-bold text-gray-500">・{targetCount}名</span>
           </p>
         );
         const freshnessNote = (
-          <p className="text-[11px] text-gray-400 leading-relaxed">
+          <p className="text-xs text-gray-500 leading-relaxed">
             人数は「回答状況を更新」で取得した時点のものです。最新にするには概況タブの更新ボタンを押してください。
           </p>
         );
@@ -5439,11 +5728,11 @@ function AdminBody({
                 </div>
                 <div className="overflow-y-auto px-5 py-4 space-y-3 flex-1">
                   <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2" style={{ background: "#F4F7F6" }}>
-                    <span className="shrink-0 text-gray-400 font-bold">現在</span>
+                    <span className="shrink-0 text-gray-500 font-bold">現在</span>
                     {currentTag}
                   </div>
                   {/* 色の凡例 */}
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500">
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
                     {(isEv ? ["yes", "arrived", "no", "none"] : ["unanswered", "answered"]).map((g) => (
                       <span key={g} className="inline-flex items-center gap-1">
                         <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: isEv ? EVENT_GROUP_COLOR[g] : SURVEY_GROUP_COLOR[g] }} />
@@ -5457,20 +5746,20 @@ function AdminBody({
                     )}
                   </div>
                   {list.length === 0 ? (
-                    <p className="text-xs text-gray-400 py-4">この年度の{isEv ? "イベント" : "アンケート"}はまだありません。</p>
+                    <p className="text-xs text-gray-500 py-4">この年度の{isEv ? "イベント" : "アンケート"}はまだありません。</p>
                   ) : isEv ? (
                     yearEvents.map((e) => {
                       const on = isEventTarget && tEventId === e.id;
                       return (
                         <div key={e.id} className="rounded-xl p-3 border" style={{ borderColor: on ? cat.color : "#E5E7EB", borderLeftWidth: 4, borderLeftColor: cat.color, background: on ? cat.bg : "#fff" }}>
                           <p className="text-sm font-bold truncate" style={{ color: INK }}>{e.title}</p>
-                          <p className="text-xs text-gray-400 mb-2">{e.dateStr || "日付未定"}・対象 {eventAudience(e).length}名</p>
+                          <p className="text-xs text-gray-500 mb-2">{e.dateStr || "日付未定"}・対象 {eventAudience(e).length}名</p>
                           <div className="flex flex-wrap gap-1.5">
                             {["yes", "arrived", "no", "none"].map((g) => {
                               const n = eventGroupList(e, g).length;
                               return (
                                 <button key={g} onClick={() => pick(`event:${e.id}:${g}`)} disabled={n === 0}
-                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                                  className="text-xs font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
                                   style={chipC(on && tGroup === g, EVENT_GROUP_COLOR[g])}>
                                   {groupLabelOf(g)} {n}名
                                 </button>
@@ -5489,20 +5778,20 @@ function AdminBody({
                       return (
                         <div key={sv.id} className="rounded-xl p-3 border" style={{ borderColor: on || pickOn ? cat.color : "#E5E7EB", borderLeftWidth: 4, borderLeftColor: cat.color, background: on || pickOn ? cat.bg : "#fff" }}>
                           <p className="text-sm font-bold truncate" style={{ color: INK }}>{sv.title}</p>
-                          <p className="text-xs text-gray-400 mb-2">{sv.dueDate ? `期限 ${sv.due || sv.dueDate}` : "期限なし"}・対象 {surveyAudience(sv).length}名</p>
+                          <p className="text-xs text-gray-500 mb-2">{sv.dueDate ? `期限 ${sv.due || sv.dueDate}` : "期限なし"}・対象 {surveyAudience(sv).length}名</p>
                           <div className="flex flex-wrap gap-1.5">
                             {["unanswered", "answered"].map((g) => {
                               const n = surveyGroupList(sv, g).length;
                               return (
                                 <button key={g} onClick={() => pick(`survey:${sv.id}:${g}`)} disabled={n === 0}
-                                  className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                                  className="text-xs font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
                                   style={chipC(on && tSGroup === g, SURVEY_GROUP_COLOR[g])}>
                                   {surveyGroupLabelOf(g)} {n}名
                                 </button>
                               );
                             })}
                             <button onClick={() => openPick(answered, label)} disabled={answered.length === 0}
-                              className="text-[11px] font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
+                              className="text-xs font-bold px-2.5 py-1.5 rounded-full border disabled:opacity-40"
                               style={chipC(pickOn, TARGET_CAT.pick.color)}>
                               回答済みから選ぶ{pickOn ? ` ${pickList.length}名` : ""}
                             </button>
@@ -5542,14 +5831,14 @@ function AdminBody({
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">配信対象を選ぶ</p>
+                  <p className="text-xs text-gray-500">配信対象を選ぶ</p>
                   {currentTag}
                 </div>
                 <button onClick={closePicker} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
               <div className="overflow-y-auto px-5 py-4 space-y-5">
                 <div>
-                  <p className="text-[11px] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.status.color }}>
+                  <p className="text-xs font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.status.color }}>
                     <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: TARGET_CAT.status.color }} />ステータス別
                   </p>
                   <div className="flex flex-wrap gap-2">
@@ -5563,7 +5852,7 @@ function AdminBody({
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-[11px] font-bold text-gray-400">イベント・アンケートで絞る</p>
+                  <p className="text-xs font-bold text-gray-500">イベント・アンケートで絞る</p>
                   {catButton(TARGET_CAT.event, "event", yearEvents.length, "イベント",
                     isEventTarget ? `選択中：${targetLabel}・${targetCount}名（タップで変更）` : null)}
                   {catButton(TARGET_CAT.survey, "survey", yearSurveys.length, "アンケート",
@@ -5571,7 +5860,7 @@ function AdminBody({
                 </div>
 
                 <div>
-                  <p className="text-[11px] font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.pick.color }}>
+                  <p className="text-xs font-bold mb-1.5 flex items-center gap-1.5" style={{ color: TARGET_CAT.pick.color }}>
                     <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: TARGET_CAT.pick.color }} />学生を個別に選んで送る
                   </p>
                   <button onClick={() => openPick(activeStudents, "個別選択")}
@@ -5598,12 +5887,12 @@ function AdminBody({
         const list = filteredActive;
         const changed = multiChanged();
         const cls = "w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm";
-        const L = ({ children }) => <p className="text-[11px] font-bold text-gray-400 mb-1">{children}</p>;
+        const L = ({ children }) => <p className="text-xs font-bold text-gray-500 mb-1">{children}</p>;
         return (
           <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: "#F4F7F6" }}>
             <div className="shrink-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-xs text-gray-400">まとめて編集（{selectedYear}卒）</p>
+                <p className="text-xs text-gray-500">まとめて編集（{selectedYear}卒）</p>
                 <p className="text-base font-bold">一覧の{list.length}名・変更中 {changed.length}名</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
@@ -5616,15 +5905,15 @@ function AdminBody({
             </div>
             {(multiErr || multiDone) && (
               <div className="shrink-0 px-5 py-2 text-xs font-bold"
-                style={multiErr ? { background: "#FEF2F2", color: "#B91C1C" } : { background: "#F1F8F3", color: "#1E874B" }}>
+                style={multiErr ? { background: "#FDE8E8", color: "#C81E1E" } : { background: "#E4F6EC", color: "#0A8F4D" }}>
                 {multiErr || multiDone}
               </div>
             )}
             <div className="flex-1 overflow-y-auto px-5 py-4">
-              <p className="text-xs text-gray-400 mb-3">
+              <p className="text-xs text-gray-500 mb-3">
                 内定者タブの検索・フィルター・並び替えで絞り込んだ一覧がそのまま並びます。必要な人だけ入力して、上の「変更を保存」でまとめて保存できます。
               </p>
-              {list.length === 0 && <p className="text-xs text-gray-400">該当する学生がいません。</p>}
+              {list.length === 0 && <p className="text-xs text-gray-500">該当する学生がいません。</p>}
               <div className="space-y-3">
                 {list.map((st) => {
                   const isChanged = changed.some((x) => x.id === st.id);
@@ -5634,8 +5923,8 @@ function AdminBody({
                       style={{ borderColor: isChanged ? BRAND : "#E5E7EB" }}>
                       <div className="flex items-center gap-2 mb-2">
                         <p className="text-sm font-bold truncate">{st.name}</p>
-                        <span className="text-xs text-gray-400 truncate">{st.email}</span>
-                        {isChanged && <span className="ml-auto shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>変更あり</span>}
+                        <span className="text-xs text-gray-500 truncate">{st.email}</span>
+                        {isChanged && <span className="ml-auto shrink-0 text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>変更あり</span>}
                       </div>
                       <div className={pc ? "grid grid-cols-4 gap-2" : "grid grid-cols-2 gap-2"}>
                         <div><L>フリガナ</L><input value={multiValue(st, "kana")} onChange={(e) => setMultiValue(st.id, "kana", e.target.value)} placeholder="サトウ ミサキ" className={cls} /></div>
@@ -5669,7 +5958,7 @@ function AdminBody({
                   );
                 })}
               </div>
-              <p className="text-xs text-gray-400 mt-4 leading-relaxed">
+              <p className="text-xs text-gray-500 mt-4 leading-relaxed">
                 氏名・生年月日・メールアドレスは学生本人の申告情報のため変更できません（メールはログインIDのため）。ステータスの変更は一覧のプルダウンから行ってください。
               </p>
             </div>
@@ -5688,17 +5977,17 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-sm p-5">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-xs text-gray-400">出欠を変更</p>
+                  <p className="text-xs text-gray-500">出欠を変更</p>
                   <p className="text-lg font-bold mt-0.5">{st.name}</p>
                 </div>
-                <button onClick={() => setAttendEdit(null)} aria-label="閉じる"><X size={20} className="text-gray-400" /></button>
+                <button onClick={() => setAttendEdit(null)} aria-label="閉じる"><X size={20} className="text-gray-500" /></button>
               </div>
 
               <p className="text-xs font-bold text-gray-500 mt-4 mb-1.5">出欠</p>
               <div className="flex gap-2">
                 {["出席", "欠席", "未回答"].map((ans) => {
                   const on = attendAns === ans;
-                  const c = ans === "出席" ? "#1E874B" : ans === "欠席" ? "#DC2626" : "#B45309";
+                  const c = ans === "出席" ? "#0A8F4D" : ans === "欠席" ? "#C81E1E" : "#B45309";
                   return (
                     <button key={ans} onClick={() => setAttendAns(ans)}
                       className="flex-1 py-2 rounded-lg text-sm font-bold border"
@@ -5722,7 +6011,7 @@ function AdminBody({
                   <p className="text-xs font-bold text-gray-500 mb-1.5">到着</p>
                   <button onClick={() => toggleArrival(e, st)}
                     className="w-full py-2 rounded-lg text-sm font-bold border inline-flex items-center justify-center gap-1.5"
-                    style={arr ? { background: "#EAF7EE", color: "#1E874B", borderColor: "#BFE6CC" } : { borderColor: "#E5E7EB", color: "#6B7280", background: "#fff" }}>
+                    style={arr ? { background: "#E4F6EC", color: "#0A8F4D", borderColor: "#BFE6CC" } : { borderColor: "#E5E7EB", color: "#6B7280", background: "#fff" }}>
                     {arr ? <><CheckCircle2 size={15} /> 到着済み（タップで取消）</> : "未到着（タップで到着済みにする）"}
                   </button>
                 </div>
@@ -5795,7 +6084,7 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     {isDoc ? `${isSv ? "アンケート" : "イベント"}の対象者を調整` : (isSv ? "アンケートの対象者を選ぶ（表示する学生）" : "対象者を選ぶ（表示する学生）")}
                   </p>
                   {isDoc && docItem && <p className="text-sm font-bold mt-0.5 truncate">{docItem.title}</p>}
@@ -5804,12 +6093,12 @@ function AdminBody({
                 <button onClick={closeTargetModal} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
               </div>
               {isDoc && (
-                <p className="px-4 pt-2 text-[11px] text-gray-400 shrink-0">
+                <p className="px-4 pt-2 text-xs text-gray-500 shrink-0">
                   チェックを入れた学生にだけ表示されます。「この内容で保存」すると対象者が<span className="font-bold">この名簿に固定</span>され、以後に登録した学生には表示されません。全員やエリアで自動的に対象にしたい場合は、下の「個別指定を解除（条件どおりに戻す）」を使ってください。
                 </p>
               )}
               <div className="px-4 py-2 border-b border-gray-100 flex flex-wrap gap-1.5 shrink-0">
-                <button onClick={() => setSelectedUids(areaIdsFn())} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>エリアで選択</button>
+                <button onClick={() => setSelectedUids(areaIdsFn())} className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>エリアで選択</button>
                 <button onClick={() => setSelectedUids(candidates.map((s) => s.id))} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員</button>
                 <button onClick={() => setSelectedUids([])} className="text-xs font-bold px-2.5 py-1 rounded-lg border border-gray-300 text-gray-600">全員解除</button>
               </div>
@@ -5824,7 +6113,7 @@ function AdminBody({
                         : <span className="inline-block shrink-0" style={{ width: 18, height: 18, borderRadius: 999, border: "1.5px solid #C9BFC3" }} />}
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold truncate" style={{ color: on ? INK : "#9CA3AF" }}>{st.name}</p>
-                        <p className="text-xs text-gray-400 truncate">{st.univ}・{areaOf(st)}</p>
+                        <p className="text-xs text-gray-500 truncate">{st.univ}・{areaOf(st)}</p>
                       </div>
                     </button>
                   );
@@ -5854,9 +6143,9 @@ function AdminBody({
           <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
-                <p className="text-xs text-gray-400">自由記述の回答</p>
+                <p className="text-xs text-gray-500">自由記述の回答</p>
                 <p className="text-base font-bold mt-0.5 break-words">{textAnswers.qLabel}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{textAnswers.items.length}件</p>
+                <p className="text-xs text-gray-500 mt-0.5">{textAnswers.items.length}件</p>
               </div>
               <button onClick={() => setTextAnswers(null)} aria-label="閉じる" className="shrink-0 -mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
             </div>
@@ -5864,7 +6153,7 @@ function AdminBody({
               {textAnswers.items.map((it, i) => (
                 <div key={i} className="rounded-lg p-3" style={{ background: "#FAFBFC", border: "1px solid #EEF1F4" }}>
                   <p className="text-sm text-gray-800 leading-relaxed whitespace-pre-wrap">{it.text}</p>
-                  <p className="text-xs text-gray-400 mt-1.5">— {it.name}（{it.univ}）</p>
+                  <p className="text-xs text-gray-500 mt-1.5">— {it.name}（{it.univ}）</p>
                 </div>
               ))}
             </div>
@@ -5878,9 +6167,9 @@ function AdminBody({
           <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
-                <p className="text-xs text-gray-400 truncate">{optionVoters.qLabel}</p>
+                <p className="text-xs text-gray-500 truncate">{optionVoters.qLabel}</p>
                 <p className="text-lg font-bold mt-0.5 break-words">「{optionVoters.option}」を選んだ人</p>
-                <p className="text-xs text-gray-400 mt-0.5">{optionVoters.list.length}名</p>
+                <p className="text-xs text-gray-500 mt-0.5">{optionVoters.list.length}名</p>
               </div>
               <button onClick={() => setOptionVoters(null)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
             </div>
@@ -5889,7 +6178,7 @@ function AdminBody({
               {optionVoters.list.map((st) => (
                 <div key={st.id} className="px-5 py-2.5">
                   <p className="text-sm font-bold truncate">{st.name}</p>
-                  <p className="text-xs text-gray-400 truncate">{st.univ}</p>
+                  <p className="text-xs text-gray-500 truncate">{st.univ}</p>
                 </div>
               ))}
             </div>
@@ -5911,7 +6200,7 @@ function AdminBody({
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "82vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
-                  <p className="text-xs text-gray-400">履歴から作成</p>
+                  <p className="text-xs text-gray-500">履歴から作成</p>
                   <p className="text-lg font-bold mt-0.5">{isEvent ? "過去のイベント" : "過去のアンケート"}</p>
                 </div>
                 <button onClick={() => setHistoryPicker(null)} aria-label="閉じる" className="-mt-0.5 -mr-1 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
@@ -5919,7 +6208,7 @@ function AdminBody({
               <div className="p-4 overflow-y-auto">
                 <p className="text-xs text-gray-500 mb-2">項目を選ぶと内容を確認でき、「この内容で新規作成」で入力欄に読み込みます（日付・回答期限は引き継ぎません）。</p>
                 {items.length === 0 ? (
-                  <p className="text-xs text-gray-400">{isEvent ? "過去のイベントがありません。" : "過去のアンケートがありません。"}</p>
+                  <p className="text-xs text-gray-500">{isEvent ? "過去のイベントがありません。" : "過去のアンケートがありません。"}</p>
                 ) : (
                   <div className="space-y-2">
                     {items.map((it) => {
@@ -5929,9 +6218,9 @@ function AdminBody({
                           <button onClick={() => setHistoryExpanded(open ? null : it.id)} className="w-full text-left p-3">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-sm font-bold truncate">{it.title || "（無題）"}</p>
-                              <p className="text-xs text-gray-400 shrink-0">{it.grad ? `${it.grad}卒` : ""}{it.published === false ? "・下書き" : ""}</p>
+                              <p className="text-xs text-gray-500 shrink-0">{it.grad ? `${it.grad}卒` : ""}{it.published === false ? "・下書き" : ""}</p>
                             </div>
-                            <p className="text-xs text-gray-400 mt-0.5">
+                            <p className="text-xs text-gray-500 mt-0.5">
                               {isEvent ? `${it.dateStr || "日付未定"}・${it.place || ""}` : `設問 ${surveyQuestions(it).length}問${it.dueDate ? `・期限 ${it.due || it.dueDate}` : ""}`}
                             </p>
                           </button>
@@ -5947,8 +6236,8 @@ function AdminBody({
                                 <ol className="text-xs text-gray-600 space-y-1.5 list-decimal ml-4">
                                   {surveyQuestions(it).map((q) => (
                                     <li key={q.id}>
-                                      {q.label} <span className="text-gray-400">（{q.type === "text" ? "自由記述" : q.type === "multi" ? "複数選択" : "単一選択"}）</span>
-                                      {q.type !== "text" && q.options?.length > 0 && <span className="text-gray-400">：{q.options.join("／")}</span>}
+                                      {q.label} <span className="text-gray-500">（{q.type === "text" ? "自由記述" : q.type === "multi" ? "複数選択" : "単一選択"}）</span>
+                                      {q.type !== "text" && q.options?.length > 0 && <span className="text-gray-500">：{q.options.join("／")}</span>}
                                     </li>
                                   ))}
                                 </ol>
@@ -6006,13 +6295,13 @@ function AdminBody({
               {/* 固定ヘッダー：名前の横に編集、右上に閉じる（スクロールで隠れない） */}
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div className="min-w-0">
-                  <p className="text-xs text-gray-400">内定者情報</p>
+                  <p className="text-xs text-gray-500">内定者情報</p>
                   <p className="text-lg font-bold mt-0.5 truncate">{d.name}</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {!editDetail && (
                     <button onClick={() => setEditDetail(true)}
-                      className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>
+                      className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                       編集
                     </button>
                   )}
@@ -6030,7 +6319,7 @@ function AdminBody({
                     <StudentEditor key={d.id} student={d} setBanner={setBanner} onDone={() => setEditDetail(false)}
                       sourceOptions={sourceOptions} onAddSource={addSource}
                       newSource={newSource} setNewSource={setNewSource} />
-                    <p className="text-xs text-gray-400 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
+                    <p className="text-xs text-gray-500 mt-3 leading-relaxed">氏名・生年月日・メールは学生本人の申告情報のため編集できません（メールはログインIDのため変更不可）。</p>
                   </>
                 ) : (
                   <>
@@ -6045,8 +6334,8 @@ function AdminBody({
                     {(() => {
                       const pend = pendingTasksOf(d);
                       return (
-                        <div className="mt-3 rounded-lg p-3" style={{ background: pend.length ? "#FFF7E6" : "#F1F8F3", border: `1px solid ${pend.length ? "#F5D08C" : "#CDE8D6"}` }}>
-                          <p className="text-xs font-bold mb-1.5" style={{ color: pend.length ? "#B45309" : "#1E874B" }}>
+                        <div className="mt-3 rounded-lg p-3" style={{ background: pend.length ? "#FEF1DC" : "#E4F6EC", border: `1px solid ${pend.length ? "#F5D08C" : "#CDE8D6"}` }}>
+                          <p className="text-xs font-bold mb-1.5" style={{ color: pend.length ? "#B45309" : "#0A8F4D" }}>
                             {pend.length ? `未対応のタスク（${pend.length}件）` : "未対応のタスクはありません"}
                           </p>
                           {pend.map((t) => (
@@ -6062,28 +6351,28 @@ function AdminBody({
                           <div className="flex items-center justify-between gap-2 mb-1.5">
                             <p className="text-xs font-bold text-gray-500">面談記録（{ms.length}件）</p>
                             <button onClick={() => { setDetailStudent(null); openMeetForm(null, d.id); }}
-                              className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+                              className="text-xs font-bold px-2.5 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
                               ＋ 記録する
                             </button>
                           </div>
-                          {ms.length === 0 && <p className="text-xs text-gray-400">まだ面談の記録はありません。</p>}
+                          {ms.length === 0 && <p className="text-xs text-gray-500">まだ面談の記録はありません。</p>}
                           {ms.slice(0, 3).map((m) => (
                             <div key={m.id} className="bg-white rounded-lg p-2 mb-1.5" style={{ border: "1px solid #E5E7EB" }}>
                               <p className="text-xs font-bold">{m.date}{m.time ? ` ${m.time}` : ""}・{m.kind}{m.interviewer ? `（${m.interviewer}）` : ""}</p>
                               {meetingBody(m).map((b) => (
                                 <div key={b.key} className="mt-1">
-                                  <p className="text-[11px] font-bold text-gray-500">{b.label}</p>
+                                  <p className="text-xs font-bold text-gray-500">{b.label}</p>
                                   <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{b.text}</p>
                                 </div>
                               ))}
                               {meetShotsView(m.shots, 56)}
                             </div>
                           ))}
-                          {ms.length > 3 && <p className="text-[11px] text-gray-400">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}
+                          {ms.length > 3 && <p className="text-xs text-gray-500">ほか{ms.length - 3}件は「面談」タブで確認できます。</p>}
                         </div>
                       );
                     })()}
-                    <p className="text-xs text-gray-400 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
+                    <p className="text-xs text-gray-500 mt-3 leading-relaxed">連絡先やフリガナを直すには、右上の「編集」を押してください。</p>
                   </>
                 )}
               </div>
@@ -6109,30 +6398,30 @@ function AdminBody({
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">送信先</p>
                   <p className="text-sm font-bold" style={{ color: BRAND }}>{selectedYear}卒・{targetLabel}（{list.length}名）</p>
-                  <p className="text-[11px] text-gray-500 mt-0.5">
+                  <p className="text-xs text-gray-500 mt-0.5">
                     LINE {lineTargetCount}通／メール {mailCount}通
-                    {noneCount > 0 && <span className="font-bold" style={{ color: "#B91C1C" }}>／連絡先なし {noneCount}名（届きません）</span>}
+                    {noneCount > 0 && <span className="font-bold" style={{ color: "#C81E1E" }}>／連絡先なし {noneCount}名（届きません）</span>}
                   </p>
                   <div className="mt-1.5 rounded-lg border border-gray-200 max-h-52 overflow-y-auto divide-y divide-gray-100">
                     {list.length === 0 ? (
-                      <p className="text-xs text-gray-400 px-3 py-2">送信先がいません。「戻って直す」で配信対象を変えてください。</p>
+                      <p className="text-xs text-gray-500 px-3 py-2">送信先がいません。「戻って直す」で配信対象を変えてください。</p>
                     ) : list.map((s) => (
                       <div key={s.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
                         <span className="min-w-0 truncate font-bold">{s.name || "（名前なし）"}</span>
-                        <span className="min-w-0 flex-1 truncate text-gray-400">{s.univ || ""}</span>
-                        <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-                          style={s.lineUserId ? { background: "#E7F9EE", color: "#059947" } : s.email ? { background: "#EEF2FF", color: "#4F46E5" } : { background: "#FEF2F2", color: "#B91C1C" }}>
+                        <span className="min-w-0 flex-1 truncate text-gray-500">{s.univ || ""}</span>
+                        <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded-full"
+                          style={s.lineUserId ? { background: "#E4F6EC", color: "#0A8F4D" } : s.email ? { background: "#EEF2FF", color: "#4F46E5" } : { background: "#FDE8E8", color: "#C81E1E" }}>
                           {s.lineUserId ? "LINE" : s.email ? "メール" : "連絡先なし"}
                         </span>
                       </div>
                     ))}
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1">辞退者・削除済みは含みません。</p>
+                  <p className="text-xs text-gray-500 mt-1">辞退者・削除済みは含みません。</p>
                 </div>
                 <div>
                   <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
                   <div className="rounded-lg border border-gray-200 p-3 text-sm whitespace-pre-wrap leading-relaxed break-words" style={{ background: "#F9FAFB" }}>{msg}</div>
-                  {hasName && <p className="text-[11px] text-gray-500 mt-1">「{"{name}"}」は送信時に各自の登録名に置き換わります。</p>}
+                  {hasName && <p className="text-xs text-gray-500 mt-1">「{"{name}"}」は送信時に各自の登録名に置き換わります。</p>}
                 </div>
               </div>
               <div className="px-5 py-3 border-t border-gray-200 flex gap-2 shrink-0">
@@ -6158,7 +6447,7 @@ function AdminBody({
             <p className="text-xs mt-2 leading-relaxed font-bold" style={{ color: BRAND }}>削除後も「辞退者・削除済み一覧」からいつでも復元できます。</p>
             <div className="flex gap-2 mt-4">
               <button onClick={() => setPendingStatus(null)} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-gray-300 text-gray-600 bg-white">キャンセル</button>
-              <button onClick={confirmDecline} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: "#DC2626" }}>変更して削除</button>
+              <button onClick={confirmDecline} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white" style={{ background: "#C81E1E" }}>変更して削除</button>
             </div>
           </div>
         </div>
@@ -6202,7 +6491,7 @@ function AdminBody({
                 if (!list.length) return null;
                 return (
                   <div key={g}>
-                    <p className="text-[11px] font-bold text-gray-500 mb-1">{g}</p>
+                    <p className="text-xs font-bold text-gray-500 mb-1">{g}</p>
                     <div className="space-y-1.5">
                       {list.map((t) => {
                         const Icon = t.icon;
@@ -6215,7 +6504,7 @@ function AdminBody({
                             <Icon size={19} />
                             <span className="flex-1">{t.label}</span>
                             {badge > 0 && badgeDot(badge, 19)}
-                            <ChevronRight size={16} className="text-gray-400" />
+                            <ChevronRight size={16} className="text-gray-500" />
                           </button>
                         );
                       })}
@@ -6237,7 +6526,7 @@ function AdminBody({
               <button key={t.key} onClick={() => setTab(t.key)} aria-current={active ? "page" : undefined}
                 className="py-2.5 flex flex-col items-center gap-0.5" style={{ color: active ? BRAND : "#6B7280" }}>
                 <Icon size={21} />
-                <span className="text-[11px] font-bold">{t.label}</span>
+                <span className="text-xs font-bold">{t.label}</span>
               </button>
             );
           })}
@@ -6250,10 +6539,10 @@ function AdminBody({
                   <MoreHorizontal size={21} />
                   {moreBadge > 0 && (
                     <span className="absolute text-white rounded-full font-bold flex items-center justify-center"
-                      style={{ top: -6, right: -12, background: "#DC2626", fontSize: 11, minWidth: 17, height: 17, padding: "0 4px", lineHeight: 1 }}>{moreBadge}</span>
+                      style={{ top: -6, right: -12, background: "#C81E1E", fontSize: 11, minWidth: 17, height: 17, padding: "0 4px", lineHeight: 1 }}>{moreBadge}</span>
                   )}
                 </span>
-                <span className="text-[11px] font-bold">{active ? tabs.find((t) => t.key === tab).label : "その他"}</span>
+                <span className="text-xs font-bold">{active ? tabs.find((t) => t.key === tab).label : "その他"}</span>
               </button>
             );
           })()}
@@ -6300,7 +6589,7 @@ function StudentEditor({ student, setBanner, onDone, sourceOptions = [], onAddSo
     finally { setSaving(false); }
   };
 
-  const L = ({ children }) => <p className="text-[11px] font-bold text-gray-400 mb-1">{children}</p>;
+  const L = ({ children }) => <p className="text-xs font-bold text-gray-500 mb-1">{children}</p>;
   const cls = "w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm";
 
   return (
@@ -6339,12 +6628,12 @@ function StudentEditor({ student, setBanner, onDone, sourceOptions = [], onAddSo
               placeholder="新しい媒体・紹介会社を追加" className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
             <button onClick={async () => { const n = (newSource || "").trim(); if (!n) return; await onAddSource(n); set("source", n); if (setNewSource) setNewSource(""); }}
               disabled={!(newSource || "").trim()}
-              className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: BRAND, color: BRAND, background: "#fff" }}>
+              className="shrink-0 text-xs font-bold px-3 rounded-lg border disabled:opacity-40" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
               追加
             </button>
           </div>
         )}
-        <p className="text-[11px] text-gray-400 mt-1">追加した選択肢は、他の内定者の編集画面でもプルダウンに出ます。</p>
+        <p className="text-xs text-gray-500 mt-1">追加した選択肢は、他の内定者の編集画面でもプルダウンに出ます。</p>
       </div>
       <div className="flex gap-2">
         <button onClick={save} disabled={saving}
@@ -6384,10 +6673,10 @@ function QuestionAdminCard({ q, reload, setBanner }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-gray-400 truncate">{q.name || "（名前なし）"}{q.grad ? `・${q.grad}卒` : ""}{dateStr ? `・${dateStr}` : ""}</p>
+        <p className="text-xs text-gray-500 truncate">{q.name || "（名前なし）"}{q.grad ? `・${q.grad}卒` : ""}{dateStr ? `・${dateStr}` : ""}</p>
         {q.answer
-          ? <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#EAF7EE", color: "#1E874B" }}>回答済み</span>
-          : <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FFF7E6", color: "#B45309" }}>未回答</span>}
+          ? <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#E4F6EC", color: "#0A8F4D" }}>回答済み</span>
+          : <span className="text-xs font-bold px-2 py-0.5 rounded-full shrink-0" style={{ background: "#FEF1DC", color: "#B45309" }}>未回答</span>}
       </div>
       <p className="text-sm whitespace-pre-wrap">{q.text}</p>
       <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} rows={3}
@@ -6402,11 +6691,11 @@ function QuestionAdminCard({ q, reload, setBanner }) {
         </button>
         {confirmDel ? (
           <>
-            <button onClick={remove} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#DC2626" }}>削除する</button>
-            <button onClick={() => setConfirmDel(false)} className="text-xs text-gray-400 px-1">取消</button>
+            <button onClick={remove} className="text-xs font-bold px-2.5 py-1.5 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除する</button>
+            <button onClick={() => setConfirmDel(false)} className="text-xs text-gray-500 px-1">取消</button>
           </>
         ) : (
-          <button onClick={() => setConfirmDel(true)} className="text-xs font-bold text-gray-400 ml-auto">削除</button>
+          <button onClick={() => setConfirmDel(true)} className="text-xs font-bold text-gray-500 ml-auto">削除</button>
         )}
       </div>
     </div>
@@ -6474,20 +6763,20 @@ function TemplateManager({ categories, templates, setBanner }) {
     <div className="mt-3 border border-gray-200 rounded-lg p-3 space-y-4" style={{ background: "#FAFBFC" }}>
       {/* 種別（カテゴリ） */}
       <div>
-        <p className="text-[11px] font-bold text-gray-400 mb-1.5">種別（カテゴリ）</p>
+        <p className="text-xs font-bold text-gray-500 mb-1.5">種別（カテゴリ）</p>
         <div className="space-y-1.5">
-          {categories.length === 0 && <p className="text-xs text-gray-400">種別がありません。下で追加してください。</p>}
+          {categories.length === 0 && <p className="text-xs text-gray-500">種別がありません。下で追加してください。</p>}
           {categories.map((c, i) => (
             <div key={c.id} className="flex items-center gap-1.5">
               <div className="flex flex-col shrink-0">
-                <button onClick={() => moveCat(i, -1)} disabled={i === 0} className="text-gray-400 disabled:opacity-25 leading-none text-xs">▲</button>
-                <button onClick={() => moveCat(i, 1)} disabled={i === categories.length - 1} className="text-gray-400 disabled:opacity-25 leading-none text-xs">▼</button>
+                <button onClick={() => moveCat(i, -1)} disabled={i === 0} className="text-gray-500 disabled:opacity-25 leading-none text-xs">▲</button>
+                <button onClick={() => moveCat(i, 1)} disabled={i === categories.length - 1} className="text-gray-500 disabled:opacity-25 leading-none text-xs">▼</button>
               </div>
               <input defaultValue={c.name} onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== c.name) renameCat(c.id, v); }}
                 className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-bold" />
               {confirmCat === c.id ? (
                 <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => removeCat(c.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
+                  <button onClick={() => removeCat(c.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除</button>
                   <button onClick={() => setConfirmCat(null)} className="text-xs px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                 </div>
               ) : (
@@ -6501,13 +6790,13 @@ function TemplateManager({ categories, templates, setBanner }) {
             className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs" />
           <button onClick={addCat} disabled={!catName.trim()} className="text-xs font-bold px-3 py-1.5 rounded-lg text-white disabled:opacity-40" style={{ background: BRAND }}>種別を追加</button>
         </div>
-        <p className="text-[11px] text-gray-400 mt-1">種別を削除しても、その中のテンプレは「未分類」に移動します（テンプレ自体は消えません）。</p>
+        <p className="text-xs text-gray-500 mt-1">種別を削除しても、その中のテンプレは「未分類」に移動します（テンプレ自体は消えません）。</p>
       </div>
 
       {/* テンプレ一覧 */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[11px] font-bold text-gray-400">テンプレ</p>
+          <p className="text-xs font-bold text-gray-500">テンプレ</p>
           {!tForm && (
             <button onClick={() => setTForm({ name: "", body: "", categoryId: "" })} className="text-xs font-bold px-2.5 py-1 rounded-lg text-white" style={{ background: BRAND }}>＋ テンプレを追加</button>
           )}
@@ -6537,7 +6826,7 @@ function TemplateManager({ categories, templates, setBanner }) {
             if (list.length === 0) return null;
             return (
               <div key={g.id ?? "none"}>
-                <p className="text-[11px] font-bold mb-1" style={{ color: BRAND }}>{g.name}</p>
+                <p className="text-xs font-bold mb-1" style={{ color: BRAND }}>{g.name}</p>
                 <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 bg-white">
                   {list.map((t) => (
                     <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2">
@@ -6545,13 +6834,13 @@ function TemplateManager({ categories, templates, setBanner }) {
                       <div className="flex items-center gap-1.5 shrink-0">
                         {confirmTpl === t.id ? (
                           <>
-                            <button onClick={() => removeTpl(t.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#DC2626" }}>削除</button>
+                            <button onClick={() => removeTpl(t.id)} className="text-xs font-bold px-2 py-1 rounded-lg text-white" style={{ background: "#C81E1E" }}>削除</button>
                             <button onClick={() => setConfirmTpl(null)} className="text-xs px-1.5 py-1 rounded-lg border border-gray-300 text-gray-500 bg-white">取消</button>
                           </>
                         ) : (
                           <>
                             <button onClick={() => setTForm({ id: t.id, name: t.name || "", body: t.body || "", categoryId: t.categoryId || "" })}
-                              className="text-xs font-bold px-2 py-1 rounded-lg border" style={{ borderColor: BRAND, color: BRAND }}>編集</button>
+                              className="text-xs font-bold px-2 py-1 rounded-lg border" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>編集</button>
                             <button onClick={() => setConfirmTpl(t.id)} aria-label={`テンプレ「${t.name}」を削除`} className="text-gray-300 p-1"><Trash2 size={14} /></button>
                           </>
                         )}
@@ -6562,7 +6851,7 @@ function TemplateManager({ categories, templates, setBanner }) {
               </div>
             );
           })}
-          {templates.length === 0 && <p className="text-xs text-gray-400">テンプレがありません。「＋ テンプレを追加」で作成できます。</p>}
+          {templates.length === 0 && <p className="text-xs text-gray-500">テンプレがありません。「＋ テンプレを追加」で作成できます。</p>}
         </div>
       </div>
     </div>

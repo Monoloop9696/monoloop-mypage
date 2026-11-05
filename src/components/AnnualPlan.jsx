@@ -307,10 +307,10 @@ export default function AnnualPlan({
     grads.forEach((grad) => {
       const d = boardData(grad);
       d.lanes.forEach((lane) => lane.placed.forEach(({ item, s, e }) => {
-        if (!item.more) need = Math.max(need, (textWidth(cardText(item), 11, 700) + 24) / (e - s));
+        if (!item.more) need = Math.max(need, (textWidth(cardText(item), 12, 700) + 24) / (e - s));
       }));
       d.autoLanes.forEach((lane) => lane.placed.forEach(({ item, s, e }) => {
-        if (!item.more) need = Math.max(need, (textWidth(item.title, 10, 500) + 20) / (e - s));
+        if (!item.more) need = Math.max(need, (textWidth(item.title, 12, 500) + 20) / (e - s));
       }));
     });
     return Math.min(COL_MAX, Math.ceil(need));
@@ -355,7 +355,7 @@ export default function AnnualPlan({
       const h = 6 + Math.max(1, lane.rowCount) * ROW_H;
       return (
         <div key={lane.key} style={{ display: "contents" }}>
-          <div className="flex items-center text-[11px] font-bold text-gray-500 px-2.5 bg-white border-r border-b border-gray-200" style={{ position: "sticky", left: 0, zIndex: 2, minHeight: h }}>
+          <div className="flex items-center text-xs font-bold text-gray-500 px-2.5 bg-white border-r border-b border-gray-200" style={{ position: "sticky", left: 0, zIndex: 2, minHeight: h }}>
             <span className="truncate">{lane.label}</span>
             {!auto && <span className="ml-auto font-normal tabular-nums">{lane.done}/{lane.items.length}</span>}
           </div>
@@ -365,21 +365,21 @@ export default function AnnualPlan({
             {lane.placed.map(({ item, s, e, row }) => item.more ? (
               <button key={item.id} type="button" title={`${monthLabel(item.start.slice(0, 7))}の${lane.label}をすべて見る`}
                 onClick={() => setMoreDlg({ grad, lane, auto, month: item.start.slice(0, 7), items: item.all })}
-                className="absolute rounded-md px-1.5 text-[10px] font-bold whitespace-nowrap text-center underline"
+                className="absolute rounded-md px-1.5 text-xs font-bold whitespace-nowrap text-center underline"
                 style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: "#374151", background: "#fff", border: "1px dashed #9CA3AF" }}>
                 他{item.items.length}件
               </button>
             ) : auto ? (
               <button key={item.id} type="button" title={`${item.title}（${rangeLabel(item.start, item.end)}）`}
                 onClick={() => goTab(grad, lane.tab)}
-                className={`absolute rounded-md px-1.5 text-[10px] font-medium whitespace-nowrap overflow-hidden text-ellipsis ${item.count ? "text-center" : "text-left"}`}
+                className={`absolute rounded-md px-1.5 text-xs font-medium whitespace-nowrap overflow-hidden text-ellipsis ${item.count ? "text-center" : "text-left"}`}
                 style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: 20, lineHeight: "20px", color: AUTO.color, background: AUTO.bg, border: `1px solid ${AUTO.border}` }}>
                 {item.title}
               </button>
             ) : (
               <button key={item.id} type="button" title={`${item.title}（${rangeLabel(item.start, item.end)}・${PLAN_STATUS[item.status] || "予定"}）`}
                 onClick={() => openEdit(item)}
-                className="absolute rounded-lg px-2 text-[11px] font-bold whitespace-nowrap overflow-hidden text-ellipsis text-left"
+                className="absolute rounded-lg px-2 text-xs font-bold whitespace-nowrap overflow-hidden text-ellipsis text-left"
                 style={{ left: s * col + 2, width: (e - s) * col - 4, top: 4 + row * ROW_H, height: CARD_H, lineHeight: `${CARD_H}px`, ...cardStyle(item, lane.key), ...(isPrev ? { filter: "saturate(.6)" } : {}) }}>
                 {cardText(item)}
               </button>
@@ -392,7 +392,7 @@ export default function AnnualPlan({
       <div key={grad} className="bg-white border border-gray-200 rounded-2xl mb-4">
         <div className={`flex items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-200 rounded-t-2xl ${isPrev ? "bg-gray-50" : ""}`}>
           <p className="text-sm font-bold">{grad}卒{isPrev && <span className="ml-1 text-xs font-normal text-gray-500">（前年度）</span>}</p>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-xs text-gray-500">
             {d.done}件 実施済み／{d.planned}件 予定
             {outsideBtn(grad, d)}
           </p>
@@ -408,15 +408,15 @@ export default function AnnualPlan({
         </div>
         <div ref={(el) => setScrollEl(grad, el)} onScroll={(e) => syncScroll(e.currentTarget)} className="overflow-x-auto rounded-b-2xl">
           <div style={{ display: "grid", gridTemplateColumns: gridCols, minWidth: "max-content" }}>
-            <div className="bg-white border-r border-b border-gray-200 px-2.5 py-1.5 text-[10px] text-gray-400 flex items-end" style={{ position: "sticky", left: 0, zIndex: 3 }}>
+            <div className="bg-white border-r border-b border-gray-200 px-2.5 py-1.5 text-xs text-gray-500 flex items-end" style={{ position: "sticky", left: 0, zIndex: 3 }}>
               {months[0].y}/{months[0].m}〜{months[PLAN_MONTHS - 1].y}/{months[PLAN_MONTHS - 1].m}
             </div>
             {months.map((m, i) => (
               <button key={m.key} type="button" onClick={() => openNewAt(grad, m.key, null)} title={`${m.y}年${m.m}月に活動を追加`}
-                className="group border-b border-r border-gray-200 text-center py-1.5 text-[11px] font-bold leading-tight hover:bg-gray-50"
+                className="group border-b border-r border-gray-200 text-center py-1.5 text-xs font-bold leading-tight hover:bg-gray-50"
                 style={i === todayIdx ? { background: TODAY_BG, color: TODAY_FG } : { color: "#6B7280" }}>
                 {m.m}月<span className="ml-1 font-normal opacity-0 group-hover:opacity-100" style={{ color: BRAND }}>＋</span>
-                <span className="block text-[10px] font-normal" style={{ visibility: i === 0 || m.m === 1 ? "visible" : "hidden" }}>{m.y}</span>
+                <span className="block text-xs font-normal" style={{ visibility: i === 0 || m.m === 1 ? "visible" : "hidden" }}>{m.y}</span>
               </button>
             ))}
             {d.lanes.map((lane) => renderLane(lane, false))}
@@ -439,7 +439,7 @@ export default function AnnualPlan({
       <div key={grad} className="mb-4">
         <div className="flex items-center justify-between gap-2 px-1 mb-2">
           <p className="text-sm font-bold">{grad}卒{isPrev && <span className="ml-1 text-xs font-normal text-gray-500">（前年度）</span>}</p>
-          <p className="text-[11px] text-gray-500">{d.done}件 実施済み／{d.planned}件 予定{outsideBtn(grad, d)}</p>
+          <p className="text-xs text-gray-500">{d.done}件 実施済み／{d.planned}件 予定{outsideBtn(grad, d)}</p>
         </div>
         {outsidePanel(grad, d, "mb-2")}
         <div className="grid gap-2.5">
@@ -450,12 +450,12 @@ export default function AnnualPlan({
             return (
               <div key={m.key} id={isNow ? "ml-plan-this-month" : undefined} className="bg-white border rounded-xl px-3 py-2.5" style={{ borderColor: isNow ? "#F59E0B" : HAIR }}>
                 <p className="text-[13px] font-bold flex items-center gap-2 mb-1">
-                  {m.m}月<span className="text-[11px] font-normal text-gray-500">{m.y}</span>
-                  {isNow && <span className="text-[10px] font-bold px-2 rounded-full" style={{ background: TODAY_BG, color: TODAY_FG }}>今月</span>}
+                  {m.m}月<span className="text-xs font-normal text-gray-500">{m.y}</span>
+                  {isNow && <span className="text-xs font-bold px-2 rounded-full" style={{ background: TODAY_BG, color: TODAY_FG }}>今月</span>}
                   <button type="button" onClick={() => openNewAt(grad, m.key, null)} aria-label={`${m.y}年${m.m}月に活動を追加`} title="この月に活動を追加"
-                    className="ml-auto w-6 h-6 rounded-full border text-sm font-bold leading-none flex items-center justify-center" style={{ borderColor: BRAND, color: BRAND }}>＋</button>
+                    className="ml-auto w-6 h-6 rounded-full border text-sm font-bold leading-none flex items-center justify-center" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>＋</button>
                 </p>
-                {rows.length === 0 && auto.length === 0 && <p className="text-[11px] text-gray-400">—</p>}
+                {rows.length === 0 && auto.length === 0 && <p className="text-xs text-gray-500">—</p>}
                 {rows.map((i) => {
                   const def = PLAN_KINDS[i._kind] || PLAN_KINDS.other;
                   const cancel = i.status === "cancel";
@@ -463,8 +463,8 @@ export default function AnnualPlan({
                     <button key={i.id} type="button" onClick={() => openEdit(i)} className="w-full flex items-center gap-2 py-1.5 border-t border-gray-100 text-left first:border-t-0">
                       <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: def.color, opacity: cancel ? 0.4 : 1 }} />
                       <span className="flex-1 min-w-0 text-xs font-bold truncate" style={cancel ? { textDecoration: "line-through", color: "#9CA3AF" } : undefined}>{cardText(i)}</span>
-                      <span className="text-[11px] text-gray-500 whitespace-nowrap">{rangeLabel(i.start, i.end)}</span>
-                      <span className="text-[10px] font-bold px-1.5 rounded-full" style={i.status === "done" ? { background: "#E7F9EE", color: "#059947" } : cancel ? { background: "#F3F4F6", color: "#6B7280" } : { background: BRAND_LIGHT, color: BRAND }}>{PLAN_STATUS[i.status] || "予定"}</span>
+                      <span className="text-xs text-gray-500 whitespace-nowrap">{rangeLabel(i.start, i.end)}</span>
+                      <span className="text-xs font-bold px-1.5 rounded-full" style={i.status === "done" ? { background: "#E4F6EC", color: "#0A8F4D" } : cancel ? { background: "#F3F4F6", color: "#6B7280" } : { background: BRAND_LIGHT, color: BRAND }}>{PLAN_STATUS[i.status] || "予定"}</span>
                     </button>
                   );
                 })}
@@ -472,7 +472,7 @@ export default function AnnualPlan({
                   <button key={i.id} type="button" onClick={() => goTab(grad, i._tab)} className="w-full flex items-center gap-2 py-1.5 border-t border-gray-100 text-left text-gray-500">
                     <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: "#D1D5DB" }} />
                     <span className="flex-1 min-w-0 text-xs truncate">{i._lane}：{i.title}</span>
-                    <span className="text-[11px] whitespace-nowrap">{i.count ? "" : mdLabel(i.start)}</span>
+                    <span className="text-xs whitespace-nowrap">{i.count ? "" : mdLabel(i.start)}</span>
                   </button>
                 ))}
               </div>
@@ -509,7 +509,7 @@ export default function AnnualPlan({
         </label>
         <span className="flex-1" />
         <button type="button" onClick={jumpToday} className="text-xs font-bold px-3 py-2 rounded-xl border bg-white text-gray-600" style={{ borderColor: HAIR }}>今月へ</button>
-        <button type="button" onClick={askCopy} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl border bg-white" style={{ borderColor: BRAND, color: BRAND }}>
+        <button type="button" onClick={askCopy} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl border bg-white" style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
           <Copy size={14} /> 前年度からコピー
         </button>
         <button type="button" onClick={openNew} className="flex items-center gap-1 text-xs font-bold px-3 py-2 rounded-xl text-white" style={{ background: BRAND }}>
@@ -523,13 +523,13 @@ export default function AnnualPlan({
           const off = kindOff.has(k);
           return (
             <button key={k} type="button" onClick={() => toggleKind(k)} aria-pressed={!off} title={off ? "表示する" : "隠す"}
-              className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full border bg-white"
+              className="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded-full border bg-white"
               style={{ borderColor: HAIR, color: off ? "#9CA3AF" : "#374151", opacity: off ? 0.5 : 1 }}>
               <span className="inline-block rounded-full" style={{ width: 9, height: 9, background: def.color }} />{def.label}
             </button>
           );
         })}
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 ml-1">
+        <span className="inline-flex items-center gap-1.5 text-xs text-gray-500 ml-1">
           <span className="inline-block rounded border border-dashed border-gray-400 bg-white" style={{ width: 14, height: 10 }} />予定
           <span className="inline-block rounded bg-gray-300 ml-1" style={{ width: 14, height: 10 }} />✓ 実施済み
           <span className="line-through ml-1">中止</span>
@@ -627,10 +627,10 @@ export default function AnnualPlan({
                     )}
                   </div>
                 )}
-                <p className="text-[11px] text-gray-400 mt-1">1日だけ・1か月だけの活動は年表の月の枠に収まり、○〜○の期間は日付の位置に幅をとって出ます。</p>
+                <p className="text-xs text-gray-500 mt-1">1日だけ・1か月だけの活動は年表の月の枠に収まり、○〜○の期間は日付の位置に幅をとって出ます。</p>
               </div>
               <div>
-                <p className="text-xs font-bold text-gray-500 mb-1">担当者<span className="font-normal text-gray-400 ml-1">（任意）</span></p>
+                <p className="text-xs font-bold text-gray-500 mb-1">担当者<span className="font-normal text-gray-500 ml-1">（任意）</span></p>
                 <input value={it.owner} onChange={(e) => patchItem({ owner: e.target.value })} className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm" />
               </div>
               <div>
@@ -638,7 +638,7 @@ export default function AnnualPlan({
                 <div className="flex gap-1.5">
                   {Object.entries(PLAN_STATUS).map(([k, label]) => {
                     const on = it.status === k;
-                    const bg = k === "done" ? "#059947" : k === "cancel" ? "#6B7280" : BRAND;
+                    const bg = k === "done" ? "#0A8F4D" : k === "cancel" ? "#6B7280" : BRAND;
                     return (
                       <button key={k} type="button" aria-pressed={on} onClick={() => patchItem({ status: k })}
                         className="flex-1 py-2 rounded-lg border text-xs font-bold"
@@ -648,28 +648,28 @@ export default function AnnualPlan({
                 </div>
               </div>
               <div>
-                <p className="text-xs font-bold text-gray-500 mb-1">メモ<span className="font-normal text-gray-400 ml-1">（実施後の記録など・任意）</span></p>
+                <p className="text-xs font-bold text-gray-500 mb-1">メモ<span className="font-normal text-gray-500 ml-1">（実施後の記録など・任意）</span></p>
                 <textarea value={it.memo} onChange={(e) => patchItem({ memo: e.target.value })} rows={4} placeholder="例）参加12名、うち特別ルート希望3名。来年は9月上旬に前倒し。"
                   className="w-full min-w-0 border border-gray-300 rounded-lg p-2.5 text-sm leading-relaxed" />
               </div>
               {it.start && !inCycle(Number(it.grad), it.start) && (
-                <p className="text-[11px]" style={{ color: TODAY_FG }}>この日付は {it.grad}卒の年表の期間外です（年表・月リストには出ません）。日付か卒年度を見直してください。</p>
+                <p className="text-xs" style={{ color: TODAY_FG }}>この日付は {it.grad}卒の年表の期間外です（年表・月リストには出ません）。日付か卒年度を見直してください。</p>
               )}
               {it.id && (
                 <div className="pt-2">
                   {drawer.confirmDel ? (
                     <div className="flex gap-2">
-                      <button type="button" onClick={removeItem} disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: "#DC2626" }}>削除する</button>
+                      <button type="button" onClick={removeItem} disabled={busy} className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40" style={{ background: "#C81E1E" }}>削除する</button>
                       <button type="button" onClick={() => setDrawer({ ...drawer, confirmDel: false })} className="flex-1 py-2 rounded-lg text-xs font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>取消</button>
                     </div>
                   ) : (
-                    <button type="button" onClick={() => setDrawer({ ...drawer, confirmDel: true })} className="text-xs font-bold" style={{ color: "#DC2626" }}>この活動を削除</button>
+                    <button type="button" onClick={() => setDrawer({ ...drawer, confirmDel: true })} className="text-xs font-bold" style={{ color: "#C81E1E" }}>この活動を削除</button>
                   )}
                 </div>
               )}
             </div>
             <div className="px-5 py-3 border-t border-gray-200 shrink-0">
-              {drawerErr && <p className="text-xs font-bold mb-2" style={{ color: "#DC2626" }}>{drawerErr}</p>}
+              {drawerErr && <p className="text-xs font-bold mb-2" style={{ color: "#C81E1E" }}>{drawerErr}</p>}
               <div className="flex gap-2">
                 <button type="button" onClick={closeDrawer} className="px-4 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>閉じる</button>
                 <button type="button" onClick={saveItem} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white disabled:opacity-40" style={{ background: BRAND }}>
@@ -694,20 +694,20 @@ export default function AnnualPlan({
               <button type="button" onClick={() => setMoreDlg(null)} aria-label="閉じる" className="shrink-0 p-1.5 rounded-full text-gray-500 hover:bg-gray-100"><X size={20} /></button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-2">
-              <p className="text-[11px] text-gray-500 py-2">この月の全件です（年表には先頭3件だけ出しています）。{moreDlg.auto ? "押すと元の画面へ移ります。" : "押すと開いて直せます。"}</p>
+              <p className="text-xs text-gray-500 py-2">この月の全件です（年表には先頭3件だけ出しています）。{moreDlg.auto ? "押すと元の画面へ移ります。" : "押すと開いて直せます。"}</p>
               {moreDlg.items.map((i) => moreDlg.auto ? (
                 <button key={i.id} type="button" onClick={() => { setMoreDlg(null); goTab(moreDlg.grad, moreDlg.lane.tab); }}
                   className="w-full flex items-center gap-2 py-2.5 border-t border-gray-100 text-left text-gray-600">
                   <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: "#D1D5DB" }} />
                   <span className="flex-1 min-w-0 text-sm truncate">{i.title}</span>
-                  <span className="text-[11px] text-gray-500 whitespace-nowrap">{mdLabel(i.start)}</span>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">{mdLabel(i.start)}</span>
                 </button>
               ) : (
                 <button key={i.id} type="button" onClick={() => openEdit(i)} className="w-full flex items-center gap-2 py-2.5 border-t border-gray-100 text-left">
                   <span className="shrink-0 rounded-full" style={{ width: 10, height: 10, background: (PLAN_KINDS[moreDlg.lane.key] || PLAN_KINDS.other).color, opacity: i.status === "cancel" ? 0.4 : 1 }} />
                   <span className="flex-1 min-w-0 text-sm font-bold truncate" style={i.status === "cancel" ? { textDecoration: "line-through", color: "#9CA3AF" } : undefined}>{cardText(i)}</span>
-                  <span className="text-[11px] text-gray-500 whitespace-nowrap">{rangeLabel(i.start, i.end)}</span>
-                  <span className="text-[10px] font-bold px-1.5 rounded-full" style={i.status === "done" ? { background: "#E7F9EE", color: "#059947" } : i.status === "cancel" ? { background: "#F3F4F6", color: "#6B7280" } : { background: BRAND_LIGHT, color: BRAND }}>{PLAN_STATUS[i.status] || "予定"}</span>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">{rangeLabel(i.start, i.end)}</span>
+                  <span className="text-xs font-bold px-1.5 rounded-full" style={i.status === "done" ? { background: "#E4F6EC", color: "#0A8F4D" } : i.status === "cancel" ? { background: "#F3F4F6", color: "#6B7280" } : { background: BRAND_LIGHT, color: BRAND }}>{PLAN_STATUS[i.status] || "予定"}</span>
                 </button>
               ))}
             </div>
@@ -731,7 +731,7 @@ export default function AnnualPlan({
                   ? `${copyDlg.from}卒にコピーできる活動がありません（中止の活動はコピーしません）。`
                   : `${copyDlg.from}卒の活動 ${copyDlg.count}件を ${copyDlg.to}卒に「予定」として追加します。日付は1年後ろにずらし、メモは引き継ぎません。すでにコピー済みでも重複して追加されます。`}
             </p>
-            {copyErr && <p className="text-xs font-bold mt-2" style={{ color: "#DC2626" }}>{copyErr}</p>}
+            {copyErr && <p className="text-xs font-bold mt-2" style={{ color: "#C81E1E" }}>{copyErr}</p>}
             <div className="flex gap-2 mt-4">
               <button type="button" onClick={() => setCopyDlg(null)} disabled={busy} className="flex-1 py-2.5 rounded-xl text-sm font-bold border bg-white text-gray-600" style={{ borderColor: HAIR }}>{copyDlg.count ? "やめる" : "閉じる"}</button>
               {copyDlg.count > 0 && (

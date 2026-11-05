@@ -24,6 +24,20 @@ export const BRAND = "#E4007F";
 export const BRAND_LIGHT = "#FCE3EF";
 export const LINE_GREEN = "#06C755";
 
+// ---- 状態の色（2026-11 統一）----
+// ブランド色（BRAND）は「主ボタン」と「選択中」にだけ使い、状態は下の5色で表す。
+//   ok=完了・出席・連携済み／warn=期限が近い・未回答／danger=要対応・未連携／info=受付中・内定／idle=終了・欠席
+export const TONE = {
+  ok: { fg: "#0A8F4D", bg: "#E4F6EC", solid: "#0A8F4D" },
+  warn: { fg: "#B45309", bg: "#FEF1DC", solid: "#D97706" },
+  danger: { fg: "#C81E1E", bg: "#FDE8E8", solid: "#C81E1E" },
+  info: { fg: "#2457C5", bg: "#E6EEFC", solid: "#2457C5" },
+  idle: { fg: "#6B7280", bg: "#EEF0F2", solid: "#9CA3AF" },
+};
+// 副ボタン（枠だけ）の色。主ボタンは BRAND の塗り、補助ボタンは枠なしの灰色文字
+export const BTN_LINE = "#D1D5DB";
+export const BTN_INK = "#374151";
+
 // ---- フォント：游ゴシック体に統一 ----
 const YU_GOTHIC =
   "'Yu Gothic Medium','Yu Gothic','YuGothic','游ゴシック Medium','游ゴシック体','游ゴシック','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif";
