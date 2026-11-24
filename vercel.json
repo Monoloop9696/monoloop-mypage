@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/bc-img/:img", "destination": "/api/public-cohorts?img=:img" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "functions": {

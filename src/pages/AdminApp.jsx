@@ -436,6 +436,9 @@ export function AdminBody({
   const [msg, setMsg] = useState("");
   const [sent, setSent] = useState(null);
   const [sending, setSending] = useState(false);
+  const [bcImages, setBcImages] = useState([]); // LINE配信に添付する画像（圧縮済み dataURL・最大 BC_MAX_IMAGES 枚）
+  const [bcImgBusy, setBcImgBusy] = useState(false);
+  const [bcImgErr, setBcImgErr] = useState("");
   const [showEventForm, setShowEventForm] = useState(false);
   const [ev, setEv] = useState(EMPTY_EV);
   const [editingDraftId, setEditingDraftId] = useState(null);
@@ -1979,16 +1982,41 @@ export function AdminBody({
       const r = await lineBroadcast({
         target: isPickTarget ? "個別選択" : target, targetLabel, body: msg, grad: selectedYear,
         uids: targetRecipientList.map((s) => s.id),
+        images: bcImages, // 添付画像（dataURL）。API が保存して LINE には画像、メールにはリンクで届ける
       });
-      setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount });
+      setSent({ target: targetLabel, count: r.count ?? targetCount, line: r.lineCount, mail: r.mailCount, images: r.imageCount || 0 });
       refreshBroadcasts();
       refreshQuota();
       setMsg("");
+      setBcImages([]);
+      setBcImgErr("");
     } catch (ex) {
       setBanner(`配信に失敗しました：${ex.message}`);
     } finally {
       setSending(false);
       setBcConfirm(false);
+    }
+  };
+
+  // 添付画像：選んだ画像を圧縮して持つ（最大3枚）。
+  // 1枚あたり dataURL 約0.9MB（実体 約0.65MB）まで＝API の受信上限と Firestore の1ドキュメント上限に収める
+  const BC_MAX_IMAGES = 3;
+  const onPickBcImages = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    const room = BC_MAX_IMAGES - bcImages.length;
+    if (room <= 0) { setBcImgErr(`添付できる画像は${BC_MAX_IMAGES}枚までです。`); return; }
+    setBcImgErr(files.length > room ? `添付できる画像は${BC_MAX_IMAGES}枚までです。先に選んだ${room}枚だけ追加しました。` : "");
+    setBcImgBusy(true);
+    try {
+      const out = [];
+      for (const f of files.slice(0, room)) out.push(await fileToCompressedDataURL(f, { maxDim: 1600, quality: 0.85, maxLen: 900 * 1000 }));
+      setBcImages((prev) => [...prev, ...out].slice(0, BC_MAX_IMAGES));
+    } catch (ex) {
+      setBcImgErr(ex.message || "画像を読み込めませんでした。");
+    } finally {
+      setBcImgBusy(false);
     }
   };
 
@@ -4941,6 +4969,36 @@ export function AdminBody({
                   {msg.replace(/\{name\}|\{名前\}/gi, (activeStudents.find((s) => s.name)?.name) || "山田花子")}
                 </div>
               )}
+              {/* 添付画像（最大3枚）。LINEには本文のあとに画像として届き、未連携の方にはメールにリンクが入る */}
+              <div className="mt-3 rounded-lg border border-gray-200 p-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-gray-500">添付画像<span className="ml-1 font-normal">（{bcImages.length} / {BC_MAX_IMAGES}枚）</span></p>
+                  <label className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer ${bcImages.length >= BC_MAX_IMAGES || bcImgBusy ? "opacity-40 pointer-events-none" : ""}`}
+                    style={{ borderColor: "#D1D5DB", color: "#374151", background: "#fff" }}>
+                    <ImagePlus size={14} /> {bcImgBusy ? "読み込み中…" : "画像を添付"}
+                    <input type="file" accept="image/*" multiple className="hidden" onChange={onPickBcImages}
+                      disabled={bcImages.length >= BC_MAX_IMAGES || bcImgBusy} aria-label="添付する画像を選ぶ" />
+                  </label>
+                </div>
+                {bcImages.length > 0 && (
+                  <div className="flex flex-wrap gap-2.5 mt-2">
+                    {bcImages.map((src, i) => (
+                      <div key={i} className="relative">
+                        <img src={src} alt={`添付画像 ${i + 1}`} className="rounded-lg border border-gray-200 object-cover" style={{ width: 84, height: 84 }} />
+                        <button onClick={() => { setBcImages((p) => p.filter((_, idx) => idx !== i)); setBcImgErr(""); }}
+                          aria-label={`添付画像 ${i + 1} を外す`}
+                          className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-white border border-gray-300 text-gray-600 flex items-center justify-center shadow-sm">
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {bcImgErr && <p className="text-xs font-bold mt-1.5" style={{ color: "#C81E1E" }}>{bcImgErr}</p>}
+                <p className="text-xs text-gray-500 mt-1.5">
+                  写真・画像（JPEG・PNG）を{BC_MAX_IMAGES}枚まで添付できます。LINEでは本文のあとに画像として届き、送信数は増えません。未連携の方にはメールに画像のリンクが入ります。PDFなどのファイルはLINEの仕様で送れません。
+                </p>
+              </div>
               <div className="mt-2">
                 {!showTplSave ? (
                   <button disabled={!msg} onClick={() => setShowTplSave(true)} className="text-xs font-bold disabled:opacity-40" style={{ color: BRAND }}>
@@ -4986,6 +5044,7 @@ export function AdminBody({
                 <p className="text-xs text-gray-600 mt-1">
                   「{sent.target}」宛に配信（{sent.count}名）。
                   {sent.line != null && `LINE ${sent.line}件 / メール ${sent.mail}件。`}
+                  {sent.images > 0 && `画像 ${sent.images}枚を添付。`}
                   配信ログは自動で保存されます。
                 </p>
               </div>
@@ -5023,6 +5082,9 @@ export function AdminBody({
                           LINE {b.lineCount ?? 0}件<span className="text-gray-500"> / メール {b.mailCount ?? 0}件（対象 {b.count ?? 0}名）</span>
                         </p>
                         {b.body && <p className="text-xs text-gray-600 mt-1.5 line-clamp-2 whitespace-pre-wrap">{b.body}</p>}
+                        {Array.isArray(b.images) && b.images.length > 0 && (
+                          <p className="text-xs text-gray-500 mt-1 flex items-center gap-1"><ImagePlus size={12} /> 画像 {b.images.length}枚を添付</p>
+                        )}
                         <p className="text-xs mt-1.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "内容・宛先を見る ▼"}</p>
                       </button>
                       {open && (
@@ -5031,6 +5093,18 @@ export function AdminBody({
                             <div>
                               <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
                               <p className="text-xs text-gray-700 whitespace-pre-wrap bg-gray-50 rounded-lg p-2.5">{b.body}</p>
+                            </div>
+                          )}
+                          {Array.isArray(b.images) && b.images.length > 0 && (
+                            <div>
+                              <p className="text-xs font-bold text-gray-500 mb-1">添付画像（{b.images.length}枚）</p>
+                              <div className="flex flex-wrap gap-2">
+                                {b.images.map((u, i) => (
+                                  <a key={u} href={u} target="_blank" rel="noopener noreferrer" title="タップで大きく表示">
+                                    <img src={u} alt={`添付画像 ${i + 1}`} loading="lazy" className="rounded-lg border border-gray-200 object-cover" style={{ width: 84, height: 84 }} />
+                                  </a>
+                                ))}
+                              </div>
                             </div>
                           )}
                           {hasNames ? (
@@ -6553,6 +6627,17 @@ export function AdminBody({
                   <div className="rounded-lg border border-gray-200 p-3 text-sm whitespace-pre-wrap leading-relaxed break-words" style={{ background: "#F9FAFB" }}>{msg}</div>
                   {hasName && <p className="text-xs text-gray-500 mt-1">「{"{name}"}」は送信時に各自の登録名に置き換わります。</p>}
                 </div>
+                {bcImages.length > 0 && (
+                  <div>
+                    <p className="text-xs font-bold text-gray-500 mb-1">添付画像（{bcImages.length}枚）</p>
+                    <div className="flex flex-wrap gap-2">
+                      {bcImages.map((src, i) => (
+                        <img key={i} src={src} alt={`添付画像 ${i + 1}`} className="rounded-lg border border-gray-200 object-cover" style={{ width: 96, height: 96 }} />
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">LINEには本文のあとに画像で届きます。メールで届く方には画像のリンクが入ります。</p>
+                  </div>
+                )}
               </div>
               <div className="px-5 py-3 border-t border-gray-200 flex gap-2 shrink-0">
                 <button onClick={() => setBcConfirm(false)} disabled={sending} className="flex-1 py-2.5 rounded-xl text-sm font-bold border border-gray-300 text-gray-600 bg-white disabled:opacity-40">戻って直す</button>

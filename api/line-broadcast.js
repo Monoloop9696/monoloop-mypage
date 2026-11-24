@@ -3,6 +3,9 @@ import { readJson, sendJson, methodGuard, requireAdmin } from "./_lib/util.js";
 import { multicast, pushMessage } from "./_lib/line.js";
 import { sendEmail } from "./_lib/resend.js";
 import { resolveRecipients } from "./_lib/broadcastTarget.js";
+import { parseImages, imageUrl, buildLineMessages, mailImageNote } from "./_lib/broadcastImages.js";
+
+const APP_URL = process.env.APP_URL || "https://monoloop-mypage.vercel.app";
 
 // タスク未完了者（公開イベントの出欠・公開アンケートの回答・住所電話のいずれかが未完了）の uid 一覧
 async function computeIncompleteUids(grad, students) {
@@ -34,11 +37,13 @@ export default async function handler(req, res) {
   if (!admin) return sendJson(res, 403, { error: "権限がありません。" });
 
   try {
-    const { target, targetLabel, body, grad, lineOnly, uids } = await readJson(req);
+    const { target, targetLabel, body, grad, lineOnly, uids, images } = await readJson(req);
     const y = Number(grad);
     const text = String(body || "").trim();
     if (!text) return sendJson(res, 400, { error: "メッセージが空です。" });
     if (!Number.isFinite(y)) return sendJson(res, 400, { error: "年度が不正です。" });
+    // 添付画像（JPEG/PNG・最大3枚）。形式や大きさが不正なら送信前に 400 で止める
+    const attachments = parseImages(images);
 
     // 対象年度の学生（在籍者への絞り込みは resolveRecipients 側）
     const snap = await dbAdmin.collection("students").where("grad", "==", y).get();
@@ -59,6 +64,17 @@ export default async function handler(req, res) {
       },
     });
 
+    // 添付画像を保存して公開URLを作る（送信先が決まってから保存する＝宛先エラーのときに画像だけ残さない）。
+    // LINE の画像メッセージは公開 HTTPS の URL が必要。/bc-img/<id>.jpg → /api/public-cohorts が配る
+    const imageUrls = [];
+    for (const a of attachments) {
+      const ref = await dbAdmin.collection("bcFiles").add({
+        data: a.buffer, mime: a.mime, size: a.buffer.length, grad: y,
+        sentBy: admin.email || null, createdAt: FieldValue.serverTimestamp(),
+      });
+      imageUrls.push(imageUrl(APP_URL, ref.id, a.mime));
+    }
+
     // {name} / {名前} を各受信者のマイページ登録名に置換（差し込み）
     const hasPlaceholder = /\{name\}|\{名前\}/i.test(text);
     const personalize = (t, s) => t.replace(/\{name\}|\{名前\}/gi, s.name || "");
@@ -71,11 +87,11 @@ export default async function handler(req, res) {
     if (lineRecipients.length) {
       if (hasPlaceholder) {
         for (const s of lineRecipients) {
-          try { if (await pushMessage(s.lineUserId, personalize(text, s))) lineCount += 1; }
+          try { if (await pushMessage(s.lineUserId, buildLineMessages(personalize(text, s), imageUrls))) lineCount += 1; }
           catch { /* 個別送信失敗はスキップ */ }
         }
       } else {
-        lineCount = await multicast(lineRecipients.map((s) => s.lineUserId), text);
+        lineCount = await multicast(lineRecipients.map((s) => s.lineUserId), buildLineMessages(text, imageUrls));
       }
     }
 
@@ -87,7 +103,7 @@ export default async function handler(req, res) {
           await sendEmail({
             to: s.email,
             subject: "【モノ・ループ】お知らせ",
-            text: `${s.name || ""}さん\n\n${personalize(text, s)}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
+            text: `${s.name || ""}さん\n\n${personalize(text, s)}${mailImageNote(imageUrls)}\n\n──────────\nモノ・ループ株式会社 採用担当\n※ 本メールはマイページ未連携の方へお送りしています。`,
           });
           mailCount += 1;
         } catch {
@@ -106,6 +122,7 @@ export default async function handler(req, res) {
       mailCount,
       lineNames: lineRecipients.map((s) => s.name || "（名前なし）"),
       mailNames: mailUsers.map((s) => s.name || "（名前なし）"),
+      images: imageUrls, // 添付画像の公開URL（履歴に小さく表示する）
       sentBy: admin.email || null,
       sentAt: FieldValue.serverTimestamp(),
     });
@@ -114,6 +131,7 @@ export default async function handler(req, res) {
       count: recipients.length,
       lineCount,
       mailCount,
+      imageCount: imageUrls.length,
     });
   } catch (err) {
     if (err && err.status === 400) return sendJson(res, 400, { error: err.message });

@@ -31,6 +31,9 @@ export async function replyMessage(replyToken, text) {
   return res.ok;
 }
 
+// 文字列ならテキスト1通、配列ならそのまま（本文＋画像など。1回5件まで）
+const toMessages = (m) => (Array.isArray(m) ? m : [{ type: "text", text: m }]);
+
 export async function pushMessage(to, text) {
   const res = await fetch(`${LINE_API}/message/push`, {
     method: "POST",
@@ -38,7 +41,7 @@ export async function pushMessage(to, text) {
       Authorization: `Bearer ${accessToken()}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ to, messages: [{ type: "text", text }] }),
+    body: JSON.stringify({ to, messages: toMessages(text) }),
   });
   return res.ok;
 }
@@ -55,7 +58,7 @@ export async function multicast(userIds, text) {
         Authorization: `Bearer ${accessToken()}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ to: chunk, messages: [{ type: "text", text }] }),
+      body: JSON.stringify({ to: chunk, messages: toMessages(text) }),
     });
     if (res.ok) sent += chunk.length;
   }

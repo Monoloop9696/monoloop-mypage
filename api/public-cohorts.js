@@ -3,6 +3,7 @@ import { dbAdmin, FieldValue } from "./_lib/firebaseAdmin.js";
 import { readJson, sendJson, methodGuard, adminEmails, requireAdmin } from "./_lib/util.js";
 import { sendEmail } from "./_lib/resend.js";
 import { SLOT_KINDS, slotKindForRoute, formatSlotLabel, selectableSlots, validateSlotSelection } from "../src/lib/specialRoute.js";
+import { imageIdFromRequest } from "./_lib/broadcastImages.js";
 
 // 公開エンドポイント（未ログインで呼べる）。Vercel の関数数上限（12）対策で action により分岐する。
 //   action なし        : /signup での年度有効性チェック。initialPassword は絶対に返さない（year と active のみ）。
@@ -10,6 +11,8 @@ import { SLOT_KINDS, slotKindForRoute, formatSlotLabel, selectableSlots, validat
 //   action=specialSlots : 特別選考LPに出す説明会／OCの候補日程（受付中・今日以降）。{ kind } → { slots }
 //   action=specialEntry : 特別選考LPのエントリー登録。templates に _type:"specialEntry" で保存し、本人と管理者へメール。
 //   action=specialConfirm: 【管理者のみ】エントリーの日程を確定し、希望があれば本人へ確定メール。
+//   GET ?img=<id>        : LINE配信に添付した画像を返す（/bc-img/<id>.jpg から vercel.json の rewrite で来る）。
+//                          LINE の画像メッセージは公開 HTTPS の画像URLが必要なため。IDは推測できない自動ID。
 // 特別コード・エントリー・日程は templates（管理者のみ read/write）に置くので Firestore ルールの変更は不要。
 // 日程の判定ロジックは src/lib/specialRoute.js を LP・管理画面と共用する。
 
@@ -242,7 +245,28 @@ async function specialConfirm(req, res, body) {
   return sendJson(res, 200, { ok: true, mailSent });
 }
 
+// LINE配信の添付画像（bcFiles）を返す。見つからなければ 404
+async function serveBroadcastImage(req, res) {
+  const id = imageIdFromRequest(req);
+  const snap = id ? await dbAdmin.collection("bcFiles").doc(id).get() : null;
+  const d = snap && snap.exists ? snap.data() : null;
+  const buf = d && d.data ? Buffer.from(d.data) : null;
+  if (!buf || !buf.length) return sendJson(res, 404, { error: "画像が見つかりません。" });
+  res.statusCode = 200;
+  res.setHeader("Content-Type", d.mime === "image/png" ? "image/png" : "image/jpeg");
+  res.setHeader("Content-Length", String(buf.length));
+  res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  res.end(buf);
+}
+
 export default async function handler(req, res) {
+  if (req.method === "GET" || req.method === "HEAD") {
+    try { return await serveBroadcastImage(req, res); }
+    catch (err) {
+      console.error("[public-cohorts] image error:", err && err.message);
+      return sendJson(res, 500, { error: "画像を取得できませんでした。" });
+    }
+  }
   if (!methodGuard(req, res)) return;
   try {
     const body = await readJson(req);
