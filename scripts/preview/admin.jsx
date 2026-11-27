@@ -3,6 +3,9 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { AdminHeader, AdminBody } from "../../src/pages/AdminApp";
 import "../../src/index.css";
+import { startOverlayExit } from "../../src/lib/overlayExit";
+
+startOverlayExit(); // 本番（main.jsx）と同じく、閉じるときの動きを有効にする
 
 const ts = (s) => { const d = new Date(s); return { toDate: () => d, toMillis: () => d.getTime() }; };
 const names = [

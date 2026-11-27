@@ -2506,7 +2506,7 @@ export function AdminBody({
             </div>
 
             {showEventForm && (
-              <div className="fixed inset-0 z-[65] flex justify-end">
+              <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
                 <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={resetForm} />
                 <div className="ml-drawer relative h-full w-full max-w-2xl bg-white flex flex-col"
                   style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
@@ -2740,7 +2740,7 @@ export function AdminBody({
                     {pc && <ChevronRight size={16} className="text-gray-400" />}
                   </button>
                   {open && (
-                    <div className="fixed inset-0 z-[60] flex justify-end">
+                    <div className="ml-ov ml-ov-drawer fixed inset-0 z-[60] flex justify-end">
                       <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setExpandedEvent(null)} />
                       <div className="ml-drawer relative h-full w-full max-w-xl bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
                         <div className="flex items-start justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -2891,7 +2891,7 @@ export function AdminBody({
             </div>
 
             {showSurveyForm && (
-              <div className="fixed inset-0 z-[65] flex justify-end">
+              <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
                 <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeSurveyForm} />
                 <div className="ml-drawer relative h-full w-full max-w-2xl bg-white flex flex-col"
                   style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
@@ -3241,7 +3241,7 @@ export function AdminBody({
                       return <p className="text-xs font-bold mb-1.5 inline-block px-2 py-0.5 rounded-full" style={{ background: BRAND_LIGHT, color: BRAND }}>セクション{si + 1}{sec && sec.title ? `：${sec.title}` : ""}</p>;
                     };
                     return (
-                    <div className="fixed inset-0 z-[60] flex justify-end">
+                    <div className="ml-ov ml-ov-drawer fixed inset-0 z-[60] flex justify-end">
                       <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setExpandedSurvey(null)} />
                       <div className={`ml-drawer relative h-full w-full bg-white flex flex-col ${pc ? "max-w-4xl" : "max-w-xl"}`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
                         <div className="flex items-start justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -5088,7 +5088,7 @@ export function AdminBody({
                         <p className="text-xs mt-1.5" style={{ color: BRAND }}>{open ? "閉じる ▲" : "内容・宛先を見る ▼"}</p>
                       </button>
                       {open && (
-                        <div className="px-3 pb-3 border-t border-gray-100 pt-2.5 space-y-2.5">
+                        <div className="ml-reveal px-3 pb-3 border-t border-gray-100 pt-2.5 space-y-2.5">
                           {b.body && (
                             <div>
                               <p className="text-xs font-bold text-gray-500 mb-1">本文</p>
@@ -5166,7 +5166,7 @@ export function AdminBody({
       {followDrawer && (() => {
         const rows = followRows();
         return (
-          <div className="fixed inset-0 z-[65] flex justify-end">
+          <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
             <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setFollowDrawer(false)} />
             <div className="ml-drawer relative h-full w-full max-w-xl bg-white flex flex-col" style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
               <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -5200,7 +5200,7 @@ export function AdminBody({
         const st = students.find((x) => x.id === ivBookedView.uid);
         if (!b) return null;
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6" onClick={() => setIvBookedView(null)}>
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6" onClick={() => setIvBookedView(null)}>
             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100">
                 <div className="min-w-0">
@@ -5248,7 +5248,7 @@ export function AdminBody({
         const iv = interviewerOptions.find((o) => o.name === ivConfirmIv) || null;
 
         return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={closeIvConfirm}>
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={closeIvConfirm}>
             <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
@@ -5392,7 +5392,7 @@ export function AdminBody({
 
       {/* 面談の日程調整ドロワー */}
       {ivReqOpen && (
-        <div className="fixed inset-0 z-[65] flex justify-end">
+        <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeIvReq} />
           <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-3xl" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -5490,7 +5490,7 @@ export function AdminBody({
 
       {/* 面談の記録ドロワー */}
       {meetOpen && (
-        <div className="fixed inset-0 z-[65] flex justify-end">
+        <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeMeetForm} />
           <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-5xl" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -5710,7 +5710,7 @@ export function AdminBody({
         const st = students.find((s) => s.id === meetHist.id) || meetHist;
         const ms = meetingsOf(st.id);
         return (
-          <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[60] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
             onClick={() => { setMeetHist(null); setMeetDelId(null); }}>
             <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
               onClick={(e) => e.stopPropagation()}>
@@ -5787,7 +5787,7 @@ export function AdminBody({
 
       {/* 面談記録のスクリーンショットの拡大表示（最前面） */}
       {shotView && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.75)" }} onClick={() => setShotView(null)}>
+        <div className="ml-ov ml-ov-modal fixed inset-0 z-[90] flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.75)" }} onClick={() => setShotView(null)}>
           <button onClick={() => setShotView(null)} aria-label="閉じる" className="absolute top-4 right-4 p-2 rounded-full text-white" style={{ background: "rgba(255,255,255,0.15)" }}><X size={20} /></button>
           <img src={shotView} alt="スクリーンショット" className="rounded-xl shadow-2xl" style={{ maxWidth: "92vw", maxHeight: "85vh", objectFit: "contain" }} onClick={(e) => e.stopPropagation()} />
         </div>
@@ -5830,7 +5830,7 @@ export function AdminBody({
         if (pickView) {
           const allOn = pickRows.length > 0 && pickRows.every((s) => pickSel.has(s.id));
           return (
-            <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+            <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
               onClick={closePick}>
               <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
                 onClick={(e) => e.stopPropagation()}>
@@ -5912,7 +5912,7 @@ export function AdminBody({
           const cat = TARGET_CAT[tpView];
           const list = isEv ? yearEvents : yearSurveys;
           return (
-            <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+            <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
               onClick={closePicker}>
               <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
                 onClick={(e) => e.stopPropagation()}>
@@ -6026,7 +6026,7 @@ export function AdminBody({
           </button>
         );
         return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10"
             onClick={closePicker}>
             <div className="bg-white rounded-2xl w-full max-w-lg flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}
               onClick={(e) => e.stopPropagation()}>
@@ -6090,7 +6090,7 @@ export function AdminBody({
         const cls = "w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm";
         const L = ({ children }) => <p className="text-xs font-bold text-gray-500 mb-1">{children}</p>;
         return (
-          <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: "#F4F7F6" }}>
+          <div className="ml-ov ml-ov-full fixed inset-0 z-[70] flex flex-col" style={{ background: "#F4F7F6" }}>
             <div className="shrink-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-xs text-gray-500">まとめて編集（{selectedYear}卒）</p>
@@ -6174,7 +6174,7 @@ export function AdminBody({
         const arr = arrivedOf(st, e);
         const save = () => { setAdminRsvp(e, st, attendAns, attendAns === "欠席" ? cancelReason : ""); setAttendEdit(null); };
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
             <div className="bg-white rounded-2xl w-full max-w-sm p-5">
               <div className="flex items-start justify-between">
                 <div>
@@ -6281,7 +6281,7 @@ export function AdminBody({
           return labels.length ? labels.join(" / ") : "エリア不明";
         };
         return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
@@ -6340,7 +6340,7 @@ export function AdminBody({
 
       {/* 自由記述の一覧モーダル */}
       {textAnswers && (
-        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setTextAnswers(null)}>
+        <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setTextAnswers(null)}>
           <div className="bg-white rounded-2xl w-full max-w-2xl flex flex-col overflow-hidden" style={{ maxHeight: "84vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
@@ -6364,7 +6364,7 @@ export function AdminBody({
 
       {/* 選択肢の回答者モーダル */}
       {optionVoters && (
-        <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setOptionVoters(null)}>
+        <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10" onClick={() => setOptionVoters(null)}>
           <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "80vh" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
               <div className="min-w-0">
@@ -6397,7 +6397,7 @@ export function AdminBody({
           ? [...events].sort((a, b) => (b.dateStr || "").localeCompare(a.dateStr || ""))
           : [...surveys].sort((a, b) => (b.dueDate || "").localeCompare(a.dueDate || "") || ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
         return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-10">
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col overflow-hidden" style={{ maxHeight: "82vh" }}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100 shrink-0">
                 <div>
@@ -6491,7 +6491,7 @@ export function AdminBody({
           ["アカウント作成", (logins[d.id] && fmtDateTime(logins[d.id].creationTime)) || "—"],
         ];
         return (
-          <div className={`fixed inset-0 z-[80] flex bg-black bg-opacity-40 ${pc ? "justify-end" : "items-center justify-center px-6"}`}
+          <div className={`ml-ov ${pc ? "ml-ov-drawer justify-end" : "ml-ov-modal items-center justify-center px-6"} fixed inset-0 z-[80] flex bg-black bg-opacity-40`}
             onClick={() => { if (!editDetail) setDetailStudent(null); }}>
             <div onClick={(ev) => ev.stopPropagation()}
               className={pc ? "ml-drawer bg-white h-full w-full max-w-md flex flex-col overflow-hidden" : "bg-white rounded-2xl w-full max-w-sm max-h-[80vh] flex flex-col overflow-hidden"}
@@ -6592,7 +6592,7 @@ export function AdminBody({
         const noneCount = list.length - lineTargetCount - mailCount;
         const hasName = /\{name\}|\{名前\}/i.test(msg);
         return (
-          <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-6 sm:pt-10" onClick={() => !sending && setBcConfirm(false)}>
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-start justify-center bg-black bg-opacity-40 px-4 pt-6 sm:pt-10" onClick={() => !sending && setBcConfirm(false)}>
             <div className="bg-white rounded-2xl w-full max-w-md flex flex-col" style={{ maxHeight: "85vh" }} onClick={(e) => e.stopPropagation()}>
               <div className="px-5 pt-4 pb-3 border-b border-gray-200 shrink-0">
                 <p className="text-sm font-bold">送信内容の確認</p>
@@ -6652,7 +6652,7 @@ export function AdminBody({
       })()}
 
       {pendingStatus && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
+        <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6">
           <div className="bg-white rounded-2xl p-5 w-full max-w-sm">
             <p className="text-sm font-bold">ステータスの変更</p>
             <p className="text-xs text-gray-600 mt-2 leading-relaxed">
@@ -6670,7 +6670,7 @@ export function AdminBody({
 
       {/* 学生画面プレビュー（閲覧専用） */}
       {preview && selectedYear && (
-        <div className="fixed inset-0 z-[70] flex flex-col" style={{ background: PAPER }}>
+        <div className="ml-ov ml-ov-full fixed inset-0 z-[70] flex flex-col" style={{ background: PAPER }}>
           <div className="px-4 py-2.5 flex items-center justify-between shrink-0" style={{ background: "#28191F", color: "#FAF4F2" }}>
             <p className="text-xs font-bold flex items-center gap-1.5">
               <Eye size={13} /> プレビュー中（{selectedYear}卒／学生にはこのように表示されます）
@@ -6693,7 +6693,7 @@ export function AdminBody({
 
       {/* スマホ表示：「その他」のメニュー（下部ナビに出していないタブをグループ見出しつきで並べる） */}
       {!pc && moreOpen && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(58,42,48,0.40)" }}
+        <div className="ml-ov ml-ov-sheet fixed inset-0 z-[60] flex items-end justify-center" style={{ background: "rgba(58,42,48,0.40)" }}
           onClick={() => setMoreOpen(false)}>
           <div className="bg-white w-full max-w-md rounded-t-2xl p-4 pb-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">

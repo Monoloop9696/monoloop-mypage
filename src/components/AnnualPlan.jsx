@@ -547,7 +547,7 @@ export default function AnnualPlan({
 
       {/* 活動ドロワー */}
       {it && (
-        <div className="fixed inset-0 z-[65] flex justify-end">
+        <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={closeDrawer} />
           <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-[440px]" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -683,7 +683,7 @@ export default function AnnualPlan({
 
       {/* 年表の「他N件」一覧ドロワー */}
       {moreDlg && (
-        <div className="fixed inset-0 z-[65] flex justify-end">
+        <div className="ml-ov ml-ov-drawer fixed inset-0 z-[65] flex justify-end">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => setMoreDlg(null)} />
           <div className={`ml-drawer relative h-full w-full ${pc ? "max-w-[440px]" : "max-w-lg"} bg-white flex flex-col`} style={{ boxShadow: "-12px 0 40px rgba(58,42,48,0.20)" }}>
             <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-gray-200 shrink-0">
@@ -720,7 +720,7 @@ export default function AnnualPlan({
 
       {/* 前年度からコピーの確認 */}
       {copyDlg && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+        <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-center justify-center px-4">
           <div className="absolute inset-0" style={{ background: "rgba(58,42,48,0.40)" }} onClick={() => !busy && setCopyDlg(null)} />
           <div className="relative bg-white rounded-2xl w-full max-w-md p-5 shadow-xl">
             <p className="text-sm font-bold mb-2">前年度の計画をコピー</p>

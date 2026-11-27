@@ -146,23 +146,70 @@ button {
   }
 }
 
-/* 管理画面の編集ドロワー（右からスライドイン） */
-@keyframes ml-drawer-kf {
-  from {
-    transform: translateX(28px);
-    opacity: 0;
-  }
-  to {
-    transform: none;
-    opacity: 1;
-  }
-}
-.ml-drawer {
-  animation: ml-drawer-kf 0.28s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+/* ============================================================
+   開く・閉じるの動き（2026-11-27）
+   画面に重ねて出すもの（モーダル・ドロワー・シート・全画面・通知）の根元に付けるクラス：
+     .ml-ov            背景ごとふわっと出る（必ず付ける）
+     .ml-ov-modal      中央のモーダル：枠が少し下から拡大して出る
+     .ml-ov-drawer     右からのドロワー：中の .ml-drawer が右端からすべり込む
+     .ml-ov-sheet      下からのシート：下からせり上がる
+     .ml-ov-full       全画面：フェードだけ
+     .ml-toast         通知：上から降りてくる
+     .ml-reveal        折りたたみの中身：開くときにふわっと出る
+   閉じる動きは src/lib/overlayExit.js が付ける（React が外した要素を一瞬だけ戻して .ml-out で動かす）。
+   開く動きは終わったら元の状態に戻る（forwards を付けない）。transform が残ると、中に置いた
+   position:fixed の要素の位置がずれるため。
+   ============================================================ */
+:root {
+  --ml-in: 220ms; /* 開く */
+  --ml-out: 176ms; /* 閉じる（開くより少し短く）。overlayExit.js の EXIT_MS と合わせる */
+  --ml-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
+@keyframes ml-fade-in { from { opacity: 0; } }
+@keyframes ml-fade-out { to { opacity: 0; } }
+@keyframes ml-modal-in { from { opacity: 0; transform: translateY(14px) scale(0.96); } }
+@keyframes ml-modal-out { to { opacity: 0; transform: translateY(10px) scale(0.97); } }
+@keyframes ml-drawer-in { from { transform: translateX(100%); } }
+@keyframes ml-drawer-out { to { transform: translateX(100%); } }
+@keyframes ml-sheet-in { from { transform: translateY(100%); } }
+@keyframes ml-sheet-out { to { transform: translateY(100%); } }
+/* 通知は Tailwind の -translate-x-1/2（transform）で中央寄せしているので、transform ではなく translate を動かす */
+@keyframes ml-toast-in { from { opacity: 0; translate: 0 -14px; } }
+@keyframes ml-toast-out { to { opacity: 0; translate: 0 -14px; } }
+@keyframes ml-reveal-in { from { opacity: 0; transform: translateY(-6px); } }
+
+/* ---- 開く ---- */
+.ml-ov { animation: ml-fade-in var(--ml-in) ease-out; }
+.ml-ov-modal > :not(.absolute) { animation: ml-modal-in var(--ml-in) var(--ml-ease); }
+.ml-drawer { animation: ml-drawer-in var(--ml-in) var(--ml-ease); }
+.ml-ov-sheet > :not(.absolute) { animation: ml-sheet-in var(--ml-in) var(--ml-ease); }
+.ml-toast { animation: ml-toast-in var(--ml-in) var(--ml-ease); }
+.ml-reveal { animation: ml-reveal-in var(--ml-in) var(--ml-ease); }
+
+/* ---- 閉じる（overlayExit.js が .ml-out を付けた要素）---- */
+.ml-out { pointer-events: none; }
+.ml-ov.ml-out { animation: ml-fade-out var(--ml-out) ease-in forwards; }
+.ml-ov-modal.ml-out > :not(.absolute) { animation: ml-modal-out var(--ml-out) ease-in forwards; }
+.ml-ov.ml-out > .ml-drawer { animation: ml-drawer-out var(--ml-out) ease-in forwards; }
+.ml-ov-sheet.ml-out > :not(.absolute) { animation: ml-sheet-out var(--ml-out) ease-in forwards; }
+.ml-toast.ml-out { animation: ml-toast-out var(--ml-out) ease-in forwards; }
+/* 閉じている最中に、中身の「出てくる動き」がもう一度始まらないようにする */
+.ml-out .ml-reveal, .ml-out .ml-in, .ml-out .ml-pop, .ml-out .ml-ov { animation: none !important; }
+/* 同じ操作で別の画面に差し替わったとき（overlayExit.js が印を付ける）は動かさない */
+[data-ml-swap], [data-ml-swap] > * { animation: none !important; }
+
+/* 端末で「動きを減らす」が有効な方には、移動や拡大をやめてフェードだけにする */
 @media (prefers-reduced-motion: reduce) {
-  .ml-drawer {
+  .ml-ov-modal > :not(.absolute),
+  .ml-drawer,
+  .ml-ov-sheet > :not(.absolute),
+  .ml-reveal,
+  .ml-ov-modal.ml-out > :not(.absolute),
+  .ml-ov.ml-out > .ml-drawer,
+  .ml-ov-sheet.ml-out > :not(.absolute) {
     animation: none;
   }
+  .ml-toast { animation-name: ml-fade-in; }
+  .ml-toast.ml-out { animation-name: ml-fade-out; }
 }

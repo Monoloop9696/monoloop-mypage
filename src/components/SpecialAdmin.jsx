@@ -630,7 +630,7 @@ export default function SpecialAdmin({ savedTemplates, pc, setBanner }) {
       {confirmDlg && (() => {
         const s = confirmDlg.slotId ? slotById.get(confirmDlg.slotId) : null;
         return (
-          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6" onClick={() => !confirmBusy && setConfirmDlg(null)}>
+          <div className="ml-ov ml-ov-modal fixed inset-0 z-[80] flex items-center justify-center bg-black bg-opacity-40 px-6" onClick={() => !confirmBusy && setConfirmDlg(null)}>
             <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-2 p-5 pb-3 border-b border-gray-100">
                 <div className="min-w-0">

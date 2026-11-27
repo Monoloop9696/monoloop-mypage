@@ -672,7 +672,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
         {/* 送信完了などの短い通知 */}
         {toast && (
-          <div className="fixed left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-full text-xs font-bold shadow-lg"
+          <div className="ml-toast fixed left-1/2 -translate-x-1/2 z-[90] px-4 py-2.5 rounded-full text-xs font-bold shadow-lg"
             style={{ top: 72, background: INK, color: "#fff", maxWidth: "90%" }}>
             {toast}
           </div>
@@ -1204,7 +1204,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* NEWS 記事の詳細（全画面・写真ギャラリー） */}
           {activeArticle && (
-            <div className="fixed inset-0 z-50 overflow-y-auto" style={{ background: PAPER, ...studentFontStyle }}>
+            <div className="ml-ov ml-ov-full fixed inset-0 z-50 overflow-y-auto" style={{ background: PAPER, ...studentFontStyle }}>
               <div className="max-w-md mx-auto min-h-screen pb-20">
                 <div className="sticky top-0 z-10 px-5 py-3 flex items-center justify-between"
                   style={{ background: PAPER, borderBottom: `1px solid ${HAIR}` }}>
@@ -1404,7 +1404,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* 基本情報登録モーダル */}
           {showProfile && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
+            <div className="ml-ov ml-ov-sheet fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
               <div className="w-full max-w-md p-6 max-h-96 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER }}>
                 <div className="flex items-start justify-between">
                   <div>
@@ -1438,7 +1438,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* 面談の候補日時を登録 */}
           {interviewOpen && myInterview && (
-            <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
+            <div className="ml-ov ml-ov-sheet fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
               <div className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                 <div className="flex items-start justify-between mb-5">
                   <div>
@@ -1502,7 +1502,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
 
           {/* 内定承諾のお祝い（承諾後の初回ログインで1度だけ） */}
           {celebrate && (
-            <div className="fixed inset-0 z-[80] flex items-center justify-center px-6"
+            <div className="ml-ov ml-ov-full fixed inset-0 z-[80] flex items-center justify-center px-6"
               style={{ background: "rgba(58,42,48,0.55)" }}>
               {/* 紙吹雪 */}
               <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
@@ -1575,7 +1575,7 @@ export function StudentInner({ student, uid, grad, events, surveys, journey, myR
               return q.type === "text" ? !!(v && v.toString().trim()) : toArr(v).length > 0;
             });
             return (
-              <div className="fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
+              <div className="ml-ov ml-ov-sheet fixed inset-0 z-50 flex items-end justify-center bg-black bg-opacity-50">
                 <div ref={svScrollRef} className="w-full max-w-md p-6 overflow-y-auto" style={{ ...studentFontStyle, background: PAPER, maxHeight: "85vh" }}>
                   <div className="flex items-start justify-between mb-5">
                     <div>
